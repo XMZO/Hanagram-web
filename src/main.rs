@@ -493,7 +493,10 @@ mod tests {
 
     #[test]
     fn basic_auth_accepts_matching_header() {
-        let auth = BasicAuth::new("alice", "s3cr3t").unwrap();
+        let auth = match BasicAuth::new("alice", "s3cr3t") {
+            Ok(auth) => auth,
+            Err(error) => panic!("failed to create basic auth for test: {error}"),
+        };
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -505,7 +508,10 @@ mod tests {
 
     #[test]
     fn basic_auth_rejects_missing_or_wrong_header() {
-        let auth = BasicAuth::new("alice", "s3cr3t").unwrap();
+        let auth = match BasicAuth::new("alice", "s3cr3t") {
+            Ok(auth) => auth,
+            Err(error) => panic!("failed to create basic auth for test: {error}"),
+        };
         let mut headers = HeaderMap::new();
 
         assert!(!auth.is_authorized(&headers));

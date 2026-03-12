@@ -16,6 +16,9 @@
 # Local logs
 *.log
 
+# Local notes
+/todo.md
+
 # Editor and OS files
 .vscode/
 .idea/
