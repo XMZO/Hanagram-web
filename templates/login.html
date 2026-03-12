@@ -137,6 +137,29 @@
                             >
                         </label>
 
+                        <div class="rounded-[1.2rem] border border-line/70 bg-paper/70 px-4 py-3 text-sm leading-6 text-ink/65">
+                            {{ mfa_hint }}
+                        </div>
+
+                        <label class="block">
+                            <span class="mb-2 block text-sm font-medium text-ink/70">{{ mfa_label }}</span>
+                            <input
+                                type="text"
+                                name="mfa_code"
+                                autocomplete="one-time-code"
+                                class="w-full rounded-[1.2rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
+                            >
+                        </label>
+
+                        <label class="block">
+                            <span class="mb-2 block text-sm font-medium text-ink/70">{{ recovery_label }}</span>
+                            <input
+                                type="text"
+                                name="recovery_code"
+                                class="w-full rounded-[1.2rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
+                            >
+                        </label>
+
                         <button
                             type="submit"
                             class="w-full rounded-[1.2rem] bg-sage px-4 py-3 text-base font-semibold text-white transition hover:bg-sageDeep"
@@ -144,6 +167,12 @@
                             {{ i18n.login_submit }}
                         </button>
                     </form>
+
+                    {% if show_register %}
+                    <div class="mt-4 rounded-[1.2rem] border border-line/70 bg-paper/72 px-4 py-4 text-sm text-ink/68">
+                        <a href="{{ register_href }}" class="font-semibold text-sageDeep hover:text-sage">{{ register_label }}</a>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </section>

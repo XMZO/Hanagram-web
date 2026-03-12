@@ -75,7 +75,10 @@ impl Serialize for OtpMessage {
 
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
+    pub id: String,
+    pub user_id: String,
     pub key: String,
+    pub note: String,
     pub phone: String,
     pub session_file: PathBuf,
     pub status: SessionStatus,
@@ -119,8 +122,11 @@ impl Serialize for SessionInfo {
             .latest_code_message()
             .map(|message| message.received_at.timestamp());
 
-        let mut info = serializer.serialize_struct("SessionInfo", 9)?;
+        let mut info = serializer.serialize_struct("SessionInfo", 12)?;
+        info.serialize_field("id", &self.id)?;
+        info.serialize_field("user_id", &self.user_id)?;
         info.serialize_field("key", &self.key)?;
+        info.serialize_field("note", &self.note)?;
         info.serialize_field("phone", &self.phone)?;
         info.serialize_field("session_file", &session_file)?;
         info.serialize_field("status", &self.status)?;

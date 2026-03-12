@@ -1,0 +1,136 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Hanagram-web contributors -->
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#f6f1e8] font-sans text-[#4b4038]">
+    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <section class="rounded-[2rem] border border-[#ded3c6] bg-[#fffaf2] p-6 shadow-[0_24px_60px_rgba(122,106,90,0.08)]">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="font-serif text-4xl font-semibold">{{ title }}</h1>
+                    <p class="mt-4 text-sm leading-7 text-[#4b4038]/72">{{ description }}</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{{ dashboard_href }}" class="rounded-full border border-[#ded3c6] bg-latte px-4 py-2 text-sm">{{ dashboard_label }}</a>
+                    <a href="{{ settings_href }}" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ settings_label }}</a>
+                </div>
+            </div>
+        </section>
+
+        {% if banner %}
+        <section class="mt-5 rounded-[1.4rem] border px-4 py-3 text-sm {% if banner.kind == 'success' %}border-[#8ca38c]/35 bg-[#eef4ee] text-[#6f866f]{% else %}border-[#d9a69a]/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+            {{ banner.message }}
+        </section>
+        {% endif %}
+
+        <section class="mt-6 grid gap-5 lg:grid-cols-[0.95fr,1.05fr]">
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <h2 class="font-serif text-2xl font-semibold">{{ create_user_title }}</h2>
+                <form method="post" action="/admin/users/create" class="mt-5 grid gap-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 outline-none focus:border-[#8ca38c]">
+                    <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 outline-none focus:border-[#8ca38c]">
+                    <button type="submit" class="rounded-[1rem] bg-[#8ca38c] px-4 py-3 text-sm font-semibold text-white hover:bg-[#6f866f]">
+                        {{ create_user_label }}
+                    </button>
+                </form>
+            </article>
+
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <h2 class="font-serif text-2xl font-semibold">{{ policy_title }}</h2>
+                <form method="post" action="/admin/settings" class="mt-5 grid gap-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="block">
+                        <span class="mb-2 block text-sm">{{ registration_label }}</span>
+                        <select name="registration_policy" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
+                            {% for option in registration_options %}
+                            <option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-2 block text-sm">{{ session_ttl_label }}</span>
+                        <input type="number" min="1" name="session_absolute_ttl_hours" value="{{ system_settings.session_absolute_ttl_hours }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
+                    </label>
+                    <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
+                        <input type="checkbox" name="public_registration_open" value="1" class="mt-1 h-4 w-4" {% if public_registration_open %}checked{% endif %}>
+                        <span class="text-sm leading-6">{{ public_registration_label }}</span>
+                    </label>
+                    <label class="block">
+                        <span class="mb-2 block text-sm">{{ audit_limit_label }}</span>
+                        <input type="number" min="1" name="audit_detail_limit" value="{{ system_settings.audit_detail_limit }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
+                    </label>
+                    <button type="submit" class="rounded-[1rem] border border-[#ded3c6] bg-latte px-4 py-3 text-sm font-semibold">
+                        {{ save_policy_label }}
+                    </button>
+                </form>
+            </article>
+        </section>
+
+        <section class="mt-6 rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+            <h2 class="font-serif text-2xl font-semibold">{{ users_title }}</h2>
+            <div class="mt-4 grid gap-3">
+                {% for user in users %}
+                <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white p-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p class="font-semibold">{{ user.username }}</p>
+                            <p class="text-xs text-[#4b4038]/55">{{ user.role }}</p>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            {% if user.role != 'admin' %}
+                            <form method="post" action="/admin/users/{{ user.id }}/unlock?lang={{ lang }}">
+                                <button type="submit" class="rounded-full border border-[#ded3c6] bg-latte px-4 py-2 text-sm">{{ unlock_label }}</button>
+                            </form>
+                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke?lang={{ lang }}">
+                                <button type="submit" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ revoke_sessions_label }}</button>
+                            </form>
+                            <form method="post" action="/admin/users/{{ user.id }}/reset?lang={{ lang }}">
+                                <button type="submit" class="rounded-full border border-[#d9a69a]/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f]">{{ reset_label }}</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="mt-6 grid gap-5 lg:grid-cols-2">
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <h2 class="font-serif text-2xl font-semibold">{{ audit_title }}</h2>
+                <div class="mt-4 grid gap-3">
+                    {% for entry in audit_logs %}
+                    <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
+                        <p class="text-sm font-semibold">{{ entry.action_type }}</p>
+                        <p class="mt-1 text-xs text-[#4b4038]/55">{{ entry.created_at_unix }} · {{ entry.ip_address | default(value='-') }}</p>
+                        <pre class="mt-3 whitespace-pre-wrap break-words text-xs text-[#4b4038]/72">{{ entry.details_json }}</pre>
+                    </div>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <h2 class="font-serif text-2xl font-semibold">{{ rollup_title }}</h2>
+                <div class="mt-4 grid gap-3">
+                    {% for item in audit_rollups %}
+                    <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
+                        <p class="text-sm font-semibold">{{ item.action_type }}</p>
+                        <p class="mt-1 text-xs text-[#4b4038]/55">{{ item.total_count }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </article>
+        </section>
+    </main>
+</body>
+</html>

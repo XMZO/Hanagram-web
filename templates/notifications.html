@@ -1,0 +1,81 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Hanagram-web contributors -->
+<!DOCTYPE html>
+<html lang="{{ i18n.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ i18n.bot_settings_title }} - Hanagram Web</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#f6f1e8] font-sans text-[#4b4038]">
+    <main class="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <section class="rounded-[2rem] border border-[#ded3c6] bg-[#fffaf2] p-6 shadow-[0_24px_60px_rgba(122,106,90,0.08)]">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="font-serif text-4xl font-semibold">{{ i18n.bot_settings_title }}</h1>
+                    <p class="mt-4 text-sm leading-7 text-[#4b4038]/72">{{ i18n.bot_settings_description }}</p>
+                </div>
+                <a href="{{ settings_href }}" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ back_label }}</a>
+            </div>
+        </section>
+
+        {% if banner %}
+        <section class="mt-5 rounded-[1.4rem] border px-4 py-3 text-sm {% if banner.kind == 'success' %}border-[#8ca38c]/35 bg-[#eef4ee] text-[#6f866f]{% else %}border-[#d9a69a]/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+            {{ banner.message }}
+        </section>
+        {% endif %}
+
+        <section class="mt-6 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <p class="text-xs uppercase tracking-[0.24em] text-[#4b4038]/45">{{ i18n.bot_placeholders_title }}</p>
+                <div class="mt-4 grid gap-3">
+                    {% for placeholder in bot_placeholders %}
+                    <div class="flex items-start gap-3">
+                        <span class="rounded-full border border-[#ded3c6] bg-white px-3 py-1 font-mono text-[0.78rem]">{{ placeholder.key }}</span>
+                        <p class="pt-1 text-sm leading-6 text-[#4b4038]/68">{{ placeholder.description }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
+                <form method="post" action="{{ bot_settings_action }}" class="grid gap-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="rounded-[1.3rem] border border-[#ded3c6] bg-white px-4 py-4">
+                        <span class="flex items-center justify-between gap-4">
+                            <span>
+                                <span class="block text-sm font-medium">{{ i18n.bot_enabled_label }}</span>
+                                <span class="mt-1 block text-sm leading-6 text-[#4b4038]/62">{{ i18n.bot_enabled_hint }}</span>
+                            </span>
+                            <span class="relative inline-flex items-center">
+                                <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
+                                <span class="h-7 w-12 rounded-full bg-[#ded3c6] transition peer-checked:bg-[#8ca38c]"></span>
+                                <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="block rounded-[1.3rem] border border-[#ded3c6] bg-white px-4 py-4">
+                        <span class="mb-2 block text-sm font-medium">{{ i18n.bot_token_label }}</span>
+                        <input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-[#fffaf2] px-3 py-2.5 text-sm outline-none focus:border-[#8ca38c]">
+                    </label>
+                    <label class="block rounded-[1.3rem] border border-[#ded3c6] bg-white px-4 py-4">
+                        <span class="mb-2 block text-sm font-medium">{{ i18n.bot_chat_id_label }}</span>
+                        <input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-[#fffaf2] px-3 py-2.5 text-sm outline-none focus:border-[#8ca38c]">
+                    </label>
+                    <label class="block rounded-[1.3rem] border border-[#ded3c6] bg-white px-4 py-4">
+                        <span class="mb-2 block text-sm font-medium">{{ i18n.bot_template_label }}</span>
+                        <textarea name="template" rows="9" class="w-full rounded-[1rem] border border-[#ded3c6] bg-[#fffaf2] px-3 py-3 font-mono text-sm outline-none focus:border-[#8ca38c]">{{ bot_settings.template }}</textarea>
+                    </label>
+                    <button type="submit" class="rounded-[1rem] bg-[#8ca38c] px-4 py-3 text-sm font-semibold text-white hover:bg-[#6f866f]">
+                        {{ i18n.bot_save }}
+                    </button>
+                </form>
+            </article>
+        </section>
+    </main>
+</body>
+</html>

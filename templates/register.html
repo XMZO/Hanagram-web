@@ -1,0 +1,88 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Hanagram-web contributors -->
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} - Hanagram Web</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ["Noto Serif SC", "serif"],
+                        sans: ["Noto Sans SC", "sans-serif"]
+                    },
+                    colors: {
+                        oat: "#f6f1e8",
+                        paper: "#fffaf2",
+                        latte: "#f0e5d6",
+                        line: "#ded3c6",
+                        ink: "#4b4038",
+                        sage: "#8ca38c",
+                        sageDeep: "#6f866f",
+                        peach: "#d9a69a"
+                    }
+                }
+            }
+        };
+    </script>
+</head>
+<body class="min-h-screen bg-oat font-sans text-ink">
+    <main class="mx-auto flex min-h-screen max-w-3xl items-center px-4 py-10">
+        <section class="w-full rounded-[2rem] border border-line bg-paper p-6 shadow-[0_24px_60px_rgba(122,106,90,0.08)] sm:p-8">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <h1 class="font-display text-3xl font-semibold">{{ title }}</h1>
+                <div class="inline-flex rounded-full border border-line bg-white p-1">
+                    {% for option in languages %}
+                    <a href="{{ option.href }}" class="rounded-full px-3 py-1.5 text-sm {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}">
+                        {{ option.label }}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <p class="mt-4 text-sm leading-7 text-ink/70">{{ description }}</p>
+
+            {% if error_message %}
+            <div class="mt-5 rounded-[1.25rem] border border-peach/40 bg-[#fbefec] px-4 py-3 text-sm text-[#98675f]">
+                {{ error_message }}
+            </div>
+            {% endif %}
+
+            <form method="post" action="/register" class="mt-6 space-y-4">
+                <input type="hidden" name="lang" value="{{ lang }}">
+
+                <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-ink/70">{{ username_label }}</span>
+                    <input type="text" name="username" required class="w-full rounded-[1.1rem] border border-line bg-white px-4 py-3 outline-none focus:border-sage">
+                </label>
+
+                <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-ink/70">{{ password_label }}</span>
+                    <input type="password" name="password" required class="w-full rounded-[1.1rem] border border-line bg-white px-4 py-3 outline-none focus:border-sage">
+                </label>
+
+                <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-ink/70">{{ confirm_label }}</span>
+                    <input type="password" name="confirm_password" required class="w-full rounded-[1.1rem] border border-line bg-white px-4 py-3 outline-none focus:border-sage">
+                </label>
+
+                <div class="flex flex-wrap gap-3 pt-2">
+                    <button type="submit" class="rounded-[1.1rem] bg-sage px-5 py-3 text-sm font-semibold text-white hover:bg-sageDeep">
+                        {{ submit_label }}
+                    </button>
+                    <a href="{{ back_href }}" class="rounded-[1.1rem] border border-line bg-white px-5 py-3 text-sm text-ink/75 hover:border-sage hover:text-ink">
+                        {{ back_label }}
+                    </a>
+                </div>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

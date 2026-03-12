@@ -257,6 +257,9 @@
             const file = card.querySelector("[data-role='session-file']");
             if (file) { file.textContent = session.session_file; }
 
+            const note = card.querySelector("[data-role='session-note']");
+            if (note) { note.textContent = session.note || ""; }
+
             const latestCode = card.querySelector("[data-role='latest-code']");
             if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
 
@@ -273,6 +276,9 @@
 
             const file = modal.querySelector("[data-role='session-file']");
             if (file) { file.textContent = session.session_file; }
+
+            const note = modal.querySelector("[data-role='session-note']");
+            if (note) { note.textContent = session.note || ""; }
 
             const latestCode = modal.querySelector("[data-role='latest-code']");
             if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
@@ -384,7 +390,7 @@
         }
 
         function snapshotSessionKeys(snapshot) {
-            return snapshot.sessions.map((session) => session.key).sort();
+            return snapshot.sessions.map((session) => session.id).sort();
         }
 
         async function syncDashboard(forceFull) {
@@ -408,13 +414,13 @@
 
                 updateDashboardMeta(snapshot);
                 snapshot.sessions.forEach((session) => {
-                    const card = findSessionCard(session.key);
-                    const modal = findSessionModal(session.key);
+                    const card = findSessionCard(session.id);
+                    const modal = findSessionModal(session.id);
                     if (card) { applySessionCardUpdate(card, session, { silent: forceFull }); }
                     if (modal) {
                         applySessionModalUpdate(modal, session);
                         if (!modal.classList.contains("hidden")) {
-                            markSessionSeen(session.key, session.latest_code_at_unix || "");
+                            markSessionSeen(session.id, session.latest_code_at_unix || "");
                         }
                     }
                 });
@@ -470,7 +476,7 @@
                             {{ i18n.stat_connected }} · <span data-role="connected-summary">{{ connected_count }}/{{ sessions | length }}</span>
                         </div>
                         <div class="rounded-full border border-sage/35 bg-mint px-4 py-2 text-sm text-sageDeep">
-                            {{ i18n.bot_settings_title }} · {% if bot_settings.enabled %}{{ i18n.bot_status_enabled }}{% else %}{{ i18n.bot_status_disabled }}{% endif %}
+                            {{ current_username }}
                         </div>
                     </div>
                 </div>
@@ -497,6 +503,20 @@
                                 >
                                     {{ i18n.dashboard_add_session }}
                                 </a>
+                                <a
+                                    href="{{ settings_href }}"
+                                    class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                >
+                                    Settings
+                                </a>
+                                {% if show_admin %}
+                                <a
+                                    href="{{ admin_href }}"
+                                    class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                >
+                                    Admin
+                                </a>
+                                {% endif %}
                                 <form method="post" action="{{ logout_action }}">
                                     <button
                                         type="submit"
@@ -533,64 +553,24 @@
         </section>
         {% endif %}
 
-        <section class="mt-6 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+        <section class="mt-6 grid gap-4 lg:grid-cols-2">
             <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:90ms]">
-                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ i18n.bot_settings_title }}</p>
-                <h2 class="mt-3 font-display text-2xl font-semibold text-ink">{{ i18n.bot_settings_title }}</h2>
-                <p class="mt-3 text-sm leading-7 text-ink/68">{{ i18n.bot_settings_description }}</p>
-                <div class="mt-5 rounded-[1.3rem] border border-line/70 bg-white/80 px-4 py-4">
-                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.bot_placeholders_title }}</p>
-                    <div class="mt-4 grid gap-3">
-                        {% for placeholder in bot_placeholders %}
-                        <div class="flex items-start gap-3">
-                            <span class="rounded-full border border-line bg-paper px-3 py-1 font-mono text-[0.78rem] text-ink">{{ placeholder.key }}</span>
-                            <p class="pt-1 text-sm leading-6 text-ink/68">{{ placeholder.description }}</p>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
+                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">Focus</p>
+                <h2 class="mt-3 font-display text-2xl font-semibold text-ink">Session Center</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/68">Dashboard keeps the Telegram session list front and center. Security, active login sessions, and reminder settings live behind the settings button.</p>
             </article>
 
             <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:150ms]">
-                <form method="post" action="{{ bot_settings_action }}" class="grid gap-4">
-                    <input type="hidden" name="lang" value="{{ lang }}">
-                    <label class="rounded-[1.3rem] border border-line/80 bg-white/80 px-4 py-4">
-                        <span class="flex items-center justify-between gap-4">
-                            <span>
-                                <span class="block text-sm font-medium text-ink">{{ i18n.bot_enabled_label }}</span>
-                                <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
-                            </span>
-                            <span class="relative inline-flex items-center">
-                                <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
-                                <span class="h-7 w-12 rounded-full bg-line transition peer-checked:bg-sage"></span>
-                                <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
-                            </span>
-                        </span>
-                    </label>
-
-                    <div class="grid gap-4 lg:grid-cols-2">
-                        <label class="block rounded-[1.3rem] border border-line/80 bg-white/80 px-4 py-4">
-                            <span class="mb-2 block text-sm font-medium text-ink">{{ i18n.bot_token_label }}</span>
-                            <input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[1rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white" spellcheck="false" autocomplete="off">
-                        </label>
-                        <label class="block rounded-[1.3rem] border border-line/80 bg-white/80 px-4 py-4">
-                            <span class="mb-2 block text-sm font-medium text-ink">{{ i18n.bot_chat_id_label }}</span>
-                            <input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[1rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white" spellcheck="false" autocomplete="off">
-                        </label>
-                    </div>
-
-                    <label class="block rounded-[1.3rem] border border-line/80 bg-white/80 px-4 py-4">
-                        <span class="mb-2 block text-sm font-medium text-ink">{{ i18n.bot_template_label }}</span>
-                        <span class="mb-3 block text-sm leading-6 text-ink/62">{{ i18n.bot_template_hint }}</span>
-                        <textarea name="template" rows="9" class="w-full rounded-[1.1rem] border border-line bg-paper px-3 py-3 font-mono text-sm leading-7 text-ink outline-none transition focus:border-sage focus:bg-white" spellcheck="false">{{ bot_settings.template }}</textarea>
-                    </label>
-
-                    <div class="flex justify-end">
-                        <button type="submit" class="rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">
-                            {{ i18n.bot_save }}
-                        </button>
-                    </div>
-                </form>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <a href="{{ settings_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/85 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">Security</p>
+                        <p class="mt-2 text-lg font-semibold text-ink">Password, TOTP, Sessions</p>
+                    </a>
+                    <a href="{{ settings_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/85 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">Reminder</p>
+                        <p class="mt-2 text-lg font-semibold text-ink">Compact notification settings</p>
+                    </a>
+                </div>
             </article>
         </section>
 
@@ -616,7 +596,7 @@
                 class="paper-shadow float-in rounded-[1.7rem] border border-line/80 bg-paper/95 p-5 transition hover:-translate-y-1 hover:border-sage/45"
                 style="animation-delay: {{ loop.index0 * 70 }}ms;"
                 data-session-card
-                data-session-key="{{ session.key }}"
+                data-session-key="{{ session.id }}"
                 data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
             >
                 <div class="flex items-start justify-between gap-4">
@@ -626,6 +606,11 @@
                             <p data-role="session-phone" class="truncate text-lg font-semibold text-ink">{{ session.phone }}</p>
                         </div>
                         <p data-role="session-file" class="mt-2 truncate font-mono text-[0.76rem] text-ink/42">{{ session.session_file }}</p>
+                        {% if session.note %}
+                        <p data-role="session-note" class="mt-2 text-sm leading-6 text-ink/68">{{ session.note }}</p>
+                        {% else %}
+                        <p data-role="session-note" class="mt-2 text-sm leading-6 text-ink/40">No note</p>
+                        {% endif %}
                     </div>
 
                     <div class="flex flex-col items-end gap-2">
@@ -653,7 +638,7 @@
                     <button
                         type="button"
                         class="shrink-0 rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
-                        onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.key }}')"
+                        onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')"
                     >
                         {{ i18n.open_details }}
                     </button>
@@ -667,7 +652,7 @@
         </section>
 
         {% for session in sessions %}
-        <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.key }}" class="hidden fixed inset-0 z-50">
+        <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.id }}" class="hidden fixed inset-0 z-50">
             <div class="absolute inset-0 bg-[rgba(79,67,59,0.18)] backdrop-blur-[6px] sm:bg-[rgba(79,67,59,0.24)]" data-modal-close="session-modal-{{ loop.index }}"></div>
 
             <div class="relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-center sm:px-4 sm:py-8">
@@ -678,6 +663,11 @@
                             <h2 data-role="session-phone" class="mt-3 font-display text-[2rem] font-semibold leading-tight text-ink sm:text-3xl">{{ session.phone }}</h2>
                             <p class="mt-3 text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_file_label }}</p>
                             <p data-role="session-file" class="mt-2 break-all font-mono text-[0.76rem] text-ink/46">{{ session.session_file }}</p>
+                            {% if session.note %}
+                            <p data-role="session-note" class="mt-3 text-sm leading-7 text-ink/68">{{ session.note }}</p>
+                            {% else %}
+                            <p data-role="session-note" class="mt-3 text-sm leading-7 text-ink/40">No note</p>
+                            {% endif %}
                         </div>
 
                         <div class="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -704,13 +694,13 @@
                             <div class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.5rem]">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.export_session_title }}</p>
                                 <div class="mt-4 flex flex-wrap gap-3">
-                                    <a href="/sessions/{{ session.key }}/export/file" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>
+                                    <a href="/sessions/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>
                                         {{ i18n.export_file }}
                                     </a>
                                     <button
                                         type="button"
                                         data-label="{{ i18n.export_string }}"
-                                        data-export-url="/sessions/{{ session.key }}/export/string?lang={{ lang }}"
+                                        data-export-url="/sessions/{{ session.id }}/export/string?lang={{ lang }}"
                                         data-target="#session-export-panel-{{ loop.index }}"
                                         class="rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed]"
                                         onclick="fetchSessionString(this)"
@@ -740,7 +730,18 @@
                         </div>
 
                         <div class="space-y-4">
-                            <form method="post" action="/sessions/{{ session.key }}/rename" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
+                            <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <label class="block">
+                                    <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">Note</span>
+                                    <textarea name="note" rows="3" class="w-full rounded-[1rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white">{{ session.note }}</textarea>
+                                </label>
+                                <button type="submit" class="mt-3 w-full rounded-[1rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">
+                                    Save Note
+                                </button>
+                            </form>
+
+                            <form method="post" action="/sessions/{{ session.id }}/rename" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
                                     <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.rename_session }}</span>
@@ -766,7 +767,7 @@
                                     {{ i18n.copy }}
                                 </button>
 
-                                <form method="post" action="/sessions/{{ session.key }}/delete?lang={{ lang }}" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
+                                <form method="post" action="/sessions/{{ session.id }}/delete?lang={{ lang }}" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
                                     <button type="submit" class="w-full rounded-[1.2rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">
                                         {{ i18n.delete_session }}
                                     </button>

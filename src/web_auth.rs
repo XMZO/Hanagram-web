@@ -1,0 +1,693 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Hanagram-web contributors
+
+use std::collections::HashSet;
+
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use axum::http::{HeaderMap, header};
+use base64::Engine;
+use chrono::Utc;
+use hanagram_web::security::{
+    ArgonPolicy, EncryptedBlob, PasswordVerification, RECOVERY_CODE_COUNT, TOTP_PERIOD_SECONDS,
+    TotpVerification, build_totp_uri, decrypt_bytes, encrypt_bytes,
+    evaluate_password_strength, generate_master_key, generate_recovery_codes,
+    generate_session_token, generate_totp_secret, hash_password, hash_recovery_code,
+    hash_session_token, random_bytes, unwrap_master_key, verify_password, verify_recovery_code,
+    verify_totp, wrap_master_key,
+};
+use hanagram_web::store::{
+    AuthSessionRecord, MetaStore, NewAuditEntry, SystemSettings, UserRecord, UserRole,
+};
+use serde_json::json;
+
+pub const AUTH_COOKIE_NAME: &str = "hanagram_auth";
+pub const AUTH_AUDIT_LOGIN_SUCCESS: &str = "login_success";
+pub const AUTH_AUDIT_LOGIN_FAILURE: &str = "login_failure";
+pub const AUTH_AUDIT_REGISTER: &str = "user_registered";
+pub const AUTH_AUDIT_PASSWORD_CHANGED: &str = "password_changed";
+pub const AUTH_AUDIT_TOTP_UPDATED: &str = "totp_updated";
+
+#[derive(Clone, Debug)]
+pub struct AuthenticatedSession {
+    pub user: UserRecord,
+    pub auth_session: AuthSessionRecord,
+    pub recovery_codes_remaining: i64,
+    pub requires_totp_setup: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct RegistrationResult {
+    pub user: UserRecord,
+    pub auth_session: AuthSessionRecord,
+    pub session_token: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct LoginResult {
+    pub auth_session: AuthSessionRecord,
+    pub session_token: String,
+    pub master_key: [u8; 32],
+    pub requires_totp_setup: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct TotpSetupMaterial {
+    pub secret: String,
+    pub otp_auth_uri: String,
+    pub recovery_codes: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum LoginError {
+    InvalidCredentials,
+    MissingSecondFactor,
+    InvalidSecondFactor,
+    LockedUntil(i64),
+}
+
+pub async fn register_user(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    username: &str,
+    password: &str,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+) -> Result<RegistrationResult> {
+    let username = normalize_username(username)?;
+    if store
+        .get_user_by_username(&username)
+        .await
+        .context("failed checking for existing username")?
+        .is_some()
+    {
+        bail!("username already exists");
+    }
+
+    let is_first_user = store.count_users().await? == 0;
+    let role = if is_first_user {
+        UserRole::Admin
+    } else {
+        UserRole::User
+    };
+    let strength = evaluate_password_strength(
+        password,
+        &settings.password_strength_rules,
+        role == UserRole::Admin,
+    );
+    ensure!(strength.valid, strength.reasons.join("; "));
+
+    let argon_policy = settings.argon_policy.clone();
+    let password_hash = hash_password(password, &argon_policy)?;
+    let kek_salt = random_bytes(16);
+    let master_key = generate_master_key();
+    let wrapped_master_key = wrap_master_key(password, &kek_salt, &argon_policy, &master_key)?;
+
+    let mut user = UserRecord::new(username.clone(), role);
+    user.security.password_hash = Some(password_hash);
+    user.security.password_argon_version = argon_policy.version;
+    user.security.kek_salt_b64 = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&kek_salt),
+    );
+    user.security.encrypted_master_key_json = Some(
+        serde_json::to_string(&wrapped_master_key)
+            .context("failed to encode wrapped master key payload")?,
+    );
+    user.security.password_needs_reset = false;
+    user.updated_at_unix = Utc::now().timestamp();
+    store.save_user(&user).await?;
+
+    let session_token = generate_session_token();
+    let auth_session = issue_session_token(
+        store,
+        settings,
+        &user,
+        &session_token,
+        ip_address,
+        user_agent,
+    )
+    .await?;
+
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_REGISTER),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: ip_address.map(str::to_owned),
+            success: true,
+            details_json: json!({
+                "username": user.username,
+                "role": match user.role { UserRole::Admin => "admin", UserRole::User => "user" }
+            })
+            .to_string(),
+        })
+        .await?;
+
+    Ok(RegistrationResult {
+        user,
+        auth_session,
+        session_token,
+    })
+}
+
+pub async fn authenticate_user(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    username: &str,
+    password: &str,
+    mfa_code: Option<&str>,
+    recovery_code: Option<&str>,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+) -> Result<LoginResult, LoginError> {
+    let Some(mut user) = store
+        .get_user_by_username(&normalize_username(username).map_err(|_| LoginError::InvalidCredentials)?)
+        .await
+        .map_err(|_| LoginError::InvalidCredentials)?
+    else {
+        audit_login_failure(store, None, username, ip_address, "user_not_found").await;
+        return Err(LoginError::InvalidCredentials);
+    };
+
+    let now = Utc::now().timestamp();
+    if let Some(locked_until) = user.security.locked_until_unix {
+        if locked_until > now {
+            audit_login_failure(
+                store,
+                Some(&user.id),
+                &user.username,
+                ip_address,
+                "account_locked",
+            )
+            .await;
+            return Err(LoginError::LockedUntil(locked_until));
+        }
+    }
+
+    let Some(stored_hash) = user.security.password_hash.clone() else {
+        audit_login_failure(
+            store,
+            Some(&user.id),
+            &user.username,
+            ip_address,
+            "password_not_set",
+        )
+        .await;
+        return Err(LoginError::InvalidCredentials);
+    };
+
+    match verify_password(
+        password,
+        &stored_hash,
+        user.security.password_argon_version,
+        &settings.argon_policy,
+    )
+    .map_err(|_| LoginError::InvalidCredentials)?
+    {
+        PasswordVerification::Invalid => {
+            register_failed_login(store, settings, &mut user, ip_address).await;
+            return Err(LoginError::InvalidCredentials);
+        }
+        PasswordVerification::ValidNeedsRehash => {
+            user.security.password_hash = Some(
+                hash_password(password, &settings.argon_policy)
+                    .map_err(|_| LoginError::InvalidCredentials)?,
+            );
+            user.security.password_argon_version = settings.argon_policy.version;
+        }
+        PasswordVerification::Valid => {}
+    }
+
+    let master_key =
+        load_user_master_key(&user, password, &settings.argon_policy).map_err(|_| LoginError::InvalidCredentials)?;
+    let requires_totp = settings.totp_policy.applies_to(user.role == UserRole::Admin);
+
+    if user.security.totp_enabled {
+        let secret = decrypt_user_totp_secret(&user, &master_key).map_err(|_| LoginError::InvalidSecondFactor)?;
+        let recent_steps = store
+            .list_recent_totp_steps(&user.id, now.div_euclid(TOTP_PERIOD_SECONDS) - 2)
+            .await
+            .map_err(|_| LoginError::InvalidSecondFactor)?;
+        let used_steps = recent_steps.into_iter().collect::<HashSet<_>>();
+        let mut satisfied = false;
+
+        if let Some(code) = mfa_code.filter(|value| !value.trim().is_empty()) {
+            match verify_totp(&secret, code, now, 1, &used_steps)
+                .map_err(|_| LoginError::InvalidSecondFactor)?
+            {
+                TotpVerification::Valid { matched_step } => {
+                    store
+                        .mark_totp_step_used(&user.id, matched_step)
+                        .await
+                        .map_err(|_| LoginError::InvalidSecondFactor)?;
+                    store
+                        .prune_used_totp_steps(now.div_euclid(TOTP_PERIOD_SECONDS) - 8)
+                        .await
+                        .ok();
+                    satisfied = true;
+                }
+                TotpVerification::Replay | TotpVerification::Invalid => {}
+            }
+        }
+
+        if !satisfied {
+            if let Some(candidate) = recovery_code.filter(|value| !value.trim().is_empty()) {
+                let recovery_codes = store
+                    .list_active_recovery_code_hashes(&user.id)
+                    .await
+                    .map_err(|_| LoginError::InvalidSecondFactor)?;
+                for (code_id, code_hash) in recovery_codes {
+                    if verify_recovery_code(candidate, &code_hash)
+                        .map_err(|_| LoginError::InvalidSecondFactor)?
+                    {
+                        store
+                            .mark_recovery_code_used(&code_id)
+                            .await
+                            .map_err(|_| LoginError::InvalidSecondFactor)?;
+                        satisfied = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !satisfied {
+            audit_login_failure(
+                store,
+                Some(&user.id),
+                &user.username,
+                ip_address,
+                "second_factor_required",
+            )
+            .await;
+            return Err(if mfa_code.is_some() || recovery_code.is_some() {
+                LoginError::InvalidSecondFactor
+            } else {
+                LoginError::MissingSecondFactor
+            });
+        }
+    } else if requires_totp {
+        let session_token = generate_session_token();
+        let auth_session = issue_session_token(
+            store,
+            settings,
+            &user,
+            &session_token,
+            ip_address,
+            user_agent,
+        )
+        .await
+        .map_err(|_| LoginError::InvalidCredentials)?;
+
+        reset_successful_login_state(store, &mut user, ip_address).await;
+        audit_login_success(store, &user, ip_address, true).await;
+        return Ok(LoginResult {
+            auth_session,
+            session_token,
+            master_key,
+            requires_totp_setup: true,
+        });
+    }
+
+    let session_token = generate_session_token();
+    let auth_session = issue_session_token(
+        store,
+        settings,
+        &user,
+        &session_token,
+        ip_address,
+        user_agent,
+    )
+    .await
+    .map_err(|_| LoginError::InvalidCredentials)?;
+
+    reset_successful_login_state(store, &mut user, ip_address).await;
+    audit_login_success(store, &user, ip_address, false).await;
+    Ok(LoginResult {
+        auth_session,
+        session_token,
+        master_key,
+        requires_totp_setup: false,
+    })
+}
+
+pub async fn resolve_authenticated_session(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    headers: &HeaderMap,
+) -> Result<Option<AuthenticatedSession>> {
+    let Some(token) = find_cookie(headers, AUTH_COOKIE_NAME) else {
+        return Ok(None);
+    };
+    let token_hash = hash_session_token(token);
+    let Some(auth_session) = store.get_auth_session_by_token_hash(&token_hash).await? else {
+        return Ok(None);
+    };
+
+    let now = Utc::now().timestamp();
+    if auth_session.revoked_at_unix.is_some() || auth_session.expires_at_unix <= now {
+        return Ok(None);
+    }
+    if let Some(idle_timeout) = auth_session.idle_timeout_minutes {
+        let idle_cutoff = auth_session.last_seen_at_unix + i64::from(idle_timeout) * 60;
+        if idle_cutoff <= now {
+            return Ok(None);
+        }
+    }
+
+    let Some(user) = store.get_user_by_id(&auth_session.user_id).await? else {
+        return Ok(None);
+    };
+
+    store
+        .touch_auth_session(&auth_session.id, now, extract_client_ip(headers).as_deref())
+        .await
+        .ok();
+    let recovery_codes_remaining = store.count_active_recovery_codes(&user.id).await.unwrap_or(0);
+    let requires_totp_setup =
+        settings.totp_policy.applies_to(user.role == UserRole::Admin) && !user.security.totp_enabled;
+
+    Ok(Some(AuthenticatedSession {
+        user,
+        auth_session,
+        recovery_codes_remaining,
+        requires_totp_setup,
+    }))
+}
+
+pub async fn change_password(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    user: &mut UserRecord,
+    current_password: &str,
+    new_password: &str,
+) -> Result<[u8; 32]> {
+    let strength = evaluate_password_strength(
+        new_password,
+        &settings.password_strength_rules,
+        user.role == UserRole::Admin,
+    );
+    ensure!(strength.valid, strength.reasons.join("; "));
+
+    let master_key = load_user_master_key(user, current_password, &settings.argon_policy)?;
+    let new_hash = hash_password(new_password, &settings.argon_policy)?;
+    let new_salt = random_bytes(16);
+    let wrapped_master_key = wrap_master_key(new_password, &new_salt, &settings.argon_policy, &master_key)?;
+
+    user.security.password_hash = Some(new_hash);
+    user.security.password_argon_version = settings.argon_policy.version;
+    user.security.kek_salt_b64 = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&new_salt),
+    );
+    user.security.encrypted_master_key_json =
+        Some(serde_json::to_string(&wrapped_master_key).context("failed to encode wrapped key")?);
+    user.security.password_needs_reset = false;
+    user.updated_at_unix = Utc::now().timestamp();
+    store.save_user(user).await?;
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_PASSWORD_CHANGED),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: json!({ "username": user.username }).to_string(),
+        })
+        .await?;
+
+    Ok(master_key)
+}
+
+pub async fn save_totp_setup(
+    store: &MetaStore,
+    user: &mut UserRecord,
+    master_key: &[u8; 32],
+    secret: &str,
+    recovery_codes: &[String],
+) -> Result<()> {
+    let encrypted_secret = encrypt_bytes(master_key, secret.as_bytes())?;
+    let mut recovery_code_hashes = Vec::new();
+    for code in recovery_codes {
+        recovery_code_hashes.push(hash_recovery_code(code, &ArgonPolicy::minimum())?);
+    }
+
+    user.security.totp_secret_json =
+        Some(serde_json::to_string(&encrypted_secret).context("failed to encode totp secret")?);
+    user.security.totp_enabled = true;
+    user.updated_at_unix = Utc::now().timestamp();
+    store.save_user(user).await?;
+    store
+        .replace_recovery_codes(&user.id, &recovery_code_hashes)
+        .await?;
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_TOTP_UPDATED),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: json!({
+                "username": user.username,
+                "recovery_codes": recovery_codes.len()
+            })
+            .to_string(),
+        })
+        .await?;
+    Ok(())
+}
+
+pub fn build_totp_setup_material(username: &str) -> TotpSetupMaterial {
+    let secret = generate_totp_secret();
+    let recovery_codes = generate_recovery_codes(RECOVERY_CODE_COUNT);
+    let otp_auth_uri = build_totp_uri("Hanagram Web", username, &secret);
+
+    TotpSetupMaterial {
+        secret,
+        otp_auth_uri,
+        recovery_codes,
+    }
+}
+
+pub fn build_auth_cookie(token: &str, max_age_seconds: i64, secure: bool) -> String {
+    let secure_fragment = if secure { "; Secure" } else { "" };
+    format!(
+        "{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age_seconds}{secure_fragment}"
+    )
+}
+
+pub fn clear_auth_cookie(secure: bool) -> String {
+    let secure_fragment = if secure { "; Secure" } else { "" };
+    format!(
+        "{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_fragment}"
+    )
+}
+
+pub fn normalize_username(raw: &str) -> Result<String> {
+    let normalized = raw
+        .trim()
+        .chars()
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                Some(ch.to_ascii_lowercase())
+            } else if matches!(ch, '-' | '_' | '.') {
+                Some(ch)
+            } else {
+                None
+            }
+        })
+        .collect::<String>();
+
+    ensure!(!normalized.is_empty(), "username cannot be empty");
+    ensure!(normalized.len() >= 3, "username must be at least 3 characters");
+    Ok(normalized)
+}
+
+pub fn extract_client_ip(headers: &HeaderMap) -> Option<String> {
+    for header_name in ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"] {
+        let Some(value) = headers.get(header_name) else {
+            continue;
+        };
+        let Ok(raw) = value.to_str() else {
+            continue;
+        };
+        let candidate = raw
+            .split(',')
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(candidate) = candidate {
+            return Some(candidate.to_owned());
+        }
+    }
+
+    None
+}
+
+pub fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+}
+
+pub fn find_cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
+
+    cookies.split(';').find_map(|cookie| {
+        let (cookie_name, cookie_value) = cookie.trim().split_once('=')?;
+        if cookie_name == name {
+            Some(cookie_value)
+        } else {
+            None
+        }
+    })
+}
+
+pub fn load_user_master_key(
+    user: &UserRecord,
+    password: &str,
+    argon_policy: &ArgonPolicy,
+) -> Result<[u8; 32]> {
+    let wrapped_master_key = user
+        .security
+        .encrypted_master_key_json
+        .as_deref()
+        .context("user is missing an encrypted master key")?;
+    let salt = user
+        .security
+        .kek_salt_b64
+        .as_deref()
+        .context("user is missing a kek salt")?;
+    let salt = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(salt)
+        .context("failed to decode kek salt")?;
+    let wrapped_master_key =
+        serde_json::from_str::<EncryptedBlob>(wrapped_master_key).context("failed to parse wrapped master key")?;
+
+    unwrap_master_key(password, &salt, argon_policy, &wrapped_master_key)
+}
+
+pub fn decrypt_user_totp_secret(user: &UserRecord, master_key: &[u8; 32]) -> Result<String> {
+    let payload = user
+        .security
+        .totp_secret_json
+        .as_deref()
+        .context("user does not have an encrypted totp secret")?;
+    let payload = serde_json::from_str::<EncryptedBlob>(payload).context("failed to parse totp secret payload")?;
+    let plaintext = decrypt_bytes(master_key, &payload)?;
+    String::from_utf8(plaintext).map_err(|error| anyhow!("invalid utf-8 totp secret: {error}"))
+}
+
+async fn issue_session_token(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    user: &UserRecord,
+    token: &str,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+) -> Result<AuthSessionRecord> {
+    let expires_at = Utc::now().timestamp() + i64::from(settings.session_absolute_ttl_hours) * 3600;
+    let idle_timeout_minutes = user
+        .security
+        .preferred_idle_timeout_minutes
+        .or(settings.max_idle_timeout_minutes);
+    store
+        .create_auth_session(
+            &user.id,
+            &hash_session_token(token),
+            ip_address,
+            user_agent,
+            expires_at,
+            idle_timeout_minutes,
+        )
+        .await
+}
+
+async fn register_failed_login(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    user: &mut UserRecord,
+    ip_address: Option<&str>,
+) {
+    user.security.login_failures = user.security.login_failures.saturating_add(1);
+    let delay = hanagram_web::security::next_lockout_delay(
+        user.security.login_failures,
+        &settings.lockout_policy,
+    );
+    user.security.lockout_level = user.security.login_failures;
+    user.security.locked_until_unix = if delay > 0 {
+        Some(Utc::now().timestamp() + i64::try_from(delay).unwrap_or(i64::MAX))
+    } else {
+        None
+    };
+    user.updated_at_unix = Utc::now().timestamp();
+    let _ = store.save_user(user).await;
+    audit_login_failure(
+        store,
+        Some(&user.id),
+        &user.username,
+        ip_address,
+        "invalid_password",
+    )
+    .await;
+}
+
+async fn reset_successful_login_state(
+    store: &MetaStore,
+    user: &mut UserRecord,
+    ip_address: Option<&str>,
+) {
+    user.security.login_failures = 0;
+    user.security.lockout_level = 0;
+    user.security.locked_until_unix = None;
+    if let Some(ip_address) = ip_address {
+        user.security.last_login_ip = Some(ip_address.to_owned());
+    }
+    user.updated_at_unix = Utc::now().timestamp();
+    let _ = store.save_user(user).await;
+}
+
+async fn audit_login_failure(
+    store: &MetaStore,
+    user_id: Option<&str>,
+    username: &str,
+    ip_address: Option<&str>,
+    reason: &str,
+) {
+    let _ = store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_LOGIN_FAILURE),
+            actor_user_id: user_id.map(str::to_owned),
+            subject_user_id: user_id.map(str::to_owned),
+            ip_address: ip_address.map(str::to_owned),
+            success: false,
+            details_json: json!({
+                "username": username,
+                "reason": reason
+            })
+            .to_string(),
+        })
+        .await;
+}
+
+async fn audit_login_success(
+    store: &MetaStore,
+    user: &UserRecord,
+    ip_address: Option<&str>,
+    requires_totp_setup: bool,
+) {
+    let details = json!({
+        "username": user.username,
+        "requires_totp_setup": requires_totp_setup,
+        "new_ip": ip_address.is_some() && user.security.last_login_ip.as_deref() != ip_address
+    });
+    let _ = store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_LOGIN_SUCCESS),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: ip_address.map(str::to_owned),
+            success: true,
+            details_json: details.to_string(),
+        })
+        .await;
+}

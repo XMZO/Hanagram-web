@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as AnyhowContext, Result};
-use axum::extract::{Form, Multipart, Path as AxumPath, Query, Request, State};
+use axum::extract::{Extension, Form, Multipart, Path as AxumPath, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -41,44 +41,62 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+use hanagram_web::security::{
+    RegistrationPolicy, TotpVerification, evaluate_password_strength, generate_master_key,
+    hash_password, hash_session_token, random_bytes, verify_totp, wrap_master_key,
+};
+use hanagram_web::store::{
+    MetaStore, NewAuditEntry, SessionRecord, SystemSettings, UserRole,
+};
+
 mod i18n;
 mod session_handler;
 mod state;
+mod web_auth;
 
 use i18n::{Language, language_options};
 use session_handler::{
     LoadedSession, export_telethon_string_session, load_session, save_telethon_string_session,
 };
 use state::{OtpMessage, SessionInfo, SessionStatus, SharedState};
+use web_auth::{
+    AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
+    build_totp_setup_material, clear_auth_cookie, extract_client_ip, extract_user_agent,
+    find_cookie, load_user_master_key, normalize_username, resolve_authenticated_session,
+};
 
-const AUTH_COOKIE_NAME: &str = "hanagram_auth";
 const QR_AUTO_REFRESH_SECONDS: u64 = 5;
 const DASHBOARD_INCREMENTAL_SYNC_SECONDS: u64 = 3;
 const DASHBOARD_FULL_SYNC_SECONDS: u64 = 30;
 const BOT_SETTINGS_FILE_NAME: &str = ".hanagram-bot.json";
+const META_DB_FILE_NAME: &str = "app.db";
 const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 
 type PendingPhoneFlows = Arc<RwLock<HashMap<String, PendingPhoneLogin>>>;
 type PendingQrFlows = Arc<RwLock<HashMap<String, PendingQrLogin>>>;
+type PendingTotpSetups = Arc<RwLock<HashMap<String, PendingTotpSetup>>>;
 type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>>;
 type NotificationSettingsStore = Arc<RwLock<BotNotificationSettings>>;
+type MetaStoreHandle = Arc<MetaStore>;
+type UnlockCache = Arc<RwLock<HashMap<String, [u8; 32]>>>;
 
 #[derive(Clone)]
 struct AppState {
     shared_state: SharedState,
     session_workers: SessionWorkers,
     tera: Arc<Tera>,
-    auth: DashboardAuth,
+    meta_store: MetaStoreHandle,
+    system_settings: Arc<RwLock<SystemSettings>>,
     runtime: RuntimeConfig,
     phone_flows: PendingPhoneFlows,
     qr_flows: PendingQrFlows,
+    totp_setups: PendingTotpSetups,
+    unlock_cache: UnlockCache,
     notification_settings: NotificationSettingsStore,
     http_client: HttpClient,
 }
 
 struct Config {
-    auth_user: String,
-    auth_pass: String,
     api_id: i32,
     api_hash: String,
     sessions_dir: PathBuf,
@@ -90,52 +108,18 @@ struct RuntimeConfig {
     api_id: i32,
     api_hash: String,
     sessions_dir: PathBuf,
+    users_dir: PathBuf,
+    app_data_dir: PathBuf,
     pending_dir: PathBuf,
+    meta_db_path: PathBuf,
     notification_settings_path: PathBuf,
 }
 
-#[derive(Clone)]
-struct DashboardAuth {
-    username: String,
-    password: String,
-    session_token: String,
-}
-
-impl DashboardAuth {
-    fn new(username: String, password: String) -> Self {
-        let session_token = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(format!("{username}:{password}"));
-
-        Self {
-            username,
-            password,
-            session_token,
-        }
-    }
-
-    fn verify_credentials(&self, username: &str, password: &str) -> bool {
-        username == self.username && password == self.password
-    }
-
-    fn is_authorized(&self, headers: &HeaderMap) -> bool {
-        find_cookie(headers, AUTH_COOKIE_NAME).is_some_and(|value| value == self.session_token)
-    }
-
-    fn login_cookie(&self) -> String {
-        format!(
-            "{AUTH_COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-            self.session_token
-        )
-    }
-
-    fn clear_cookie(&self) -> String {
-        format!("{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
-    }
-}
-
 struct PendingPhoneLogin {
+    user_id: String,
     session_name: String,
     phone: String,
+    session_id: String,
     temp_path: PathBuf,
     final_path: PathBuf,
     stage: PhoneLoginStage,
@@ -148,9 +132,18 @@ enum PhoneLoginStage {
 
 #[derive(Clone, Debug)]
 struct PendingQrLogin {
+    user_id: String,
     session_name: String,
+    session_id: String,
     temp_path: PathBuf,
     final_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct PendingTotpSetup {
+    secret: String,
+    recovery_codes: Vec<String>,
+    otp_auth_uri: String,
 }
 
 struct TelegramClientSession {
@@ -279,6 +272,28 @@ struct HealthResponse {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct ActiveSessionView {
+    id: String,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
+    issued_at: String,
+    expires_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct AdminUserView {
+    id: String,
+    username: String,
+    role: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SelectOption {
+    value: &'static str,
+    label: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct PageBanner {
     kind: &'static str,
     message: String,
@@ -339,6 +354,36 @@ struct LangQuery {
 struct LoginForm {
     username: String,
     password: String,
+    mfa_code: Option<String>,
+    recovery_code: Option<String>,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RegisterForm {
+    username: String,
+    password: String,
+    confirm_password: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ChangePasswordForm {
+    current_password: String,
+    new_password: String,
+    confirm_password: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct TotpConfirmForm {
+    code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SessionNoteForm {
+    note: String,
     lang: Option<String>,
 }
 
@@ -381,6 +426,27 @@ struct RenameSessionForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct AdminCreateUserForm {
+    username: String,
+    password: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AdminSaveSettingsForm {
+    registration_policy: String,
+    public_registration_open: Option<String>,
+    session_absolute_ttl_hours: u32,
+    audit_detail_limit: u32,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RevokeSessionsForm {
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct FlowPageQuery {
     lang: Option<String>,
     error: Option<String>,
@@ -392,18 +458,26 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = load_config()?;
-    let auth = DashboardAuth::new(config.auth_user.clone(), config.auth_pass.clone());
     let runtime = RuntimeConfig {
         api_id: config.api_id,
         api_hash: config.api_hash,
-        pending_dir: config.sessions_dir.join(".pending"),
-        notification_settings_path: config.sessions_dir.join(BOT_SETTINGS_FILE_NAME),
         sessions_dir: config.sessions_dir.clone(),
+        users_dir: config.sessions_dir.join("users"),
+        app_data_dir: config.sessions_dir.join(".hanagram"),
+        pending_dir: config.sessions_dir.join(".hanagram").join("pending"),
+        meta_db_path: config.sessions_dir.join(".hanagram").join(META_DB_FILE_NAME),
+        notification_settings_path: config.sessions_dir.join(".hanagram").join(BOT_SETTINGS_FILE_NAME),
     };
 
     tokio::fs::create_dir_all(&runtime.sessions_dir)
         .await
         .with_context(|| format!("failed to create {}", runtime.sessions_dir.display()))?;
+    tokio::fs::create_dir_all(&runtime.users_dir)
+        .await
+        .with_context(|| format!("failed to create {}", runtime.users_dir.display()))?;
+    tokio::fs::create_dir_all(&runtime.app_data_dir)
+        .await
+        .with_context(|| format!("failed to create {}", runtime.app_data_dir.display()))?;
     tokio::fs::create_dir_all(&runtime.pending_dir)
         .await
         .with_context(|| format!("failed to create {}", runtime.pending_dir.display()))?;
@@ -415,6 +489,10 @@ async fn main() -> Result<()> {
     let session_workers: SessionWorkers = Arc::new(Mutex::new(HashMap::new()));
     let phone_flows: PendingPhoneFlows = Arc::new(RwLock::new(HashMap::new()));
     let qr_flows: PendingQrFlows = Arc::new(RwLock::new(HashMap::new()));
+    let totp_setups: PendingTotpSetups = Arc::new(RwLock::new(HashMap::new()));
+    let unlock_cache: UnlockCache = Arc::new(RwLock::new(HashMap::new()));
+    let meta_store = Arc::new(MetaStore::open(&runtime.meta_db_path).await?);
+    let system_settings = Arc::new(RwLock::new(meta_store.load_system_settings().await?));
     let notification_settings = Arc::new(RwLock::new(
         load_bot_notification_settings(&runtime.notification_settings_path).await,
     ));
@@ -423,27 +501,46 @@ async fn main() -> Result<()> {
         shared_state: Arc::clone(&shared_state),
         session_workers,
         tera,
-        auth: auth.clone(),
+        meta_store: Arc::clone(&meta_store),
+        system_settings,
         runtime,
         phone_flows,
         qr_flows,
+        totp_setups,
+        unlock_cache,
         notification_settings,
         http_client: HttpClient::new(),
     };
 
-    let session_files = collect_session_files(&app_state.runtime.sessions_dir)?;
-    for session_file in session_files {
-        register_session_file(&app_state, session_file).await;
+    let session_records = app_state.meta_store.list_all_session_records().await?;
+    for session_record in session_records {
+        register_session_record(&app_state, session_record).await;
     }
 
     let protected = Router::new()
         .route("/", get(index_handler))
+        .route("/settings", get(settings_page_handler))
+        .route("/settings/notifications", get(notification_settings_page_handler))
+        .route("/settings/bot", post(save_bot_settings_handler))
+        .route("/settings/security/password", post(change_password_handler))
+        .route("/settings/security/totp/setup", get(totp_setup_page_handler))
+        .route("/settings/security/totp/setup", post(confirm_totp_setup_handler))
+        .route("/admin", get(admin_page_handler))
+        .route("/admin/users/create", post(admin_create_user_handler))
+        .route("/admin/users/{user_id}/unlock", post(admin_unlock_user_handler))
+        .route("/admin/users/{user_id}/reset", post(admin_reset_user_handler))
+        .route(
+            "/admin/users/{user_id}/sessions/revoke",
+            post(admin_revoke_user_sessions_handler),
+        )
+        .route("/admin/settings", post(admin_save_system_settings_handler))
         .route("/sessions/new", get(session_setup_page_handler))
         .route(
             "/sessions/import/string",
             post(import_string_session_handler),
         )
         .route("/sessions/import/upload", post(import_session_file_handler))
+        .route("/sessions/{session_key}/note", post(update_session_note_handler))
         .route(
             "/sessions/{session_key}/delete",
             post(delete_session_handler),
@@ -462,7 +559,6 @@ async fn main() -> Result<()> {
         )
         .route("/sessions/login/phone", post(start_phone_login_handler))
         .route("/sessions/login/qr", post(start_qr_login_handler))
-        .route("/settings/bot", post(save_bot_settings_handler))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
         .route("/sessions/phone/{flow_id}", get(phone_flow_page_handler))
         .route(
@@ -482,10 +578,11 @@ async fn main() -> Result<()> {
             "/sessions/qr/{flow_id}/cancel",
             post(cancel_qr_flow_handler),
         )
-        .route_layer(middleware::from_fn_with_state(auth.clone(), require_login));
+        .route_layer(middleware::from_fn_with_state(app_state.clone(), require_login));
 
     let app = Router::new()
         .merge(protected)
+        .route("/register", get(register_page_handler).post(register_submit_handler))
         .route("/login", get(login_page_handler).post(login_submit_handler))
         .route("/logout", post(logout_handler))
         .route("/health", get(health_handler))
@@ -516,8 +613,6 @@ fn init_tracing() {
 }
 
 fn load_config() -> Result<Config> {
-    let auth_user = required_env("AUTH_USER")?;
-    let auth_pass = required_env("AUTH_PASS")?;
     let api_id = required_env("API_ID")?
         .parse::<i32>()
         .context("API_ID must be a valid i32")?;
@@ -533,8 +628,6 @@ fn load_config() -> Result<Config> {
         .context("BIND_ADDR must be a valid socket address")?;
 
     Ok(Config {
-        auth_user,
-        auth_pass,
         api_id,
         api_hash,
         sessions_dir,
@@ -621,57 +714,40 @@ async fn cleanup_pending_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn find_cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
-
-    cookies.split(';').find_map(|cookie| {
-        let (cookie_name, cookie_value) = cookie.trim().split_once('=')?;
-        if cookie_name == name {
-            Some(cookie_value)
-        } else {
-            None
-        }
-    })
-}
-
-async fn require_login(
-    State(auth): State<DashboardAuth>,
-    request: Request,
-    next: Next,
-) -> Response {
-    if auth.is_authorized(request.headers()) {
-        return next.run(request).await;
-    }
-
-    let location = match request.uri().query() {
-        Some(query) if !query.is_empty() => format!("/login?{query}"),
-        _ => String::from("/login"),
+async fn require_login(State(app_state): State<AppState>, mut request: Request, next: Next) -> Response {
+    let language = detect_language(request.headers(), None);
+    let Some(authenticated) = resolve_authenticated_session(
+        &app_state.meta_store,
+        &app_state.system_settings.read().await.clone(),
+        request.headers(),
+    )
+    .await
+    .ok()
+    .flatten()
+    else {
+        let location = match request.uri().query() {
+            Some(query) if !query.is_empty() => format!("/login?{query}"),
+            _ => String::from("/login"),
+        };
+        return Redirect::to(&location).into_response();
     };
 
-    Redirect::to(&location).into_response()
-}
-
-fn collect_session_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut session_files = Vec::new();
-
-    for entry in
-        std::fs::read_dir(dir).with_context(|| format!("failed reading {}", dir.display()))?
+    let path = request.uri().path();
+    let allow_totp_setup = path.starts_with("/settings/security/totp")
+        || path == "/logout"
+        || path == "/api/dashboard/snapshot";
+    if (authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0)
+        && !allow_totp_setup
     {
-        let entry = entry.with_context(|| format!("failed reading entry in {}", dir.display()))?;
-        let path = entry.path();
-        let is_session = path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .map(|extension| extension.eq_ignore_ascii_case("session"))
-            .unwrap_or(false);
-
-        if path.is_file() && is_session {
-            session_files.push(path);
-        }
+        return Redirect::to(&format!(
+            "/settings/security/totp/setup?lang={}",
+            language.code()
+        ))
+        .into_response();
     }
 
-    session_files.sort();
-    Ok(session_files)
+    request.extensions_mut().insert(authenticated);
+    next.run(request).await
 }
 
 fn session_key(session_file: &Path) -> String {
@@ -718,15 +794,29 @@ fn format_phone_display(raw: &str) -> String {
     }
 }
 
-async fn initialize_session_entry(shared_state: &SharedState, key: &str, session_file: &Path) {
+async fn initialize_session_entry(shared_state: &SharedState, record: &SessionRecord) {
     let mut state = shared_state.write().await;
-    state.entry(key.to_owned()).or_insert_with(|| SessionInfo {
-        key: key.to_owned(),
-        phone: fallback_phone(session_file),
-        session_file: session_file.to_path_buf(),
-        status: SessionStatus::Connecting,
-        messages: VecDeque::new(),
-    });
+    match state.entry(record.id.clone()) {
+        std::collections::hash_map::Entry::Occupied(mut entry) => {
+            let session = entry.get_mut();
+            session.user_id = record.user_id.clone();
+            session.key = record.session_key.clone();
+            session.note = record.note.clone();
+            session.session_file = PathBuf::from(&record.storage_path);
+        }
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(SessionInfo {
+                id: record.id.clone(),
+                user_id: record.user_id.clone(),
+                key: record.session_key.clone(),
+                note: record.note.clone(),
+                phone: fallback_phone(Path::new(&record.storage_path)),
+                session_file: PathBuf::from(&record.storage_path),
+                status: SessionStatus::Connecting,
+                messages: VecDeque::new(),
+            });
+        }
+    }
 }
 
 async fn set_session_status(shared_state: &SharedState, key: &str, status: SessionStatus) {
@@ -740,6 +830,13 @@ async fn set_session_phone(shared_state: &SharedState, key: &str, phone: String)
     let mut state = shared_state.write().await;
     if let Some(info) = state.get_mut(key) {
         info.phone = format_phone_display(&phone);
+    }
+}
+
+async fn set_session_note(shared_state: &SharedState, key: &str, note: String) {
+    let mut state = shared_state.write().await;
+    if let Some(info) = state.get_mut(key) {
+        info.note = note;
     }
 }
 
@@ -844,18 +941,21 @@ async fn send_bot_notification(
     Ok(())
 }
 
-async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
-    let key = session_key(&session_file);
-    initialize_session_entry(&app_state.shared_state, &key, &session_file).await;
+async fn register_session_record(app_state: &AppState, session_record: SessionRecord) {
+    initialize_session_entry(&app_state.shared_state, &session_record).await;
 
-    let existing_worker = app_state.session_workers.lock().await.remove(&key);
+    let existing_worker = app_state
+        .session_workers
+        .lock()
+        .await
+        .remove(&session_record.id);
     if let Some(existing_worker) = existing_worker {
         existing_worker.cancellation.cancel();
         let _ = existing_worker.task.await;
     }
 
-    let worker_key = key.clone();
-    let worker_file = session_file;
+    let worker_key = session_record.id.clone();
+    let worker_file = PathBuf::from(&session_record.storage_path);
     let worker_state = Arc::clone(&app_state.shared_state);
     let api_id = app_state.runtime.api_id;
     let notification_settings = Arc::clone(&app_state.notification_settings);
@@ -880,7 +980,7 @@ async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
         .session_workers
         .lock()
         .await
-        .insert(key, SessionWorkerHandle { cancellation, task });
+        .insert(session_record.id, SessionWorkerHandle { cancellation, task });
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1129,6 +1229,115 @@ fn setup_href(language: Language) -> String {
     format!("/sessions/new?lang={}", language.code())
 }
 
+fn settings_href(language: Language) -> String {
+    format!("/settings?lang={}", language.code())
+}
+
+fn notifications_href(language: Language) -> String {
+    format!("/settings/notifications?lang={}", language.code())
+}
+
+fn admin_href(language: Language) -> String {
+    format!("/admin?lang={}", language.code())
+}
+
+fn user_sessions_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
+    runtime.users_dir.join(user_id)
+}
+
+async fn ensure_user_sessions_dir(runtime: &RuntimeConfig, user_id: &str) -> Result<PathBuf> {
+    let dir = user_sessions_dir(runtime, user_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("failed to create {}", dir.display()))?;
+    Ok(dir)
+}
+
+fn format_unix_timestamp(unix: i64) -> String {
+    match DateTime::from_timestamp(unix, 0) {
+        Some(timestamp) => timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        None => String::from("-"),
+    }
+}
+
+fn registration_policy_value(policy: RegistrationPolicy) -> &'static str {
+    match policy {
+        RegistrationPolicy::AlwaysPublic => "always_public",
+        RegistrationPolicy::AdminOnly => "admin_only",
+        RegistrationPolicy::AdminSelectable => "admin_selectable",
+    }
+}
+
+fn parse_registration_policy(raw: &str) -> RegistrationPolicy {
+    match raw {
+        "always_public" => RegistrationPolicy::AlwaysPublic,
+        "admin_selectable" => RegistrationPolicy::AdminSelectable,
+        _ => RegistrationPolicy::AdminOnly,
+    }
+}
+
+fn registration_policy_options(language: Language) -> Vec<SelectOption> {
+    match language {
+        Language::En => vec![
+            SelectOption {
+                value: "always_public",
+                label: String::from("Public Registration"),
+            },
+            SelectOption {
+                value: "admin_only",
+                label: String::from("Admin Only"),
+            },
+            SelectOption {
+                value: "admin_selectable",
+                label: String::from("Admin Toggle"),
+            },
+        ],
+        Language::ZhCn => vec![
+            SelectOption {
+                value: "always_public",
+                label: String::from("公开注册"),
+            },
+            SelectOption {
+                value: "admin_only",
+                label: String::from("仅管理员创建"),
+            },
+            SelectOption {
+                value: "admin_selectable",
+                label: String::from("管理员可开关"),
+            },
+        ],
+    }
+}
+
+async fn save_new_session_record(
+    app_state: &AppState,
+    user_id: &str,
+    session_path: PathBuf,
+) -> Result<SessionRecord> {
+    let record = SessionRecord::new(
+        user_id.to_owned(),
+        session_key(&session_path),
+        session_path.display().to_string(),
+    );
+    app_state.meta_store.save_session_record(&record).await?;
+    register_session_record(app_state, record.clone()).await;
+    Ok(record)
+}
+
+async fn load_owned_session_record(
+    app_state: &AppState,
+    user_id: &str,
+    session_id: &str,
+) -> Result<Option<SessionRecord>> {
+    let Some(record) = app_state.meta_store.get_session_record_by_id(session_id).await? else {
+        return Ok(None);
+    };
+    if record.user_id != user_id {
+        return Ok(None);
+    }
+    Ok(Some(record))
+}
+
 fn set_cookie_header(value: &str) -> Result<HeaderValue, StatusCode> {
     HeaderValue::from_str(value).map_err(|error| {
         warn!("failed to build auth cookie header: {}", error);
@@ -1208,10 +1417,17 @@ fn build_bot_placeholder_hints(language: Language) -> [BotPlaceholderHint; 7] {
     ]
 }
 
-async fn build_dashboard_snapshot(app_state: &AppState) -> DashboardSnapshot {
+async fn build_dashboard_snapshot(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+) -> DashboardSnapshot {
     let sessions = {
         let state = app_state.shared_state.read().await;
-        let mut sessions: Vec<SessionInfo> = state.values().cloned().collect();
+        let mut sessions: Vec<SessionInfo> = state
+            .values()
+            .filter(|session| session.user_id == authenticated.user.id)
+            .cloned()
+            .collect();
         sessions.sort_by(|left, right| {
             right
                 .latest_code_message()
@@ -1240,35 +1456,31 @@ async fn build_dashboard_snapshot(app_state: &AppState) -> DashboardSnapshot {
 
 async fn render_dashboard_page(
     app_state: &AppState,
+    authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/");
-    let snapshot = build_dashboard_snapshot(app_state).await;
-    let notification_settings = app_state.notification_settings.read().await.clone();
-    let bot_settings = build_bot_settings_view(&notification_settings);
-    let bot_placeholder_hints = build_bot_placeholder_hints(language);
+    let snapshot = build_dashboard_snapshot(app_state, authenticated).await;
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("languages", &languages);
+    context.insert("current_username", &authenticated.user.username);
+    context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
     context.insert(
         "logout_action",
         &format!("/logout?lang={}", language.code()),
     );
     context.insert("setup_href", &setup_href(language));
+    context.insert("settings_href", &format!("/settings?lang={}", language.code()));
+    context.insert("admin_href", &format!("/admin?lang={}", language.code()));
     context.insert("banner", &banner);
     context.insert("sessions", &snapshot.sessions);
     context.insert("connected_count", &snapshot.connected_count);
     context.insert("now", &snapshot.generated_at);
-    context.insert("bot_settings", &bot_settings);
-    context.insert("bot_placeholders", &bot_placeholder_hints);
-    context.insert(
-        "bot_settings_action",
-        &format!("/settings/bot?lang={}", language.code()),
-    );
     context.insert(
         "snapshot_api",
         &format!("/api/dashboard/snapshot?lang={}", language.code()),
@@ -1292,14 +1504,93 @@ async fn render_login_page(
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/login");
+    let settings = app_state.system_settings.read().await.clone();
+    let user_count = app_state.meta_store.count_users().await.unwrap_or(0);
+    let show_register = user_count == 0
+        || settings
+            .registration_policy
+            .allows_public_registration(settings.public_registration_open);
+    let register_label = match language {
+        Language::En => "Create Account",
+        Language::ZhCn => "创建账号",
+    };
+    let mfa_label = match language {
+        Language::En => "TOTP Code",
+        Language::ZhCn => "TOTP 动态码",
+    };
+    let recovery_label = match language {
+        Language::En => "Recovery Code",
+        Language::ZhCn => "恢复码",
+    };
+    let mfa_hint = match language {
+        Language::En => "If the account already enabled MFA, enter either a TOTP code or one recovery code.",
+        Language::ZhCn => "如果账号已经启用二次验证，请填写 TOTP 动态码或一条恢复码。",
+    };
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("languages", &languages);
     context.insert("error_message", &error_message);
+    context.insert("show_register", &show_register);
+    context.insert("register_href", &format!("/register?lang={}", language.code()));
+    context.insert("register_label", &register_label);
+    context.insert("mfa_label", &mfa_label);
+    context.insert("recovery_label", &recovery_label);
+    context.insert("mfa_hint", &mfa_hint);
 
     render_template(&app_state.tera, "login.html", &context)
+}
+
+async fn render_register_page(
+    app_state: &AppState,
+    language: Language,
+    error_message: Option<&str>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let languages = language_options(language, "/register");
+    let mut context = Context::new();
+    let title = match language {
+        Language::En => "Create Account",
+        Language::ZhCn => "创建账号",
+    };
+    let description = match language {
+        Language::En => "The first account becomes the only admin. New accounts must finish TOTP setup before entering the dashboard.",
+        Language::ZhCn => "第一个注册的账号会成为唯一管理员。新账号进入面板前必须先完成 TOTP 设置。",
+    };
+    let username_label = match language {
+        Language::En => "Username",
+        Language::ZhCn => "用户名",
+    };
+    let password_label = match language {
+        Language::En => "Password",
+        Language::ZhCn => "密码",
+    };
+    let confirm_label = match language {
+        Language::En => "Confirm Password",
+        Language::ZhCn => "确认密码",
+    };
+    let submit_label = match language {
+        Language::En => "Create Account",
+        Language::ZhCn => "创建账号",
+    };
+    let back_label = match language {
+        Language::En => "Back to Login",
+        Language::ZhCn => "返回登录",
+    };
+
+    context.insert("lang", &language.code());
+    context.insert("languages", &languages);
+    context.insert("title", &title);
+    context.insert("description", &description);
+    context.insert("username_label", &username_label);
+    context.insert("password_label", &password_label);
+    context.insert("confirm_label", &confirm_label);
+    context.insert("submit_label", &submit_label);
+    context.insert("back_label", &back_label);
+    context.insert("back_href", &format!("/login?lang={}", language.code()));
+    context.insert("error_message", &error_message);
+
+    render_template(&app_state.tera, "register.html", &context)
 }
 
 async fn render_setup_page(
@@ -1318,6 +1609,406 @@ async fn render_setup_page(
     context.insert("dashboard_href", &dashboard_href(language));
 
     render_template(&app_state.tera, "session_setup.html", &context)
+}
+
+async fn render_settings_page(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    language: Language,
+    banner: Option<PageBanner>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let active_sessions = app_state
+        .meta_store
+        .list_auth_sessions_for_user(&authenticated.user.id)
+        .await
+        .map_err(|error| {
+            warn!(
+                "failed loading auth sessions for {}: {}",
+                authenticated.user.username, error
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let active_sessions: Vec<ActiveSessionView> = active_sessions
+        .into_iter()
+        .filter(|session| session.revoked_at_unix.is_none())
+        .map(|session| ActiveSessionView {
+            id: session.id,
+            ip_address: session.ip_address,
+            user_agent: session.user_agent,
+            issued_at: format_unix_timestamp(session.issued_at_unix),
+            expires_at: format_unix_timestamp(session.expires_at_unix),
+        })
+        .collect();
+
+    let totp_status = match language {
+        Language::En if authenticated.user.security.totp_enabled => "Enabled",
+        Language::En => "Not enabled",
+        Language::ZhCn if authenticated.user.security.totp_enabled => "已启用",
+        Language::ZhCn => "未启用",
+    };
+    let idle_timeout = authenticated
+        .auth_session
+        .idle_timeout_minutes
+        .map(|minutes| match language {
+            Language::En => format!("{minutes} minutes"),
+            Language::ZhCn => format!("{minutes} 分钟"),
+        })
+        .unwrap_or_else(|| match language {
+            Language::En => String::from("Use system default"),
+            Language::ZhCn => String::from("使用系统默认值"),
+        });
+
+    let mut context = Context::new();
+    context.insert("lang", &language.code());
+    context.insert("title", &match language {
+        Language::En => "Settings",
+        Language::ZhCn => "设置",
+    });
+    context.insert("description", &match language {
+        Language::En => "Security, active sessions, and notification preferences live here so the main dashboard stays focused on Telegram sessions.",
+        Language::ZhCn => "安全、活跃会话和提醒设置都放在这里，让主面板专注于 Telegram 会话本身。",
+    });
+    context.insert("current_username", &authenticated.user.username);
+    context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
+    context.insert("admin_href", &admin_href(language));
+    context.insert("dashboard_href", &dashboard_href(language));
+    context.insert("notifications_href", &notifications_href(language));
+    context.insert("dashboard_label", &match language {
+        Language::En => "Dashboard",
+        Language::ZhCn => "主面板",
+    });
+    context.insert("admin_label", &match language {
+        Language::En => "Admin",
+        Language::ZhCn => "管理后台",
+    });
+    context.insert("notifications_label", &match language {
+        Language::En => "Notifications",
+        Language::ZhCn => "提醒设置",
+    });
+    context.insert("security_title", &match language {
+        Language::En => "Security",
+        Language::ZhCn => "安全",
+    });
+    context.insert("totp_label", &match language {
+        Language::En => "TOTP",
+        Language::ZhCn => "TOTP",
+    });
+    context.insert("totp_status", &totp_status);
+    context.insert("recovery_label", &match language {
+        Language::En => "Recovery Codes",
+        Language::ZhCn => "恢复码",
+    });
+    context.insert(
+        "recovery_remaining",
+        &authenticated.recovery_codes_remaining.to_string(),
+    );
+    context.insert("idle_label", &match language {
+        Language::En => "Idle Timeout",
+        Language::ZhCn => "空闲登出",
+    });
+    context.insert("idle_timeout", &idle_timeout);
+    context.insert("totp_setup_href", &format!(
+        "/settings/security/totp/setup?lang={}",
+        language.code()
+    ));
+    context.insert("totp_setup_label", &match language {
+        Language::En => "Manage TOTP",
+        Language::ZhCn => "管理 TOTP",
+    });
+    context.insert("password_title", &match language {
+        Language::En => "Change Password",
+        Language::ZhCn => "修改密码",
+    });
+    context.insert("password_action", &format!(
+        "/settings/security/password?lang={}",
+        language.code()
+    ));
+    context.insert("current_password_label", &match language {
+        Language::En => "Current Password",
+        Language::ZhCn => "当前密码",
+    });
+    context.insert("new_password_label", &match language {
+        Language::En => "New Password",
+        Language::ZhCn => "新密码",
+    });
+    context.insert("confirm_password_label", &match language {
+        Language::En => "Confirm New Password",
+        Language::ZhCn => "确认新密码",
+    });
+    context.insert("change_password_label", &match language {
+        Language::En => "Update Password",
+        Language::ZhCn => "更新密码",
+    });
+    context.insert("sessions_title", &match language {
+        Language::En => "Active Sessions",
+        Language::ZhCn => "活跃登录会话",
+    });
+    context.insert("sessions", &active_sessions);
+    context.insert("current_session_id", &authenticated.auth_session.id);
+    context.insert("current_user_id", &authenticated.user.id);
+    context.insert("revoke_label", &match language {
+        Language::En => "Force Logout",
+        Language::ZhCn => "强制下线",
+    });
+    context.insert("current_session_label", &match language {
+        Language::En => "Current Session",
+        Language::ZhCn => "当前会话",
+    });
+    context.insert("banner", &banner);
+
+    render_template(&app_state.tera, "settings.html", &context)
+}
+
+async fn render_notification_settings_page(
+    app_state: &AppState,
+    language: Language,
+    banner: Option<PageBanner>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
+    let bot_settings = app_state.notification_settings.read().await.clone();
+    let mut context = Context::new();
+    context.insert("lang", &language.code());
+    context.insert("i18n", translations);
+    context.insert("settings_href", &settings_href(language));
+    context.insert("back_label", &match language {
+        Language::En => "Back to Settings",
+        Language::ZhCn => "返回设置",
+    });
+    context.insert(
+        "bot_settings",
+        &build_bot_settings_view(&bot_settings),
+    );
+    context.insert(
+        "bot_placeholders",
+        &build_bot_placeholder_hints(language).to_vec(),
+    );
+    context.insert(
+        "bot_settings_action",
+        &format!("/settings/bot?lang={}", language.code()),
+    );
+    context.insert("banner", &banner);
+
+    render_template(&app_state.tera, "notifications.html", &context)
+}
+
+async fn render_totp_setup_page(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    language: Language,
+    banner: Option<PageBanner>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let pending = {
+        let mut setups = app_state.totp_setups.write().await;
+        setups
+            .entry(authenticated.auth_session.id.clone())
+            .or_insert_with(|| {
+                let material = build_totp_setup_material(&authenticated.user.username);
+                PendingTotpSetup {
+                    secret: material.secret,
+                    recovery_codes: material.recovery_codes,
+                    otp_auth_uri: material.otp_auth_uri,
+                }
+            })
+            .clone()
+    };
+    let qr_svg = render_qr_svg(&pending.otp_auth_uri).map_err(|error| {
+        warn!(
+            "failed rendering totp qr for {}: {}",
+            authenticated.user.username, error
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut context = Context::new();
+    context.insert("lang", &language.code());
+    context.insert("title", &match language {
+        Language::En => "TOTP Setup",
+        Language::ZhCn => "TOTP 设置",
+    });
+    context.insert("description", &match language {
+        Language::En => "Scan the QR code, store the recovery codes, then confirm with one TOTP code before entering the dashboard.",
+        Language::ZhCn => "先扫码、保存恢复码，再输入一次 TOTP 动态码完成确认，然后才能进入主面板。",
+    });
+    context.insert("settings_href", &settings_href(language));
+    context.insert("back_label", &match language {
+        Language::En => "Back to Settings",
+        Language::ZhCn => "返回设置",
+    });
+    context.insert("qr_title", &match language {
+        Language::En => "Authenticator QR",
+        Language::ZhCn => "认证器二维码",
+    });
+    context.insert("qr_svg", &qr_svg);
+    context.insert("secret_label", &match language {
+        Language::En => "Manual Secret",
+        Language::ZhCn => "手动输入密钥",
+    });
+    context.insert("secret", &pending.secret);
+    context.insert("recovery_title", &match language {
+        Language::En => "Recovery Codes",
+        Language::ZhCn => "恢复码",
+    });
+    context.insert("recovery_description", &match language {
+        Language::En => "Each code works once. After all 5 are used, you must generate a new set.",
+        Language::ZhCn => "每个恢复码只能使用一次。5 个都用完后，必须重新生成一组。",
+    });
+    context.insert("recovery_codes", &pending.recovery_codes);
+    context.insert("confirm_action", &format!(
+        "/settings/security/totp/setup?lang={}",
+        language.code()
+    ));
+    context.insert("confirm_label", &match language {
+        Language::En => "Enter One TOTP Code",
+        Language::ZhCn => "输入一个 TOTP 动态码",
+    });
+    context.insert("confirm_submit", &match language {
+        Language::En => "Enable TOTP",
+        Language::ZhCn => "启用 TOTP",
+    });
+    context.insert("banner", &banner);
+
+    render_template(&app_state.tera, "totp_setup.html", &context)
+}
+
+async fn render_admin_page(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    language: Language,
+    banner: Option<PageBanner>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let users = app_state.meta_store.list_users().await.map_err(|error| {
+        warn!("failed loading users for admin page: {}", error);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let users: Vec<AdminUserView> = users
+        .into_iter()
+        .map(|user| AdminUserView {
+            id: user.id,
+            username: user.username,
+            role: match user.role {
+                UserRole::Admin => String::from("admin"),
+                UserRole::User => String::from("user"),
+            },
+        })
+        .collect();
+    let audit_logs = app_state.meta_store.list_audit_logs().await.map_err(|error| {
+        warn!("failed loading audit logs: {}", error);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_rollups = app_state
+        .meta_store
+        .list_audit_rollups()
+        .await
+        .map_err(|error| {
+            warn!("failed loading audit rollups: {}", error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let system_settings = app_state.system_settings.read().await.clone();
+
+    let mut context = Context::new();
+    context.insert("lang", &language.code());
+    context.insert("title", &match language {
+        Language::En => "Admin",
+        Language::ZhCn => "管理后台",
+    });
+    context.insert("description", &match language {
+        Language::En => "Manage users, registration strategy, session lifetime, and audit visibility from one place.",
+        Language::ZhCn => "在这里统一管理用户、注册策略、登录会话时长和审计可见性。",
+    });
+    context.insert("dashboard_href", &dashboard_href(language));
+    context.insert("settings_href", &settings_href(language));
+    context.insert("dashboard_label", &match language {
+        Language::En => "Dashboard",
+        Language::ZhCn => "主面板",
+    });
+    context.insert("settings_label", &match language {
+        Language::En => "Settings",
+        Language::ZhCn => "设置",
+    });
+    context.insert("create_user_title", &match language {
+        Language::En => "Create User",
+        Language::ZhCn => "创建用户",
+    });
+    context.insert("username_label", &match language {
+        Language::En => "Username",
+        Language::ZhCn => "用户名",
+    });
+    context.insert("password_label", &match language {
+        Language::En => "Password",
+        Language::ZhCn => "密码",
+    });
+    context.insert("create_user_label", &match language {
+        Language::En => "Create User",
+        Language::ZhCn => "创建用户",
+    });
+    context.insert("policy_title", &match language {
+        Language::En => "System Policy",
+        Language::ZhCn => "系统策略",
+    });
+    context.insert("registration_label", &match language {
+        Language::En => "Registration Mode",
+        Language::ZhCn => "注册模式",
+    });
+    context.insert(
+        "registration_options",
+        &registration_policy_options(language),
+    );
+    context.insert(
+        "current_registration_policy",
+        &registration_policy_value(system_settings.registration_policy),
+    );
+    context.insert(
+        "public_registration_open",
+        &system_settings.public_registration_open,
+    );
+    context.insert("public_registration_label", &match language {
+        Language::En => "Open registration when using admin toggle mode",
+        Language::ZhCn => "当模式为管理员可开关时，当前允许公开注册",
+    });
+    context.insert("session_ttl_label", &match language {
+        Language::En => "Session TTL (hours)",
+        Language::ZhCn => "登录会话有效期（小时）",
+    });
+    context.insert("audit_limit_label", &match language {
+        Language::En => "Detailed Audit Rows",
+        Language::ZhCn => "审计详细记录保留条数",
+    });
+    context.insert("save_policy_label", &match language {
+        Language::En => "Save Policy",
+        Language::ZhCn => "保存策略",
+    });
+    context.insert("users_title", &match language {
+        Language::En => "Users",
+        Language::ZhCn => "用户列表",
+    });
+    context.insert("unlock_label", &match language {
+        Language::En => "Unlock",
+        Language::ZhCn => "解锁",
+    });
+    context.insert("revoke_sessions_label", &match language {
+        Language::En => "Force Logout",
+        Language::ZhCn => "强制下线",
+    });
+    context.insert("reset_label", &match language {
+        Language::En => "Reset",
+        Language::ZhCn => "重置",
+    });
+    context.insert("audit_title", &match language {
+        Language::En => "Audit Log",
+        Language::ZhCn => "审计日志",
+    });
+    context.insert("rollup_title", &match language {
+        Language::En => "Audit Rollups",
+        Language::ZhCn => "审计汇总",
+    });
+    context.insert("users", &users);
+    context.insert("audit_logs", &audit_logs);
+    context.insert("audit_rollups", &audit_rollups);
+    context.insert("system_settings", &system_settings);
+    context.insert("banner", &banner);
+    context.insert("current_admin_username", &authenticated.user.username);
+
+    render_template(&app_state.tera, "admin.html", &context)
 }
 
 fn build_phone_flow_view(
@@ -1407,11 +2098,43 @@ async fn login_page_handler(
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
 
-    if app_state.auth.is_authorized(&headers) {
-        return Redirect::to(&login_redirect_target(language)).into_response();
+    let settings = app_state.system_settings.read().await.clone();
+    if let Ok(Some(authenticated)) =
+        resolve_authenticated_session(&app_state.meta_store, &settings, &headers).await
+    {
+        let target = if authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0
+        {
+            format!("/settings/security/totp/setup?lang={}", language.code())
+        } else {
+            login_redirect_target(language)
+        };
+        return Redirect::to(&target).into_response();
     }
 
     match render_login_page(&app_state, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn register_page_handler(
+    State(app_state): State<AppState>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let settings = app_state.system_settings.read().await.clone();
+    let user_count = app_state.meta_store.count_users().await.unwrap_or(0);
+    let allowed = user_count == 0
+        || settings
+            .registration_policy
+            .allows_public_registration(settings.public_registration_open);
+
+    if !allowed {
+        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    }
+
+    match render_register_page(&app_state, language, None).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -1423,30 +2146,864 @@ async fn login_submit_handler(
     Form(form): Form<LoginForm>,
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
+    let settings = app_state.system_settings.read().await.clone();
+    let ip_address = extract_client_ip(&headers);
+    let user_agent = extract_user_agent(&headers);
 
-    if app_state
-        .auth
-        .verify_credentials(&form.username, &form.password)
-    {
-        let mut response = Redirect::to(&login_redirect_target(language)).into_response();
-
-        match set_cookie_header(&app_state.auth.login_cookie()) {
-            Ok(cookie) => {
-                response.headers_mut().insert(header::SET_COOKIE, cookie);
-                return response;
-            }
-            Err(status) => return status.into_response(),
-        }
-    }
-
-    match render_login_page(
-        &app_state,
-        language,
-        Some(language.translations().login_error_invalid),
+    match web_auth::authenticate_user(
+        &app_state.meta_store,
+        &settings,
+        &form.username,
+        &form.password,
+        form.mfa_code.as_deref(),
+        form.recovery_code.as_deref(),
+        ip_address.as_deref(),
+        user_agent.as_deref(),
     )
     .await
     {
-        Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+        Ok(login_result) => {
+            app_state
+                .unlock_cache
+                .write()
+                .await
+                .insert(login_result.auth_session.id.clone(), login_result.master_key);
+
+            let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
+            let redirect_target = if login_result.requires_totp_setup {
+                format!("/settings/security/totp/setup?lang={}", language.code())
+            } else {
+                login_redirect_target(language)
+            };
+            let mut response = Redirect::to(&redirect_target).into_response();
+
+            match set_cookie_header(&build_auth_cookie(
+                &login_result.session_token,
+                max_age,
+                settings.cookie_secure,
+            )) {
+                Ok(cookie) => {
+                    response.headers_mut().insert(header::SET_COOKIE, cookie);
+                    response
+                }
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(LoginError::LockedUntil(locked_until)) => {
+            let message = match language {
+                Language::En => format!("This account is locked until {locked_until}."),
+                Language::ZhCn => format!("这个账号已被锁定，解锁时间戳：{locked_until}。"),
+            };
+            match render_login_page(&app_state, language, Some(&message)).await {
+                Ok(html) => (StatusCode::TOO_MANY_REQUESTS, html).into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(LoginError::MissingSecondFactor) => {
+            let message = match language {
+                Language::En => "Enter a TOTP code or recovery code to finish signing in.",
+                Language::ZhCn => "请输入 TOTP 动态码或恢复码以完成登录。",
+            };
+            match render_login_page(&app_state, language, Some(message)).await {
+                Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(LoginError::InvalidSecondFactor) => {
+            let message = match language {
+                Language::En => "The TOTP code or recovery code was invalid.",
+                Language::ZhCn => "TOTP 动态码或恢复码不正确。",
+            };
+            match render_login_page(&app_state, language, Some(message)).await {
+                Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(LoginError::InvalidCredentials) => {
+            match render_login_page(
+                &app_state,
+                language,
+                Some(language.translations().login_error_invalid),
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+    }
+}
+
+async fn register_submit_handler(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<RegisterForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let settings = app_state.system_settings.read().await.clone();
+    let user_count = app_state.meta_store.count_users().await.unwrap_or(0);
+    let allowed = user_count == 0
+        || settings
+            .registration_policy
+            .allows_public_registration(settings.public_registration_open);
+
+    if !allowed {
+        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    }
+    if form.password != form.confirm_password {
+        let message = match language {
+            Language::En => "The two password fields must match.",
+            Language::ZhCn => "两次输入的密码必须一致。",
+        };
+        return match render_register_page(&app_state, language, Some(message)).await {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    match web_auth::register_user(
+        &app_state.meta_store,
+        &settings,
+        &form.username,
+        &form.password,
+        extract_client_ip(&headers).as_deref(),
+        extract_user_agent(&headers).as_deref(),
+    )
+    .await
+    {
+        Ok(RegistrationResult {
+            user,
+            auth_session,
+            session_token,
+        }) => {
+            let master_key =
+                match load_user_master_key(&user, &form.password, &settings.argon_policy) {
+                    Ok(master_key) => master_key,
+                    Err(error) => {
+                        warn!("failed reloading master key after registration: {}", error);
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
+                };
+            app_state
+                .unlock_cache
+                .write()
+                .await
+                .insert(auth_session.id, master_key);
+
+            let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
+            let mut response = Redirect::to(&format!(
+                "/settings/security/totp/setup?lang={}",
+                language.code()
+            ))
+            .into_response();
+            match set_cookie_header(&build_auth_cookie(
+                &session_token,
+                max_age,
+                settings.cookie_secure,
+            )) {
+                Ok(cookie) => {
+                    response.headers_mut().insert(header::SET_COOKIE, cookie);
+                    response
+                }
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(error) => match render_register_page(&app_state, language, Some(&error.to_string())).await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        },
+    }
+}
+
+async fn settings_page_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    match render_settings_page(&app_state, &authenticated, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn notification_settings_page_handler(
+    State(app_state): State<AppState>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    match render_notification_settings_page(&app_state, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn change_password_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<ChangePasswordForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if form.new_password != form.confirm_password {
+        let message = match language {
+            Language::En => "The new password fields must match.",
+            Language::ZhCn => "两次输入的新密码必须一致。",
+        };
+        return match render_settings_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(message)),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let settings = app_state.system_settings.read().await.clone();
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&authenticated.user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    };
+
+    match web_auth::change_password(
+        &app_state.meta_store,
+        &settings,
+        &mut user,
+        &form.current_password,
+        &form.new_password,
+    )
+    .await
+    {
+        Ok(master_key) => {
+            app_state
+                .unlock_cache
+                .write()
+                .await
+                .insert(authenticated.auth_session.id.clone(), master_key);
+            let mut refreshed = authenticated.clone();
+            refreshed.user = user;
+            match render_settings_page(
+                &app_state,
+                &refreshed,
+                language,
+                Some(PageBanner::success(match language {
+                    Language::En => "Password updated.",
+                    Language::ZhCn => "密码已更新。",
+                })),
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(error) => match render_settings_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        },
+    }
+}
+
+async fn totp_setup_page_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    match render_totp_setup_page(&app_state, &authenticated, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn confirm_totp_setup_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<TotpConfirmForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let code = form.code.trim();
+    if code.is_empty() {
+        return match render_totp_setup_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(match language {
+                Language::En => "Enter a TOTP code to confirm setup.",
+                Language::ZhCn => "请输入一个 TOTP 动态码完成确认。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let pending = {
+        let mut setups = app_state.totp_setups.write().await;
+        setups
+            .entry(authenticated.auth_session.id.clone())
+            .or_insert_with(|| {
+                let material = build_totp_setup_material(&authenticated.user.username);
+                PendingTotpSetup {
+                    secret: material.secret,
+                    recovery_codes: material.recovery_codes,
+                    otp_auth_uri: material.otp_auth_uri,
+                }
+            })
+            .clone()
+    };
+    let verification = verify_totp(
+        &pending.secret,
+        code,
+        Utc::now().timestamp(),
+        1,
+        &HashSet::new(),
+    );
+    let valid = matches!(verification, Ok(TotpVerification::Valid { .. }));
+    if !valid {
+        return match render_totp_setup_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(match language {
+                Language::En => "That TOTP code did not match the new secret.",
+                Language::ZhCn => "这个 TOTP 动态码与新的密钥不匹配。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let Some(master_key) = app_state
+        .unlock_cache
+        .read()
+        .await
+        .get(&authenticated.auth_session.id)
+        .copied()
+    else {
+        return match render_totp_setup_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(match language {
+                Language::En => "Your unlock state expired. Sign in again and retry TOTP setup.",
+                Language::ZhCn => "当前解锁状态已失效，请重新登录后再完成 TOTP 设置。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    };
+
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&authenticated.user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    };
+
+    match web_auth::save_totp_setup(
+        &app_state.meta_store,
+        &mut user,
+        &master_key,
+        &pending.secret,
+        &pending.recovery_codes,
+    )
+    .await
+    {
+        Ok(()) => {
+            app_state
+                .totp_setups
+                .write()
+                .await
+                .remove(&authenticated.auth_session.id);
+            Redirect::to(&settings_href(language)).into_response()
+        }
+        Err(error) => match render_totp_setup_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        },
+    }
+}
+
+async fn admin_page_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+    match render_admin_page(&app_state, &authenticated, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_create_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<AdminCreateUserForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let settings = app_state.system_settings.read().await.clone();
+    let username = match normalize_username(&form.username) {
+        Ok(value) => value,
+        Err(error) => {
+            return match render_admin_page(
+                &app_state,
+                &authenticated,
+                language,
+                Some(PageBanner::error(error.to_string())),
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+    };
+    let strength = evaluate_password_strength(&form.password, &settings.password_strength_rules, false);
+    if !strength.valid {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(strength.reasons.join("; "))),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+    if app_state
+        .meta_store
+        .get_user_by_username(&username)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(match language {
+                Language::En => "That username already exists.",
+                Language::ZhCn => "这个用户名已经存在。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let password_hash = match hash_password(&form.password, &settings.argon_policy) {
+        Ok(value) => value,
+        Err(error) => {
+            return match render_admin_page(
+                &app_state,
+                &authenticated,
+                language,
+                Some(PageBanner::error(error.to_string())),
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+    };
+    let kek_salt = random_bytes(16);
+    let master_key = generate_master_key();
+    let wrapped_master_key = match wrap_master_key(
+        &form.password,
+        &kek_salt,
+        &settings.argon_policy,
+        &master_key,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return match render_admin_page(
+                &app_state,
+                &authenticated,
+                language,
+                Some(PageBanner::error(error.to_string())),
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+    };
+
+    let mut user = hanagram_web::store::UserRecord::new(username.clone(), UserRole::User);
+    user.security.password_hash = Some(password_hash);
+    user.security.password_argon_version = settings.argon_policy.version;
+    user.security.kek_salt_b64 = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&kek_salt),
+    );
+    user.security.encrypted_master_key_json = Some(
+        serde_json::to_string(&wrapped_master_key).unwrap_or_else(|_| String::from("{}")),
+    );
+    user.updated_at_unix = Utc::now().timestamp();
+
+    let save_result = app_state.meta_store.save_user(&user).await;
+    if let Err(error) = save_result {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_created"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({ "username": username }).to_string(),
+        })
+        .await;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(match language {
+            Language::En => "User created.",
+            Language::ZhCn => "用户已创建。",
+        })),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_unlock_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+    let Some(mut user) = app_state.meta_store.get_user_by_id(&user_id).await.ok().flatten() else {
+        return Redirect::to(&admin_href(language)).into_response();
+    };
+    if user.role == UserRole::Admin {
+        return Redirect::to(&admin_href(language)).into_response();
+    }
+
+    user.security.login_failures = 0;
+    user.security.lockout_level = 0;
+    user.security.locked_until_unix = None;
+    user.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_user(&user).await {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_unlocked"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({ "username": user.username }).to_string(),
+        })
+        .await;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(match language {
+            Language::En => "User unlocked.",
+            Language::ZhCn => "用户已解锁。",
+        })),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_reset_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+    let Some(user) = app_state.meta_store.get_user_by_id(&user_id).await.ok().flatten() else {
+        return Redirect::to(&admin_href(language)).into_response();
+    };
+    if user.role == UserRole::Admin {
+        return Redirect::to(&admin_href(language)).into_response();
+    }
+
+    if let Ok(session_records) = app_state.meta_store.list_session_records_for_user(&user.id).await {
+        for record in session_records {
+            if let Some(worker) = app_state.session_workers.lock().await.remove(&record.id) {
+                worker.cancellation.cancel();
+                let _ = worker.task.await;
+            }
+            app_state.shared_state.write().await.remove(&record.id);
+            let _ = remove_file_if_exists(Path::new(&record.storage_path)).await;
+        }
+    }
+    if let Ok(auth_sessions) = app_state.meta_store.list_auth_sessions_for_user(&user.id).await {
+        let mut unlock_cache = app_state.unlock_cache.write().await;
+        for session in auth_sessions {
+            unlock_cache.remove(&session.id);
+        }
+    }
+    let _ = tokio::fs::remove_dir_all(user_sessions_dir(&app_state.runtime, &user.id)).await;
+    if let Err(error) = app_state.meta_store.delete_user(&user.id).await {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_reset"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({ "username": user.username }).to_string(),
+        })
+        .await;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(match language {
+            Language::En => "User reset and data cleared.",
+            Language::ZhCn => "用户已重置，数据已清空。",
+        })),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_revoke_user_sessions_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+    Form(form): Form<RevokeSessionsForm>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let allow_self = authenticated.user.id == user_id;
+    if authenticated.user.role != UserRole::Admin && !allow_self {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    if let Some(session_id) = form.session_id.as_deref() {
+        if let Ok(Some(session)) = app_state.meta_store.get_auth_session_by_id(session_id).await {
+            if session.user_id == user_id {
+                let _ = app_state.meta_store.revoke_auth_session(session_id).await;
+                app_state.unlock_cache.write().await.remove(session_id);
+            }
+        }
+    } else {
+        if let Ok(sessions) = app_state.meta_store.list_auth_sessions_for_user(&user_id).await {
+            let mut unlock_cache = app_state.unlock_cache.write().await;
+            for session in sessions {
+                unlock_cache.remove(&session.id);
+            }
+        }
+        let _ = app_state
+            .meta_store
+            .revoke_all_auth_sessions_for_user(&user_id)
+            .await;
+    }
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("auth_sessions_revoked"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user_id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({ "single_session": form.session_id.is_some() }).to_string(),
+        })
+        .await;
+
+    if authenticated.user.role == UserRole::Admin && authenticated.user.id != user_id {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::success(match language {
+                Language::En => "User sessions revoked.",
+                Language::ZhCn => "该用户的登录会话已强制下线。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => html.into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    match render_settings_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(match language {
+            Language::En => "Selected sessions were revoked.",
+            Language::ZhCn => "选中的登录会话已被强制下线。",
+        })),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_save_system_settings_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<AdminSaveSettingsForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let mut settings = app_state.system_settings.read().await.clone();
+    settings.registration_policy = parse_registration_policy(&form.registration_policy);
+    settings.public_registration_open = form.public_registration_open.is_some();
+    settings.session_absolute_ttl_hours = form.session_absolute_ttl_hours.max(1);
+    settings.audit_detail_limit = form.audit_detail_limit.max(1);
+
+    if let Err(error) = app_state.meta_store.save_system_settings(&settings).await {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+    *app_state.system_settings.write().await = settings;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(match language {
+            Language::En => "System settings saved.",
+            Language::ZhCn => "系统设置已保存。",
+        })),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
 }
@@ -1458,8 +3015,20 @@ async fn logout_handler(
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
     let mut response = Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    let settings = app_state.system_settings.read().await.clone();
+    if let Some(token) = find_cookie(&headers, AUTH_COOKIE_NAME) {
+        let token_hash = hash_session_token(token);
+        if let Ok(Some(session)) = app_state
+            .meta_store
+            .get_auth_session_by_token_hash(&token_hash)
+            .await
+        {
+            app_state.unlock_cache.write().await.remove(&session.id);
+            let _ = app_state.meta_store.revoke_auth_session(&session.id).await;
+        }
+    }
 
-    match set_cookie_header(&app_state.auth.clear_cookie()) {
+    match set_cookie_header(&clear_auth_cookie(settings.cookie_secure)) {
         Ok(cookie) => {
             response.headers_mut().insert(header::SET_COOKIE, cookie);
             response
@@ -1470,19 +3039,24 @@ async fn logout_handler(
 
 async fn index_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let language = detect_language(&headers, query.lang.as_deref());
-    render_dashboard_page(&app_state, language, None).await
+    render_dashboard_page(&app_state, &authenticated, language, None).await
 }
 
-async fn dashboard_snapshot_handler(State(app_state): State<AppState>) -> Json<DashboardSnapshot> {
-    Json(build_dashboard_snapshot(&app_state).await)
+async fn dashboard_snapshot_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+) -> Json<DashboardSnapshot> {
+    Json(build_dashboard_snapshot(&app_state, &authenticated).await)
 }
 
 async fn save_bot_settings_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     Form(form): Form<BotNotificationSettingsForm>,
 ) -> Response {
@@ -1497,21 +3071,29 @@ async fn save_bot_settings_handler(
     .normalized();
 
     if settings.enabled && settings.bot_token.is_empty() {
-        return render_dashboard_error_response(
+        return match render_notification_settings_page(
             &app_state,
             language,
-            translations.bot_error_missing_token,
+            Some(PageBanner::error(translations.bot_error_missing_token)),
         )
-        .await;
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     }
 
     if settings.enabled && settings.chat_id.is_empty() {
-        return render_dashboard_error_response(
+        return match render_notification_settings_page(
             &app_state,
             language,
-            translations.bot_error_missing_chat_id,
+            Some(PageBanner::error(translations.bot_error_missing_chat_id)),
         )
-        .await;
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     }
 
     if let Err(error) =
@@ -1519,13 +3101,22 @@ async fn save_bot_settings_handler(
             .await
     {
         warn!("failed saving bot notification settings: {}", error);
-        return render_dashboard_error_response(&app_state, language, translations.bot_error_save)
-            .await;
+        return match render_notification_settings_page(
+            &app_state,
+            language,
+            Some(PageBanner::error(translations.bot_error_save)),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     }
 
     *app_state.notification_settings.write().await = settings;
 
-    match render_dashboard_page(
+    let _ = authenticated;
+    match render_notification_settings_page(
         &app_state,
         language,
         Some(PageBanner::success(translations.bot_saved)),
@@ -1552,6 +3143,7 @@ async fn session_setup_page_handler(
 
 async fn import_string_session_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     Form(form): Form<StringSessionForm>,
 ) -> Response {
@@ -1568,8 +3160,20 @@ async fn import_string_session_handler(
     }
 
     let session_name = sanitize_session_name(&form.session_name);
-    let session_path =
-        match allocate_unique_session_path(&app_state.runtime.sessions_dir, &session_name).await {
+    let session_dir = match ensure_user_sessions_dir(&app_state.runtime, &authenticated.user.id).await
+    {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("failed preparing user session dir: {}", error);
+            return render_setup_error_response(
+                &app_state,
+                language,
+                translations.setup_error_path_alloc,
+            )
+            .await;
+        }
+    };
+    let session_path = match allocate_unique_session_path(&session_dir, &session_name).await {
             Ok(path) => path,
             Err(error) => {
                 warn!(
@@ -1587,7 +3191,19 @@ async fn import_string_session_handler(
 
     match save_telethon_string_session(&session_path, &form.session_string).await {
         Ok(()) => {
-            register_session_file(&app_state, session_path).await;
+            if let Err(error) =
+                save_new_session_record(&app_state, &authenticated.user.id, session_path.clone())
+                    .await
+            {
+                warn!("failed saving imported string session record: {}", error);
+                let _ = remove_file_if_exists(&session_path).await;
+                return render_setup_error_response(
+                    &app_state,
+                    language,
+                    translations.setup_error_path_alloc,
+                )
+                .await;
+            }
             Redirect::to(&dashboard_href(language)).into_response()
         }
         Err(error) => {
@@ -1605,18 +3221,23 @@ async fn import_string_session_handler(
 
 async fn export_session_file_handler(
     State(app_state): State<AppState>,
-    AxumPath(session_key): AxumPath<String>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(session_id): AxumPath<String>,
 ) -> Response {
-    let session = {
-        let state = app_state.shared_state.read().await;
-        state.get(&session_key).cloned()
+    let session = match load_owned_session_record(&app_state, &authenticated.user.id, &session_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            warn!("failed loading session record for export: {}", error);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     let Some(session) = session else {
         return (StatusCode::NOT_FOUND, String::from("session not found")).into_response();
     };
+    let session_path = PathBuf::from(&session.storage_path);
 
-    match tokio::fs::read(&session.session_file).await {
+    match tokio::fs::read(&session_path).await {
         Ok(bytes) => {
             let mut response = bytes.into_response();
             response.headers_mut().insert(
@@ -1625,7 +3246,7 @@ async fn export_session_file_handler(
             );
             match HeaderValue::from_str(&format!(
                 "attachment; filename=\"{}.session\"",
-                session.key
+                session.session_key
             )) {
                 Ok(value) => {
                     response
@@ -1639,7 +3260,7 @@ async fn export_session_file_handler(
         Err(error) => {
             warn!(
                 "failed reading session file {} for export: {}",
-                session.session_file.display(),
+                session_path.display(),
                 error
             );
             (
@@ -1653,19 +3274,27 @@ async fn export_session_file_handler(
 
 async fn export_string_session_handler(
     State(app_state): State<AppState>,
-    AxumPath(session_key): AxumPath<String>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(session_id): AxumPath<String>,
     headers: HeaderMap,
     Query(query): Query<LangQuery>,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    let session_file = {
-        let state = app_state.shared_state.read().await;
-        state
-            .get(&session_key)
-            .map(|session| session.session_file.clone())
+    let session = match load_owned_session_record(&app_state, &authenticated.user.id, &session_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            warn!("failed loading session record for string export: {}", error);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiErrorResponse {
+                    error: String::from(language.translations().export_string_error),
+                }),
+            )
+                .into_response();
+        }
     };
 
-    let Some(session_file) = session_file else {
+    let Some(session) = session else {
         return (
             StatusCode::NOT_FOUND,
             Json(ApiErrorResponse {
@@ -1674,10 +3303,11 @@ async fn export_string_session_handler(
         )
             .into_response();
     };
+    let session_file = PathBuf::from(&session.storage_path);
 
     match export_telethon_string_session(&session_file).await {
         Ok(session_string) => Json(SessionStringExportResponse {
-            session_key,
+            session_key: session.session_key,
             session_string,
         })
         .into_response(),
@@ -1700,6 +3330,7 @@ async fn export_string_session_handler(
 
 async fn import_session_file_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
@@ -1776,8 +3407,20 @@ async fn import_session_file_handler(
     } else {
         &session_name
     });
-    let session_path =
-        match allocate_unique_session_path(&app_state.runtime.sessions_dir, &session_name).await {
+    let session_dir = match ensure_user_sessions_dir(&app_state.runtime, &authenticated.user.id).await
+    {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("failed preparing user session dir: {}", error);
+            return render_setup_error_response(
+                &app_state,
+                language,
+                language.translations().setup_error_path_alloc,
+            )
+            .await;
+        }
+    };
+    let session_path = match allocate_unique_session_path(&session_dir, &session_name).await {
             Ok(path) => path,
             Err(error) => {
                 warn!("failed allocating session path for upload: {}", error);
@@ -1792,7 +3435,19 @@ async fn import_session_file_handler(
 
     match tokio::fs::write(&session_path, &file_bytes).await {
         Ok(()) => {
-            register_session_file(&app_state, session_path).await;
+            if let Err(error) =
+                save_new_session_record(&app_state, &authenticated.user.id, session_path.clone())
+                    .await
+            {
+                warn!("failed saving uploaded session record: {}", error);
+                let _ = remove_file_if_exists(&session_path).await;
+                return render_setup_error_response(
+                    &app_state,
+                    language,
+                    language.translations().setup_error_upload_write,
+                )
+                .await;
+            }
             Redirect::to(&dashboard_href(language)).into_response()
         }
         Err(error) => {
@@ -1810,52 +3465,59 @@ async fn import_session_file_handler(
 
 async fn delete_session_handler(
     State(app_state): State<AppState>,
-    AxumPath(session_key): AxumPath<String>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(session_id): AxumPath<String>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    let session_file = {
-        let state = app_state.shared_state.read().await;
-        state
-            .get(&session_key)
-            .map(|info| info.session_file.clone())
+    let session = match load_owned_session_record(&app_state, &authenticated.user.id, &session_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            warn!("failed loading session record for deletion: {}", error);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Some(session) = session else {
+        return Redirect::to(&dashboard_href(language)).into_response();
     };
 
-    let worker = app_state.session_workers.lock().await.remove(&session_key);
+    let worker = app_state.session_workers.lock().await.remove(&session.id);
     if let Some(worker) = worker {
         worker.cancellation.cancel();
         let _ = worker.task.await;
     }
 
-    if let Some(session_file) = session_file {
-        if let Err(error) = remove_file_if_exists(&session_file).await {
-            warn!(
-                "failed deleting session file {}: {}",
-                session_file.display(),
-                error
-            );
-            return match render_dashboard_page(
-                &app_state,
-                language,
-                Some(PageBanner::error(
-                    language.translations().dashboard_delete_error,
-                )),
-            )
-            .await
-            {
-                Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
-                Err(status) => status.into_response(),
-            };
-        }
+    let session_file = PathBuf::from(&session.storage_path);
+    if let Err(error) = remove_file_if_exists(&session_file).await {
+        warn!(
+            "failed deleting session file {}: {}",
+            session_file.display(),
+            error
+        );
+        return match render_dashboard_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(language.translations().dashboard_delete_error)),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+    if let Err(error) = app_state.meta_store.delete_session_record(&session.id).await {
+        warn!("failed deleting session record {}: {}", session.id, error);
     }
 
-    app_state.shared_state.write().await.remove(&session_key);
+    app_state.shared_state.write().await.remove(&session.id);
     Redirect::to(&dashboard_href(language)).into_response()
 }
 
 async fn rename_session_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(session_id): AxumPath<String>,
     headers: HeaderMap,
     Form(form): Form<RenameSessionForm>,
@@ -1865,47 +3527,70 @@ async fn rename_session_handler(
     let new_name = form.session_name.trim();
 
     if new_name.is_empty() {
-        return render_dashboard_error_response(
+        return match render_dashboard_page(
             &app_state,
+            &authenticated,
             language,
-            translations.dashboard_rename_missing,
+            Some(PageBanner::error(translations.dashboard_rename_missing)),
         )
-        .await;
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     }
 
-    let current_session = {
-        let state = app_state.shared_state.read().await;
-        state.get(&session_id).cloned()
+    let current_session = match load_owned_session_record(&app_state, &authenticated.user.id, &session_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            warn!("failed loading session record for rename: {}", error);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
     let Some(current_session) = current_session else {
-        return render_dashboard_error_response(
+        return match render_dashboard_page(
             &app_state,
+            &authenticated,
             language,
-            translations.dashboard_session_missing,
+            Some(PageBanner::error(translations.dashboard_session_missing)),
         )
-        .await;
+        .await
+        {
+            Ok(html) => (StatusCode::NOT_FOUND, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     };
+    let current_path = PathBuf::from(&current_session.storage_path);
+    let session_dir = current_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| user_sessions_dir(&app_state.runtime, &authenticated.user.id));
 
     let new_path = match allocate_renamed_session_path(
-        &app_state.runtime.sessions_dir,
+        &session_dir,
         new_name,
-        &current_session.session_file,
+        &current_path,
     )
     .await
     {
         Ok(path) => path,
         Err(error) => {
             warn!("failed allocating renamed session path: {}", error);
-            return render_dashboard_error_response(
+            return match render_dashboard_page(
                 &app_state,
+                &authenticated,
                 language,
-                translations.dashboard_rename_error,
+                Some(PageBanner::error(translations.dashboard_rename_error)),
             )
-            .await;
+            .await
+            {
+                Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+                Err(status) => status.into_response(),
+            };
         }
     };
 
-    if new_path == current_session.session_file {
+    if new_path == current_path {
         return Redirect::to(&dashboard_href(language)).into_response();
     }
 
@@ -1915,38 +3600,92 @@ async fn rename_session_handler(
         let _ = worker.task.await;
     }
 
-    if let Err(error) = tokio::fs::rename(&current_session.session_file, &new_path).await {
+    if let Err(error) = tokio::fs::rename(&current_path, &new_path).await {
         warn!(
             "failed renaming session file {} to {}: {}",
-            current_session.session_file.display(),
+            current_path.display(),
             new_path.display(),
             error
         );
-        register_session_file(&app_state, current_session.session_file.clone()).await;
-        return render_dashboard_error_response(
+        register_session_record(&app_state, current_session.clone()).await;
+        return match render_dashboard_page(
             &app_state,
+            &authenticated,
             language,
-            translations.dashboard_rename_error,
+            Some(PageBanner::error(translations.dashboard_rename_error)),
         )
-        .await;
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
     }
 
-    let new_key = session_key(&new_path);
+    let mut updated_session = current_session.clone();
+    updated_session.session_key = session_key(&new_path);
+    updated_session.storage_path = new_path.display().to_string();
+    updated_session.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_session_record(&updated_session).await {
+        warn!("failed saving renamed session record: {}", error);
+    }
     {
         let mut state = app_state.shared_state.write().await;
-        if let Some(mut session) = state.remove(&session_id) {
-            session.key = new_key.clone();
+        if let Some(session) = state.get_mut(&session_id) {
+            session.key = updated_session.session_key.clone();
             session.session_file = new_path.clone();
-            state.insert(new_key.clone(), session);
+            session.note = updated_session.note.clone();
         }
     }
 
-    register_session_file(&app_state, new_path).await;
+    register_session_record(&app_state, updated_session).await;
+    Redirect::to(&dashboard_href(language)).into_response()
+}
+
+async fn update_session_note_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(session_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<SessionNoteForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let note = form.note.trim().chars().take(240).collect::<String>();
+    let session = match load_owned_session_record(&app_state, &authenticated.user.id, &session_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            warn!("failed loading session record for note update: {}", error);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Some(mut session) = session else {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    };
+    session.note = note.clone();
+    session.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_session_record(&session).await {
+        warn!("failed saving session note: {}", error);
+        return match render_dashboard_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(match language {
+                Language::En => "Failed to update session note.",
+                Language::ZhCn => "更新会话备注失败。",
+            })),
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+    set_session_note(&app_state.shared_state, &session.id, note).await;
     Redirect::to(&dashboard_href(language)).into_response()
 }
 
 async fn start_phone_login_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     Form(form): Form<StartPhoneLoginForm>,
 ) -> Response {
@@ -1965,9 +3704,21 @@ async fn start_phone_login_handler(
     }
 
     let flow_id = Uuid::new_v4().to_string();
+    let session_id = Uuid::new_v4().to_string();
     let session_name = sanitize_session_name(&form.session_name);
-    let final_path =
-        match allocate_unique_session_path(&app_state.runtime.sessions_dir, &session_name).await {
+    let user_dir = match ensure_user_sessions_dir(&app_state.runtime, &authenticated.user.id).await {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("failed preparing user session dir: {}", error);
+            return render_setup_error_response(
+                &app_state,
+                language,
+                translations.setup_error_path_alloc,
+            )
+            .await;
+        }
+    };
+    let final_path = match allocate_unique_session_path(&user_dir, &session_name).await {
             Ok(path) => path,
             Err(error) => {
                 warn!("failed allocating session path for phone login: {}", error);
@@ -2007,8 +3758,10 @@ async fn start_phone_login_handler(
     match result {
         Ok(token) => {
             let flow = PendingPhoneLogin {
+                user_id: authenticated.user.id.clone(),
                 session_name,
                 phone: format_phone_display(phone),
+                session_id,
                 temp_path,
                 final_path,
                 stage: PhoneLoginStage::AwaitingCode { token },
@@ -2036,15 +3789,28 @@ async fn start_phone_login_handler(
 
 async fn start_qr_login_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     Form(form): Form<StartQrLoginForm>,
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
     let flow_id = Uuid::new_v4().to_string();
+    let session_id = Uuid::new_v4().to_string();
     let session_name = sanitize_session_name(&form.session_name);
-    let final_path =
-        match allocate_unique_session_path(&app_state.runtime.sessions_dir, &session_name).await {
+    let user_dir = match ensure_user_sessions_dir(&app_state.runtime, &authenticated.user.id).await {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("failed preparing user session dir: {}", error);
+            return render_setup_error_response(
+                &app_state,
+                language,
+                translations.setup_error_path_alloc,
+            )
+            .await;
+        }
+    };
+    let final_path = match allocate_unique_session_path(&user_dir, &session_name).await {
             Ok(path) => path,
             Err(error) => {
                 warn!("failed allocating session path for qr login: {}", error);
@@ -2071,7 +3837,9 @@ async fn start_qr_login_handler(
     app_state.qr_flows.write().await.insert(
         flow_id.clone(),
         PendingQrLogin {
+            user_id: authenticated.user.id.clone(),
             session_name,
+            session_id,
             temp_path,
             final_path,
         },
@@ -2082,6 +3850,7 @@ async fn start_qr_login_handler(
 
 async fn phone_flow_page_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     Query(query): Query<FlowPageQuery>,
     headers: HeaderMap,
@@ -2089,7 +3858,11 @@ async fn phone_flow_page_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let flow_guard = app_state.phone_flows.read().await;
     let flow = match flow_guard.get(&flow_id) {
-        Some(flow) => flow,
+        Some(flow) if flow.user_id == authenticated.user.id => flow,
+        Some(_) => {
+            drop(flow_guard);
+            return Redirect::to(&dashboard_href(language)).into_response();
+        }
         None => {
             drop(flow_guard);
             return render_setup_error_response(
@@ -2110,6 +3883,7 @@ async fn phone_flow_page_handler(
 
 async fn verify_phone_code_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     headers: HeaderMap,
     Form(form): Form<VerifyCodeForm>,
@@ -2125,6 +3899,17 @@ async fn verify_phone_code_handler(
         .into_response();
     }
 
+    let owner_matches = app_state
+        .phone_flows
+        .read()
+        .await
+        .get(&flow_id)
+        .map(|flow| flow.user_id == authenticated.user.id)
+        .unwrap_or(false);
+    if !owner_matches {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
     let mut flows = app_state.phone_flows.write().await;
     let Some(mut flow) = flows.remove(&flow_id) else {
         drop(flows);
@@ -2135,6 +3920,10 @@ async fn verify_phone_code_handler(
         )
         .await;
     };
+    if flow.user_id != authenticated.user.id {
+        drop(flows);
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
 
     let token = match flow.stage {
         PhoneLoginStage::AwaitingCode { token } => token,
@@ -2179,8 +3968,14 @@ async fn verify_phone_code_handler(
 
     match result {
         Ok(_) => {
-            if let Err(error) =
-                finalize_pending_session(&app_state, &flow.temp_path, &flow.final_path).await
+            if let Err(error) = finalize_pending_session(
+                &app_state,
+                &flow.user_id,
+                &flow.session_id,
+                &flow.temp_path,
+                &flow.final_path,
+            )
+            .await
             {
                 warn!("failed finalizing phone login session: {}", error);
                 let _ = remove_file_if_exists(&flow.temp_path).await;
@@ -2255,6 +4050,7 @@ async fn verify_phone_code_handler(
 
 async fn verify_phone_password_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     headers: HeaderMap,
     Form(form): Form<VerifyPasswordForm>,
@@ -2270,6 +4066,17 @@ async fn verify_phone_password_handler(
         .into_response();
     }
 
+    let owner_matches = app_state
+        .phone_flows
+        .read()
+        .await
+        .get(&flow_id)
+        .map(|flow| flow.user_id == authenticated.user.id)
+        .unwrap_or(false);
+    if !owner_matches {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
     let mut flows = app_state.phone_flows.write().await;
     let Some(mut flow) = flows.remove(&flow_id) else {
         drop(flows);
@@ -2280,6 +4087,10 @@ async fn verify_phone_password_handler(
         )
         .await;
     };
+    if flow.user_id != authenticated.user.id {
+        drop(flows);
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
 
     let token = match flow.stage {
         PhoneLoginStage::AwaitingPassword { token } => token,
@@ -2319,8 +4130,14 @@ async fn verify_phone_password_handler(
 
     match result {
         Ok(_) => {
-            if let Err(error) =
-                finalize_pending_session(&app_state, &flow.temp_path, &flow.final_path).await
+            if let Err(error) = finalize_pending_session(
+                &app_state,
+                &flow.user_id,
+                &flow.session_id,
+                &flow.temp_path,
+                &flow.final_path,
+            )
+            .await
             {
                 warn!("failed finalizing password login session: {}", error);
                 let _ = remove_file_if_exists(&flow.temp_path).await;
@@ -2392,14 +4209,26 @@ async fn verify_phone_password_handler(
 
 async fn cancel_phone_flow_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
 
-    if let Some(flow) = app_state.phone_flows.write().await.remove(&flow_id) {
-        let _ = remove_file_if_exists(&flow.temp_path).await;
+    let owner_matches = app_state
+        .phone_flows
+        .read()
+        .await
+        .get(&flow_id)
+        .map(|flow| flow.user_id == authenticated.user.id)
+        .unwrap_or(false);
+    if owner_matches {
+        if let Some(flow) = app_state.phone_flows.write().await.remove(&flow_id) {
+            let _ = remove_file_if_exists(&flow.temp_path).await;
+        }
+    } else if app_state.phone_flows.read().await.contains_key(&flow_id) {
+        return Redirect::to(&dashboard_href(language)).into_response();
     }
 
     Redirect::to(&setup_href(language)).into_response()
@@ -2407,6 +4236,7 @@ async fn cancel_phone_flow_handler(
 
 async fn qr_flow_page_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     Query(query): Query<FlowPageQuery>,
     headers: HeaderMap,
@@ -2415,7 +4245,11 @@ async fn qr_flow_page_handler(
     let flow = {
         let flows = app_state.qr_flows.read().await;
         match flows.get(&flow_id) {
-            Some(flow) => flow.clone(),
+            Some(flow) if flow.user_id == authenticated.user.id => flow.clone(),
+            Some(_) => {
+                drop(flows);
+                return Redirect::to(&dashboard_href(language)).into_response();
+            }
             None => {
                 drop(flows);
                 return render_setup_error_response(
@@ -2440,8 +4274,14 @@ async fn qr_flow_page_handler(
         Ok(QrStatus::Authorized) => {
             app_state.qr_flows.write().await.remove(&flow_id);
 
-            if let Err(error) =
-                finalize_pending_session(&app_state, &flow.temp_path, &flow.final_path).await
+            if let Err(error) = finalize_pending_session(
+                &app_state,
+                &flow.user_id,
+                &flow.session_id,
+                &flow.temp_path,
+                &flow.final_path,
+            )
+            .await
             {
                 warn!("failed finalizing qr login session: {}", error);
                 let _ = remove_file_if_exists(&flow.temp_path).await;
@@ -2468,13 +4308,19 @@ async fn qr_flow_page_handler(
 
 async fn cancel_qr_flow_handler(
     State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(flow_id): AxumPath<String>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
 
-    if let Some(flow) = app_state.qr_flows.write().await.remove(&flow_id) {
+    let flow = app_state.qr_flows.read().await.get(&flow_id).cloned();
+    if let Some(flow) = flow {
+        if flow.user_id != authenticated.user.id {
+            return Redirect::to(&dashboard_href(language)).into_response();
+        }
+        app_state.qr_flows.write().await.remove(&flow_id);
         let _ = remove_file_if_exists(&flow.temp_path).await;
     }
 
@@ -2495,17 +4341,6 @@ async fn render_setup_error_response(
     message: &str,
 ) -> Response {
     match render_setup_page(app_state, language, Some(PageBanner::error(message))).await {
-        Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
-        Err(status) => status.into_response(),
-    }
-}
-
-async fn render_dashboard_error_response(
-    app_state: &AppState,
-    language: Language,
-    message: &str,
-) -> Response {
-    match render_dashboard_page(app_state, language, Some(PageBanner::error(message))).await {
         Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
         Err(status) => status.into_response(),
     }
@@ -2538,6 +4373,8 @@ fn qr_flow_error_banner(language: Language, error: Option<&str>) -> Option<PageB
 
 async fn finalize_pending_session(
     app_state: &AppState,
+    user_id: &str,
+    session_id: &str,
     temp_path: &Path,
     final_path: &Path,
 ) -> Result<()> {
@@ -2551,7 +4388,14 @@ async fn finalize_pending_session(
             )
         })?;
 
-    register_session_file(app_state, final_path.to_path_buf()).await;
+    let mut record = SessionRecord::new(
+        user_id.to_owned(),
+        session_key(final_path),
+        final_path.display().to_string(),
+    );
+    record.id = session_id.to_owned();
+    app_state.meta_store.save_session_record(&record).await?;
+    register_session_record(app_state, record).await;
     Ok(())
 }
 
@@ -2758,31 +4602,28 @@ mod tests {
     use std::io;
 
     #[test]
-    fn dashboard_auth_accepts_matching_cookie() {
-        let auth = DashboardAuth::new(String::from("alice"), String::from("s3cr3t"));
+    fn find_cookie_extracts_named_cookie() {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_str(&format!("{AUTH_COOKIE_NAME}={}", auth.session_token))
-                .unwrap_or_else(|error| panic!("failed to build cookie header for test: {error}")),
+            HeaderValue::from_static("theme=light; hanagram_auth=session-token; other=value"),
         );
 
-        assert!(auth.is_authorized(&headers));
+        assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), Some("session-token"));
     }
 
     #[test]
-    fn dashboard_auth_rejects_missing_or_wrong_cookie() {
-        let auth = DashboardAuth::new(String::from("alice"), String::from("s3cr3t"));
+    fn find_cookie_rejects_missing_cookie() {
         let mut headers = HeaderMap::new();
 
-        assert!(!auth.is_authorized(&headers));
+        assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), None);
 
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_static("hanagram_auth=wrong-token"),
+            HeaderValue::from_static("other=value"),
         );
 
-        assert!(!auth.is_authorized(&headers));
+        assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), None);
     }
 
     #[test]

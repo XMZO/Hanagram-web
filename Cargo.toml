@@ -8,20 +8,27 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1"
+argon2 = { version = "0.5", features = ["std"] }
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+data-encoding = "2"
 dotenvy = "0.15"
 grammers-client = { git = "https://github.com/Lonami/grammers" }
 grammers-session = { git = "https://github.com/Lonami/grammers" }
+hmac = "0.12"
 libsql = { version = "0.9.29", default-features = false, features = ["core"] }
 phonenumber = "0.3"
 qrcodegen = "1.8"
+rand = "0.8"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
 tera = "1.20"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
