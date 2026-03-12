@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Runtime session data
+/sessions/
+*.session
+*.session-journal
+*.session-shm
+*.session-wal
+
+# Local logs
+*.log
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

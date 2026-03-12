@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Hanagram-web contributors
+
+services:
+  hanagram-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hanagram-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./sessions:/app/sessions
