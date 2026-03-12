@@ -8,11 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as AnyhowContext, Result};
-use axum::extract::{Query, Request, State};
+use axum::extract::{Form, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use chrono::Utc;
@@ -44,6 +44,7 @@ use state::{OtpMessage, SessionInfo, SessionStatus, SharedState};
 struct AppState {
     shared_state: SharedState,
     tera: Arc<Tera>,
+    auth: DashboardAuth,
 }
 
 struct Config {
@@ -54,26 +55,44 @@ struct Config {
     bind_addr: SocketAddr,
 }
 
+const AUTH_COOKIE_NAME: &str = "hanagram_auth";
+
 #[derive(Clone)]
-struct BasicAuth {
-    expected_header: HeaderValue,
+struct DashboardAuth {
+    username: String,
+    password: String,
+    session_token: String,
 }
 
-impl BasicAuth {
-    fn new(username: &str, password: &str) -> Result<Self> {
-        let encoded =
-            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
-        let mut expected_header = HeaderValue::from_str(&format!("Basic {encoded}"))
-            .context("failed to build basic authorization header")?;
-        expected_header.set_sensitive(true);
+impl DashboardAuth {
+    fn new(username: String, password: String) -> Self {
+        let session_token = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(format!("{username}:{password}"));
 
-        Ok(Self { expected_header })
+        Self {
+            username,
+            password,
+            session_token,
+        }
+    }
+
+    fn verify_credentials(&self, username: &str, password: &str) -> bool {
+        username == self.username && password == self.password
     }
 
     fn is_authorized(&self, headers: &HeaderMap) -> bool {
-        headers
-            .get(header::AUTHORIZATION)
-            .is_some_and(|value| value == self.expected_header)
+        find_cookie(headers, AUTH_COOKIE_NAME).is_some_and(|value| value == self.session_token)
+    }
+
+    fn login_cookie(&self) -> String {
+        format!(
+            "{AUTH_COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+            self.session_token
+        )
+    }
+
+    fn clear_cookie(&self) -> String {
+        format!("{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
     }
 }
 
@@ -88,13 +107,20 @@ struct LangQuery {
     lang: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct LoginForm {
+    username: String,
+    password: String,
+    lang: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     init_tracing();
 
     let config = load_config()?;
-    let basic_auth = BasicAuth::new(&config.auth_user, &config.auth_pass)?;
+    let auth = DashboardAuth::new(config.auth_user.clone(), config.auth_pass.clone());
     tokio::fs::create_dir_all(&config.sessions_dir)
         .await
         .with_context(|| format!("failed to create {}", config.sessions_dir.display()))?;
@@ -121,18 +147,17 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         shared_state: Arc::clone(&shared_state),
         tera,
+        auth: auth.clone(),
     };
 
-    let protected =
-        Router::new()
-            .route("/", get(index_handler))
-            .route_layer(middleware::from_fn_with_state(
-                basic_auth.clone(),
-                require_basic_auth,
-            ));
+    let protected = Router::new()
+        .route("/", get(index_handler))
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_login));
 
     let app = Router::new()
         .merge(protected)
+        .route("/login", get(login_page_handler).post(login_submit_handler))
+        .route("/logout", post(logout_handler))
         .route("/health", get(health_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
@@ -190,8 +215,21 @@ fn required_env(name: &str) -> Result<String> {
     std::env::var(name).with_context(|| format!("missing required env var {name}"))
 }
 
-async fn require_basic_auth(
-    State(auth): State<BasicAuth>,
+fn find_cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let cookies = headers.get(header::COOKIE)?.to_str().ok()?;
+
+    cookies.split(';').find_map(|cookie| {
+        let (cookie_name, cookie_value) = cookie.trim().split_once('=')?;
+        if cookie_name == name {
+            Some(cookie_value)
+        } else {
+            None
+        }
+    })
+}
+
+async fn require_login(
+    State(auth): State<DashboardAuth>,
     request: Request,
     next: Next,
 ) -> Response {
@@ -199,15 +237,12 @@ async fn require_basic_auth(
         return next.run(request).await;
     }
 
-    (
-        StatusCode::UNAUTHORIZED,
-        [(
-            header::WWW_AUTHENTICATE,
-            HeaderValue::from_static("Basic realm=\"Hanagram\""),
-        )],
-        "Unauthorized",
-    )
-        .into_response()
+    let location = match request.uri().query() {
+        Some(query) if !query.is_empty() => format!("/login?{query}"),
+        _ => String::from("/login"),
+    };
+
+    Redirect::to(&location).into_response()
 }
 
 fn collect_session_files(dir: &Path) -> Result<Vec<PathBuf>> {
@@ -435,17 +470,131 @@ async fn prime_session(
     }
 }
 
+fn login_redirect_target(language: Language) -> String {
+    format!("/?lang={}", language.code())
+}
+
+fn set_cookie_header(value: &str) -> Result<HeaderValue, StatusCode> {
+    HeaderValue::from_str(value).map_err(|error| {
+        warn!("failed to build auth cookie header: {}", error);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+fn detect_language(headers: &HeaderMap, query_lang: Option<&str>) -> Language {
+    let accept_language = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok());
+    Language::detect(query_lang, accept_language)
+}
+
+fn render_template(
+    tera: &Tera,
+    template: &str,
+    context: &Context,
+) -> std::result::Result<Html<String>, StatusCode> {
+    match tera.render(template, context) {
+        Ok(html) => Ok(Html(html)),
+        Err(error) => {
+            warn!("failed rendering {} template: {}", template, error);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn render_login_page(
+    app_state: &AppState,
+    language: Language,
+    error_message: Option<&str>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
+    let languages = language_options(language, "/login");
+
+    let mut context = Context::new();
+    context.insert("lang", &language.code());
+    context.insert("i18n", translations);
+    context.insert("languages", &languages);
+    context.insert("error_message", &error_message);
+
+    render_template(&app_state.tera, "login.html", &context)
+}
+
+async fn login_page_handler(
+    State(app_state): State<AppState>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+
+    if app_state.auth.is_authorized(&headers) {
+        return Redirect::to(&login_redirect_target(language)).into_response();
+    }
+
+    match render_login_page(&app_state, language, None).await {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn login_submit_handler(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LoginForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+
+    if app_state
+        .auth
+        .verify_credentials(&form.username, &form.password)
+    {
+        let mut response = Redirect::to(&login_redirect_target(language)).into_response();
+
+        match set_cookie_header(&app_state.auth.login_cookie()) {
+            Ok(cookie) => {
+                response.headers_mut().insert(header::SET_COOKIE, cookie);
+                return response;
+            }
+            Err(status) => return status.into_response(),
+        }
+    }
+
+    match render_login_page(
+        &app_state,
+        language,
+        Some(language.translations().login_error_invalid),
+    )
+    .await
+    {
+        Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn logout_handler(
+    State(app_state): State<AppState>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let mut response = Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+
+    match set_cookie_header(&app_state.auth.clear_cookie()) {
+        Ok(cookie) => {
+            response.headers_mut().insert(header::SET_COOKIE, cookie);
+            response
+        }
+        Err(status) => status.into_response(),
+    }
+}
+
 async fn index_handler(
     State(app_state): State<AppState>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
-    let accept_language = headers
-        .get(header::ACCEPT_LANGUAGE)
-        .and_then(|value| value.to_str().ok());
-    let language = Language::detect(query.lang.as_deref(), accept_language);
+    let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
-    let languages = language_options(language);
+    let languages = language_options(language, "/");
 
     let sessions = {
         let state = app_state.shared_state.read().await;
@@ -463,6 +612,10 @@ async fn index_handler(
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("languages", &languages);
+    context.insert(
+        "logout_action",
+        &format!("/logout?lang={}", language.code()),
+    );
     context.insert("sessions", &sessions);
     context.insert("connected_count", &connected_count);
     context.insert(
@@ -470,13 +623,7 @@ async fn index_handler(
         &Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
     );
 
-    match app_state.tera.render("index.html", &context) {
-        Ok(html) => Ok(Html(html)),
-        Err(error) => {
-            warn!("failed rendering index template: {}", error);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    render_template(&app_state.tera, "index.html", &context)
 }
 
 async fn health_handler(State(app_state): State<AppState>) -> Json<HealthResponse> {
@@ -492,33 +639,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic_auth_accepts_matching_header() {
-        let auth = match BasicAuth::new("alice", "s3cr3t") {
-            Ok(auth) => auth,
-            Err(error) => panic!("failed to create basic auth for test: {error}"),
-        };
+    fn dashboard_auth_accepts_matching_cookie() {
+        let auth = DashboardAuth::new(String::from("alice"), String::from("s3cr3t"));
         let mut headers = HeaderMap::new();
         headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Basic YWxpY2U6czNjcjN0"),
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{AUTH_COOKIE_NAME}={}", auth.session_token))
+                .unwrap_or_else(|error| panic!("failed to build cookie header for test: {error}")),
         );
 
         assert!(auth.is_authorized(&headers));
     }
 
     #[test]
-    fn basic_auth_rejects_missing_or_wrong_header() {
-        let auth = match BasicAuth::new("alice", "s3cr3t") {
-            Ok(auth) => auth,
-            Err(error) => panic!("failed to create basic auth for test: {error}"),
-        };
+    fn dashboard_auth_rejects_missing_or_wrong_cookie() {
+        let auth = DashboardAuth::new(String::from("alice"), String::from("s3cr3t"));
         let mut headers = HeaderMap::new();
 
         assert!(!auth.is_authorized(&headers));
 
         headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Basic d3Jvbmc6Y3JlZGVudGlhbHM="),
+            header::COOKIE,
+            HeaderValue::from_static("hanagram_auth=wrong-token"),
         );
 
         assert!(!auth.is_authorized(&headers));

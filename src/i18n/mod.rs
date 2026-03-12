@@ -17,6 +17,7 @@ pub struct TranslationSet {
     pub code: &'static str,
     pub html_lang: &'static str,
     pub page_title: &'static str,
+    pub login_page_title: &'static str,
     pub hero_eyebrow: &'static str,
     pub hero_title: &'static str,
     pub hero_description_prefix: &'static str,
@@ -25,6 +26,13 @@ pub struct TranslationSet {
     pub stat_connected: &'static str,
     pub stat_updated: &'static str,
     pub language_switch: &'static str,
+    pub login_title: &'static str,
+    pub login_description: &'static str,
+    pub login_username: &'static str,
+    pub login_password: &'static str,
+    pub login_submit: &'static str,
+    pub login_error_invalid: &'static str,
+    pub logout: &'static str,
     pub empty_state_title: &'static str,
     pub empty_state_description_prefix: &'static str,
     pub empty_state_description_suffix: &'static str,
@@ -41,11 +49,11 @@ pub struct TranslationSet {
     pub status_error: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct LanguageOption {
     pub code: &'static str,
     pub label: &'static str,
-    pub href: &'static str,
+    pub href: String,
     pub active: bool,
 }
 
@@ -84,18 +92,18 @@ impl Language {
     }
 }
 
-pub fn language_options(current: Language) -> [LanguageOption; 2] {
+pub fn language_options(current: Language, path: &str) -> [LanguageOption; 2] {
     [
         LanguageOption {
             code: Language::ZhCn.code(),
             label: "中文",
-            href: "/?lang=zh-CN",
+            href: format!("{path}?lang=zh-CN"),
             active: current == Language::ZhCn,
         },
         LanguageOption {
             code: Language::En.code(),
             label: "English",
-            href: "/?lang=en",
+            href: format!("{path}?lang=en"),
             active: current == Language::En,
         },
     ]

@@ -7,20 +7,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="refresh" content="30">
     <title>{{ i18n.page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     fontFamily: {
-                        display: ["ui-sans-serif", "system-ui", "sans-serif"],
-                        mono: ["ui-monospace", "SFMono-Regular", "monospace"]
+                        display: ["Noto Serif SC", "serif"],
+                        sans: ["Noto Sans SC", "sans-serif"],
+                        mono: ["Space Mono", "monospace"]
                     },
                     colors: {
-                        panel: "#0f172a",
-                        ink: "#e2e8f0",
-                        accent: "#38bdf8",
-                        accentSoft: "#082f49"
+                        oat: "#f6f1e8",
+                        paper: "#fffaf2",
+                        latte: "#f0e5d6",
+                        line: "#ded3c6",
+                        ink: "#4b4038",
+                        sage: "#8ca38c",
+                        sageDeep: "#6f866f",
+                        peach: "#d9a69a",
+                        butter: "#e8d3ad"
                     }
                 }
             }
@@ -44,139 +53,190 @@
             }
         }
     </script>
-</head>
-<body class="min-h-screen bg-slate-950 text-ink">
-    <div class="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.12),_transparent_28%),linear-gradient(180deg,_#020617_0%,_#0f172a_55%,_#020617_100%)]"></div>
+    <style>
+        body {
+            background:
+                radial-gradient(circle at 14% 18%, rgba(140, 163, 140, 0.18), transparent 24%),
+                radial-gradient(circle at 86% 14%, rgba(217, 166, 154, 0.16), transparent 20%),
+                radial-gradient(circle at 78% 80%, rgba(232, 211, 173, 0.2), transparent 24%),
+                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f3ede3 100%);
+        }
 
-    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <section class="mb-8 overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-900/75 shadow-2xl shadow-sky-950/30 backdrop-blur">
-            <div class="grid gap-6 px-6 py-8 lg:grid-cols-[2fr,1fr]">
+        .paper-shadow {
+            box-shadow: 0 22px 60px rgba(122, 106, 90, 0.08);
+        }
+
+        .soft-grid {
+            background-image:
+                linear-gradient(rgba(222, 211, 198, 0.34) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(222, 211, 198, 0.34) 1px, transparent 1px);
+            background-size: 28px 28px;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 88%);
+        }
+    </style>
+</head>
+<body class="min-h-screen font-sans text-ink antialiased">
+    <div class="pointer-events-none fixed inset-0 -z-10 soft-grid opacity-40"></div>
+
+    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <section class="paper-shadow mb-8 overflow-hidden rounded-[2rem] border border-line/80 bg-paper/95">
+            <div class="grid gap-8 px-6 py-7 lg:grid-cols-[1.35fr,0.95fr] lg:px-8 lg:py-8">
                 <div>
-                    <p class="mb-3 text-xs uppercase tracking-[0.35em] text-sky-300/80">{{ i18n.hero_eyebrow }}</p>
-                    <h1 class="font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl">{{ i18n.hero_title }}</h1>
-                    <p class="mt-3 max-w-2xl text-sm text-slate-300">
-                        {{ i18n.hero_description_prefix }} <span class="font-mono text-slate-100">777000</span>{{ i18n.hero_description_suffix }}
+                    <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-4 py-2 text-[0.72rem] font-medium uppercase tracking-[0.28em] text-ink/60">
+                        {{ i18n.hero_eyebrow }}
+                    </span>
+                    <h1 class="mt-5 font-display text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{{ i18n.hero_title }}</h1>
+                    <p class="mt-4 max-w-2xl text-[15px] leading-8 text-ink/72">
+                        {{ i18n.hero_description_prefix }} <span class="rounded-full bg-latte px-3 py-1 font-mono text-[0.95rem] text-ink">777000</span>{{ i18n.hero_description_suffix }}
                     </p>
+                    <div class="mt-6 flex flex-wrap gap-3">
+                        <div class="rounded-full border border-line bg-white/90 px-4 py-2 text-sm text-ink/70">
+                            {{ i18n.stat_updated }} · {{ now }}
+                        </div>
+                        <div class="rounded-full border border-line bg-latte/80 px-4 py-2 text-sm text-ink/70">
+                            {{ i18n.stat_connected }} · {{ connected_count }}/{{ sessions | length }}
+                        </div>
+                    </div>
                 </div>
 
-                <div>
-                    <div class="mb-3 flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-slate-500">{{ i18n.language_switch }}</p>
-                        <div class="inline-flex rounded-full border border-slate-800 bg-slate-900/80 p-1">
-                            {% for option in languages %}
-                            <a
-                                href="{{ option.href }}"
-                                hreflang="{{ option.code }}"
-                                class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sky-500 text-slate-950{% else %}text-slate-300 hover:bg-slate-800{% endif %}"
-                            >
-                                {{ option.label }}
-                            </a>
-                            {% endfor %}
+                <div class="space-y-4">
+                    <div class="rounded-[1.5rem] border border-line/80 bg-white/80 p-4">
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div class="inline-flex rounded-full border border-line bg-paper p-1">
+                                    {% for option in languages %}
+                                    <a
+                                        href="{{ option.href }}"
+                                        hreflang="{{ option.code }}"
+                                        class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
+                                    >
+                                        {{ option.label }}
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                                <form method="post" action="{{ logout_action }}">
+                                    <button
+                                        type="submit"
+                                        class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                    >
+                                        {{ i18n.logout }}
+                                    </button>
+                                </form>
+                            </div>
                         </div>
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                    <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                        <p class="text-xs uppercase tracking-[0.2em] text-slate-500">{{ i18n.stat_accounts }}</p>
-                        <p class="mt-2 text-3xl font-semibold text-white">{{ sessions | length }}</p>
+                        <div class="rounded-[1.5rem] border border-line/80 bg-white/85 p-4">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_accounts }}</p>
+                            <p class="mt-3 font-display text-3xl font-semibold text-ink">{{ sessions | length }}</p>
+                        </div>
+                        <div class="rounded-[1.5rem] border border-sage/35 bg-[#eef4ee] p-4">
+                            <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/80">{{ i18n.stat_connected }}</p>
+                            <p class="mt-3 font-display text-3xl font-semibold text-sageDeep">{{ connected_count }}</p>
+                        </div>
+                        <div class="rounded-[1.5rem] border border-butter/60 bg-[#f7f0e4] p-4">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_updated }}</p>
+                            <p class="mt-3 text-sm leading-6 text-ink/75">{{ now }}</p>
+                        </div>
                     </div>
-                    <div class="rounded-2xl border border-emerald-950/80 bg-emerald-950/40 p-4">
-                        <p class="text-xs uppercase tracking-[0.2em] text-emerald-300/70">{{ i18n.stat_connected }}</p>
-                        <p class="mt-2 text-3xl font-semibold text-emerald-300">{{ connected_count }}</p>
-                    </div>
-                    <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                        <p class="text-xs uppercase tracking-[0.2em] text-slate-500">{{ i18n.stat_updated }}</p>
-                        <p class="mt-2 text-sm font-medium text-slate-200">{{ now }}</p>
-                    </div>
-                </div>
                 </div>
             </div>
         </section>
 
         {% if sessions | length == 0 %}
-        <section class="rounded-3xl border border-dashed border-slate-800 bg-slate-900/50 px-6 py-16 text-center">
-            <p class="text-sm uppercase tracking-[0.3em] text-slate-500">{{ i18n.empty_state_title }}</p>
-            <p class="mt-4 text-lg text-slate-300">{{ i18n.empty_state_description_prefix }} <span class="font-mono">.session</span> {{ i18n.empty_state_description_suffix }}</p>
+        <section class="paper-shadow rounded-[2rem] border border-dashed border-line bg-paper/95 px-6 py-16 text-center">
+            <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
+            <p class="mx-auto mt-4 max-w-2xl text-lg leading-8 text-ink/70">
+                {{ i18n.empty_state_description_prefix }}
+                <span class="rounded-full bg-latte px-3 py-1 font-mono text-sm text-ink">.session</span>
+                {{ i18n.empty_state_description_suffix }}
+            </p>
         </section>
         {% else %}
         <section class="grid gap-5 lg:grid-cols-2">
             {% for session in sessions %}
-            <article class="rounded-3xl border border-slate-800/90 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/40 backdrop-blur">
-                <div class="flex flex-col gap-4 border-b border-slate-800 pb-5 sm:flex-row sm:items-start sm:justify-between">
+            <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 sm:p-6">
+                <div class="grid gap-5 xl:grid-cols-[1.05fr,0.95fr]">
                     <div>
-                        <div class="flex items-center gap-3">
-                            <span class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-emerald-400 shadow-[0_0_20px_rgba(74,222,128,0.8)]{% elif session.status.kind == "connecting" %}bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.7)]{% else %}bg-rose-400 shadow-[0_0_20px_rgba(251,113,133,0.8)]{% endif %}"></span>
-                            <p class="text-lg font-semibold text-white">{{ session.phone }}</p>
-                        </div>
-                        <p class="mt-2 font-mono text-xs text-slate-500">{{ session.session_file }}</p>
-                    </div>
-
-                    <div class="rounded-2xl border px-3 py-2 text-sm {% if session.status.kind == "connected" %}border-emerald-900/80 bg-emerald-950/50 text-emerald-200{% elif session.status.kind == "connecting" %}border-amber-900/80 bg-amber-950/40 text-amber-100{% else %}border-rose-950/80 bg-rose-950/40 text-rose-200{% endif %}">
-                        {% if session.status.kind == "connected" %}
-                        {{ i18n.status_connected }}
-                        {% elif session.status.kind == "connecting" %}
-                        {{ i18n.status_connecting }}
-                        {% else %}
-                        {{ i18n.status_error }}
-                        {% endif %}
-                    </div>
-                </div>
-
-                <div class="mt-5 rounded-3xl border border-slate-800 bg-[linear-gradient(135deg,rgba(8,47,73,0.55),rgba(15,23,42,0.95))] p-5">
-                    <div class="flex items-start justify-between gap-4">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.28em] text-sky-200/65">{{ i18n.latest_otp }}</p>
-                            <p class="mt-3 font-mono text-4xl font-semibold tracking-[0.18em] text-white">
-                                {{ session.latest_code | default(value=i18n.otp_placeholder) }}
-                            </p>
-                        </div>
-                        <button
-                            class="rounded-full border border-sky-900/80 bg-sky-950/60 px-4 py-2 text-sm font-medium text-sky-200 transition hover:border-sky-700 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
-                            data-code="{{ session.latest_code | default(value="") }}"
-                            data-label="{{ i18n.copy }}"
-                            data-copied="{{ i18n.copied }}"
-                            data-prompt-label="{{ i18n.copy_fallback }}"
-                            onclick="copyCode(this)"
-                            {% if not session.latest_code %}disabled{% endif %}
-                        >
-                            {{ i18n.copy }}
-                        </button>
-                    </div>
-
-                    {% if session.status.error %}
-                    <p class="mt-4 rounded-2xl border border-rose-950/70 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-                        {{ session.status.error }}
-                    </p>
-                    {% endif %}
-                </div>
-
-                <div class="mt-5">
-                    <div class="mb-3 flex items-center justify-between">
-                        <h2 class="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">{{ i18n.recent_messages }}</h2>
-                        <span class="text-xs text-slate-500">{{ i18n.newest_first }}</span>
-                    </div>
-
-                    {% if session.recent_messages | length == 0 %}
-                    <div class="rounded-2xl border border-dashed border-slate-800 bg-slate-950/50 px-4 py-6 text-sm text-slate-500">
-                        {{ i18n.no_messages }}
-                    </div>
-                    {% else %}
-                    <div class="space-y-3">
-                        {% for message in session.recent_messages %}
-                        <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <p class="text-sm leading-6 text-slate-200">{{ message.text }}</p>
-                                <div class="shrink-0 text-right">
-                                    {% if message.code %}
-                                    <p class="font-mono text-lg font-semibold text-sky-300">{{ message.code }}</p>
-                                    {% endif %}
-                                    <p class="text-xs text-slate-500">{{ message.received_at }}</p>
+                        <div class="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <div class="flex items-center gap-3">
+                                    <span class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_6px_rgba(140,163,140,0.18)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_6px_rgba(232,211,173,0.28)]{% else %}bg-peach shadow-[0_0_0_6px_rgba(217,166,154,0.2)]{% endif %}"></span>
+                                    <p class="text-lg font-semibold text-ink">{{ session.phone }}</p>
                                 </div>
+                                <p class="mt-2 break-all font-mono text-[0.78rem] text-ink/42">{{ session.session_file }}</p>
+                            </div>
+
+                            <div class="rounded-full border px-3 py-1.5 text-sm {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
+                                {% if session.status.kind == "connected" %}
+                                {{ i18n.status_connected }}
+                                {% elif session.status.kind == "connecting" %}
+                                {{ i18n.status_connecting }}
+                                {% else %}
+                                {{ i18n.status_error }}
+                                {% endif %}
                             </div>
                         </div>
-                        {% endfor %}
+
+                        <div class="mt-5 rounded-[1.6rem] border border-line/80 bg-white/85 p-5">
+                            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ i18n.latest_otp }}</p>
+                                    <p class="mt-4 font-mono text-[2.35rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.7rem]">
+                                        {{ session.latest_code | default(value=i18n.otp_placeholder) }}
+                                    </p>
+                                </div>
+                                <button
+                                    class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e9dfcf] disabled:cursor-not-allowed disabled:opacity-45"
+                                    data-code="{{ session.latest_code | default(value="") }}"
+                                    data-label="{{ i18n.copy }}"
+                                    data-copied="{{ i18n.copied }}"
+                                    data-prompt-label="{{ i18n.copy_fallback }}"
+                                    onclick="copyCode(this)"
+                                    {% if not session.latest_code %}disabled{% endif %}
+                                >
+                                    {{ i18n.copy }}
+                                </button>
+                            </div>
+
+                            {% if session.status.error %}
+                            <p class="mt-4 rounded-[1.2rem] border border-peach/40 bg-[#fbefec] px-4 py-3 text-sm leading-6 text-[#98675f]">
+                                {{ session.status.error }}
+                            </p>
+                            {% endif %}
+                        </div>
                     </div>
-                    {% endif %}
+
+                    <div class="rounded-[1.6rem] border border-line/80 bg-[#fdf8f1] p-5">
+                        <div class="mb-4 flex items-center justify-between">
+                            <h2 class="text-sm font-semibold uppercase tracking-[0.25em] text-ink/48">{{ i18n.recent_messages }}</h2>
+                            <span class="text-xs text-ink/42">{{ i18n.newest_first }}</span>
+                        </div>
+
+                        {% if session.recent_messages | length == 0 %}
+                        <div class="rounded-[1.3rem] border border-dashed border-line bg-white/70 px-4 py-8 text-sm text-ink/50">
+                            {{ i18n.no_messages }}
+                        </div>
+                        {% else %}
+                        <div class="space-y-3">
+                            {% for message in session.recent_messages %}
+                            <div class="rounded-[1.3rem] border border-line/80 bg-white/80 p-4">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <p class="text-sm leading-7 text-ink/78">{{ message.text }}</p>
+                                    <div class="shrink-0 text-left sm:text-right">
+                                        {% if message.code %}
+                                        <p class="font-mono text-base font-semibold text-sageDeep">{{ message.code }}</p>
+                                        {% endif %}
+                                        <p class="mt-1 text-xs text-ink/42">{{ message.received_at }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
             </article>
             {% endfor %}
