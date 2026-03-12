@@ -19,7 +19,9 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use grammers_client::client::{LoginToken, PasswordToken, UpdatesConfiguration};
 use grammers_client::tl;
-use grammers_client::{Client, SenderPool, SignInError, sender::SenderPoolFatHandle};
+use grammers_client::{
+    Client, InvocationError, SenderPool, SignInError, sender::SenderPoolFatHandle,
+};
 use grammers_session::Session;
 use grammers_session::storages::SqliteSession;
 use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
@@ -28,9 +30,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tera::{Context, Tera};
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -49,10 +52,12 @@ const QR_AUTO_REFRESH_SECONDS: u64 = 5;
 
 type PendingPhoneFlows = Arc<RwLock<HashMap<String, PendingPhoneLogin>>>;
 type PendingQrFlows = Arc<RwLock<HashMap<String, PendingQrLogin>>>;
+type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>>;
 
 #[derive(Clone)]
 struct AppState {
     shared_state: SharedState,
+    session_workers: SessionWorkers,
     tera: Arc<Tera>,
     auth: DashboardAuth,
     runtime: RuntimeConfig,
@@ -141,6 +146,11 @@ struct TelegramClientSession {
     session: Arc<SqliteSession>,
     pool_handle: SenderPoolFatHandle,
     pool_task: JoinHandle<()>,
+}
+
+struct SessionWorkerHandle {
+    cancellation: CancellationToken,
+    task: JoinHandle<()>,
 }
 
 impl TelegramClientSession {
@@ -269,6 +279,12 @@ struct VerifyPasswordForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RenameSessionForm {
+    session_name: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct FlowPageQuery {
     lang: Option<String>,
     error: Option<String>,
@@ -299,11 +315,13 @@ async fn main() -> Result<()> {
     let template_glob = format!("{}/templates/**/*", env!("CARGO_MANIFEST_DIR"));
     let tera = Arc::new(Tera::new(&template_glob).context("failed to initialize templates")?);
     let shared_state: SharedState = Arc::new(RwLock::new(HashMap::new()));
+    let session_workers: SessionWorkers = Arc::new(Mutex::new(HashMap::new()));
     let phone_flows: PendingPhoneFlows = Arc::new(RwLock::new(HashMap::new()));
     let qr_flows: PendingQrFlows = Arc::new(RwLock::new(HashMap::new()));
 
     let app_state = AppState {
         shared_state: Arc::clone(&shared_state),
+        session_workers,
         tera,
         auth: auth.clone(),
         runtime,
@@ -324,6 +342,14 @@ async fn main() -> Result<()> {
             post(import_string_session_handler),
         )
         .route("/sessions/import/upload", post(import_session_file_handler))
+        .route(
+            "/sessions/{session_key}/delete",
+            post(delete_session_handler),
+        )
+        .route(
+            "/sessions/{session_key}/rename",
+            post(rename_session_handler),
+        )
         .route("/sessions/login/phone", post(start_phone_login_handler))
         .route("/sessions/login/qr", post(start_qr_login_handler))
         .route("/sessions/phone/{flow_id}", get(phone_flow_page_handler))
@@ -495,6 +521,7 @@ fn fallback_phone(session_file: &Path) -> String {
 async fn initialize_session_entry(shared_state: &SharedState, key: &str, session_file: &Path) {
     let mut state = shared_state.write().await;
     state.entry(key.to_owned()).or_insert_with(|| SessionInfo {
+        key: key.to_owned(),
         phone: fallback_phone(session_file),
         session_file: session_file.to_path_buf(),
         status: SessionStatus::Connecting,
@@ -528,14 +555,74 @@ async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
     let key = session_key(&session_file);
     initialize_session_entry(&app_state.shared_state, &key, &session_file).await;
 
-    let worker_key = key;
+    let existing_worker = app_state.session_workers.lock().await.remove(&key);
+    if let Some(existing_worker) = existing_worker {
+        existing_worker.cancellation.cancel();
+        let _ = existing_worker.task.await;
+    }
+
+    let worker_key = key.clone();
     let worker_file = session_file;
     let worker_state = Arc::clone(&app_state.shared_state);
     let api_id = app_state.runtime.api_id;
+    let cancellation = CancellationToken::new();
+    let worker_cancellation = cancellation.clone();
 
-    tokio::spawn(async move {
-        run_session_worker(worker_key, worker_file, worker_state, api_id).await;
+    let task = tokio::spawn(async move {
+        run_session_worker(
+            worker_key,
+            worker_file,
+            worker_state,
+            api_id,
+            worker_cancellation,
+        )
+        .await;
     });
+
+    app_state
+        .session_workers
+        .lock()
+        .await
+        .insert(key, SessionWorkerHandle { cancellation, task });
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum SessionFailureAction {
+    Retryable(String),
+    Terminal(String),
+}
+
+fn classify_session_failure(error: &anyhow::Error) -> SessionFailureAction {
+    const SESSION_LOAD_FAILED: &str = "failed to load session";
+    const SESSION_UNAUTHORIZED: &str = "session is no longer authorized";
+
+    if error.to_string() == SESSION_LOAD_FAILED {
+        return SessionFailureAction::Terminal(String::from(SESSION_LOAD_FAILED));
+    }
+
+    if error.to_string() == "session is not authorized" {
+        return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+    }
+
+    for cause in error.chain() {
+        if let Some(invocation_error) = cause.downcast_ref::<InvocationError>() {
+            match invocation_error {
+                InvocationError::Rpc(rpc_error) if rpc_error.code == 401 => {
+                    return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+                }
+                InvocationError::Transport(transport_error)
+                    if transport_error
+                        .to_string()
+                        .contains("bad status (negative length -404)") =>
+                {
+                    return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    SessionFailureAction::Retryable(error.to_string())
 }
 
 async fn run_session_worker(
@@ -543,35 +630,45 @@ async fn run_session_worker(
     session_file: PathBuf,
     shared_state: SharedState,
     api_id: i32,
+    cancellation: CancellationToken,
 ) {
     let retry_delays = [5_u64, 10, 20, 40, 80];
     let mut attempt = 0_usize;
 
     loop {
+        if cancellation.is_cancelled() {
+            break;
+        }
+
         set_session_status(&shared_state, &key, SessionStatus::Connecting).await;
 
-        match run_session_once(&key, &session_file, &shared_state, api_id).await {
-            Ok(()) => {
-                set_session_status(
-                    &shared_state,
-                    &key,
-                    SessionStatus::Error(String::from("session loop ended")),
-                )
-                .await;
-                break;
-            }
+        match run_session_once(&key, &session_file, &shared_state, api_id, &cancellation).await {
+            Ok(()) => break,
             Err(error) => {
-                let message = error.to_string();
-                warn!("session {} failed: {}", session_file.display(), message);
-                set_session_status(&shared_state, &key, SessionStatus::Error(message)).await;
+                warn!("session {} failed: {error:#}", session_file.display());
 
-                if attempt >= retry_delays.len() {
-                    break;
+                match classify_session_failure(&error) {
+                    SessionFailureAction::Terminal(message) => {
+                        set_session_status(&shared_state, &key, SessionStatus::Error(message))
+                            .await;
+                        break;
+                    }
+                    SessionFailureAction::Retryable(message) => {
+                        set_session_status(&shared_state, &key, SessionStatus::Error(message))
+                            .await;
+
+                        if attempt >= retry_delays.len() {
+                            break;
+                        }
+
+                        let delay = retry_delays[attempt];
+                        attempt += 1;
+                        tokio::select! {
+                            _ = cancellation.cancelled() => break,
+                            _ = sleep(Duration::from_secs(delay)) => {}
+                        }
+                    }
                 }
-
-                let delay = retry_delays[attempt];
-                attempt += 1;
-                sleep(Duration::from_secs(delay)).await;
             }
         }
     }
@@ -582,6 +679,7 @@ async fn run_session_once(
     session_file: &Path,
     shared_state: &SharedState,
     api_id: i32,
+    cancellation: &CancellationToken,
 ) -> Result<()> {
     let session = match load_session(session_file).await {
         Some(session) => Arc::new(session),
@@ -596,54 +694,59 @@ async fn run_session_once(
     let client = Client::new(pool_handle.clone());
     let pool_task = tokio::spawn(runner.run());
 
-    let result = async {
-        if !client
-            .is_authorized()
-            .await
-            .context("authorization check failed")?
-        {
-            anyhow::bail!("session is not authorized");
-        }
+    let result = tokio::select! {
+        _ = cancellation.cancelled() => Ok(()),
+        result = async {
+            if !client
+                .is_authorized()
+                .await
+                .context("authorization check failed")?
+            {
+                anyhow::bail!("session is not authorized");
+            }
 
-        prime_session(&session, &client, key, shared_state).await;
-        set_session_status(shared_state, key, SessionStatus::Connected).await;
+            prime_session(&session, &client, key, shared_state).await;
+            set_session_status(shared_state, key, SessionStatus::Connected).await;
 
-        let code_regex = Regex::new(r"\b\d{5,6}\b").context("failed to compile OTP regex")?;
-        let mut updates = client
-            .stream_updates(
-                updates,
-                UpdatesConfiguration {
-                    catch_up: true,
-                    ..Default::default()
-                },
-            )
-            .await;
+            let code_regex = Regex::new(r"\b\d{5,6}\b").context("failed to compile OTP regex")?;
+            let mut updates = client
+                .stream_updates(
+                    updates,
+                    UpdatesConfiguration {
+                        catch_up: true,
+                        ..Default::default()
+                    },
+                )
+                .await;
 
-        loop {
-            match updates.next().await {
-                Ok(grammers_client::update::Update::NewMessage(message))
-                    if message.sender_id() == Some(PeerId::user(777000)) =>
-                {
-                    let text = message.text().to_string();
-                    let code = code_regex
-                        .find(&text)
-                        .map(|matched| matched.as_str().to_string());
-                    let otp = OtpMessage {
-                        received_at: Utc::now(),
-                        text,
-                        code,
-                    };
-                    push_otp_message(shared_state, key, otp).await;
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    updates.sync_update_state().await;
-                    return Err(error).context("update loop failed");
+            loop {
+                tokio::select! {
+                    _ = cancellation.cancelled() => return Ok(()),
+                    update = updates.next() => match update {
+                        Ok(grammers_client::update::Update::NewMessage(message))
+                            if message.sender_id() == Some(PeerId::user(777000)) =>
+                        {
+                            let text = message.text().to_string();
+                            let code = code_regex
+                                .find(&text)
+                                .map(|matched| matched.as_str().to_string());
+                            let otp = OtpMessage {
+                                received_at: Utc::now(),
+                                text,
+                                code,
+                            };
+                            push_otp_message(shared_state, key, otp).await;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            updates.sync_update_state().await;
+                            return Err(error).context("update loop failed");
+                        }
+                    }
                 }
             }
-        }
-    }
-    .await;
+        } => result,
+    };
 
     let _ = pool_handle.quit();
     let _ = pool_task.await;
@@ -745,7 +848,17 @@ async fn render_dashboard_page(
     let sessions = {
         let state = app_state.shared_state.read().await;
         let mut sessions: Vec<SessionInfo> = state.values().cloned().collect();
-        sessions.sort_by(|left, right| left.phone.cmp(&right.phone));
+        sessions.sort_by(|left, right| {
+            right
+                .latest_code_message()
+                .map(|message| message.received_at)
+                .cmp(
+                    &left
+                        .latest_code_message()
+                        .map(|message| message.received_at),
+                )
+                .then_with(|| left.phone.cmp(&right.phone))
+        });
         sessions
     };
 
@@ -1140,6 +1253,143 @@ async fn import_session_file_handler(
             .await
         }
     }
+}
+
+async fn delete_session_handler(
+    State(app_state): State<AppState>,
+    AxumPath(session_key): AxumPath<String>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let session_file = {
+        let state = app_state.shared_state.read().await;
+        state
+            .get(&session_key)
+            .map(|info| info.session_file.clone())
+    };
+
+    let worker = app_state.session_workers.lock().await.remove(&session_key);
+    if let Some(worker) = worker {
+        worker.cancellation.cancel();
+        let _ = worker.task.await;
+    }
+
+    if let Some(session_file) = session_file {
+        if let Err(error) = remove_file_if_exists(&session_file).await {
+            warn!(
+                "failed deleting session file {}: {}",
+                session_file.display(),
+                error
+            );
+            return match render_dashboard_page(
+                &app_state,
+                language,
+                Some(PageBanner::error(
+                    language.translations().dashboard_delete_error,
+                )),
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+    }
+
+    app_state.shared_state.write().await.remove(&session_key);
+    Redirect::to(&dashboard_href(language)).into_response()
+}
+
+async fn rename_session_handler(
+    State(app_state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<RenameSessionForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+    let new_name = form.session_name.trim();
+
+    if new_name.is_empty() {
+        return render_dashboard_error_response(
+            &app_state,
+            language,
+            translations.dashboard_rename_missing,
+        )
+        .await;
+    }
+
+    let current_session = {
+        let state = app_state.shared_state.read().await;
+        state.get(&session_id).cloned()
+    };
+    let Some(current_session) = current_session else {
+        return render_dashboard_error_response(
+            &app_state,
+            language,
+            translations.dashboard_session_missing,
+        )
+        .await;
+    };
+
+    let new_path = match allocate_renamed_session_path(
+        &app_state.runtime.sessions_dir,
+        new_name,
+        &current_session.session_file,
+    )
+    .await
+    {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("failed allocating renamed session path: {}", error);
+            return render_dashboard_error_response(
+                &app_state,
+                language,
+                translations.dashboard_rename_error,
+            )
+            .await;
+        }
+    };
+
+    if new_path == current_session.session_file {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let worker = app_state.session_workers.lock().await.remove(&session_id);
+    if let Some(worker) = worker {
+        worker.cancellation.cancel();
+        let _ = worker.task.await;
+    }
+
+    if let Err(error) = tokio::fs::rename(&current_session.session_file, &new_path).await {
+        warn!(
+            "failed renaming session file {} to {}: {}",
+            current_session.session_file.display(),
+            new_path.display(),
+            error
+        );
+        register_session_file(&app_state, current_session.session_file.clone()).await;
+        return render_dashboard_error_response(
+            &app_state,
+            language,
+            translations.dashboard_rename_error,
+        )
+        .await;
+    }
+
+    let new_key = session_key(&new_path);
+    {
+        let mut state = app_state.shared_state.write().await;
+        if let Some(mut session) = state.remove(&session_id) {
+            session.key = new_key.clone();
+            session.session_file = new_path.clone();
+            state.insert(new_key.clone(), session);
+        }
+    }
+
+    register_session_file(&app_state, new_path).await;
+    Redirect::to(&dashboard_href(language)).into_response()
 }
 
 async fn start_phone_login_handler(
@@ -1696,6 +1946,17 @@ async fn render_setup_error_response(
     }
 }
 
+async fn render_dashboard_error_response(
+    app_state: &AppState,
+    language: Language,
+    message: &str,
+) -> Response {
+    match render_dashboard_page(app_state, language, Some(PageBanner::error(message))).await {
+        Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
 fn phone_flow_error_banner(language: Language, error: Option<&str>) -> Option<PageBanner> {
     let translations = language.translations();
     let message = match error {
@@ -1806,6 +2067,39 @@ async fn allocate_unique_session_path(dir: &Path, raw_name: &str) -> Result<Path
     )
 }
 
+async fn allocate_renamed_session_path(
+    dir: &Path,
+    raw_name: &str,
+    current_path: &Path,
+) -> Result<PathBuf> {
+    let base_name = sanitize_session_name(raw_name);
+
+    for index in 0..10_000_u32 {
+        let candidate_name = if index == 0 {
+            format!("{base_name}.session")
+        } else {
+            format!("{base_name}-{index}.session")
+        };
+        let candidate = dir.join(candidate_name);
+
+        if candidate == current_path {
+            return Ok(candidate);
+        }
+
+        if !tokio::fs::try_exists(&candidate)
+            .await
+            .with_context(|| format!("failed probing {}", candidate.display()))?
+        {
+            return Ok(candidate);
+        }
+    }
+
+    anyhow::bail!(
+        "failed to allocate a renamed session path in {}",
+        dir.display()
+    )
+}
+
 fn pending_flow_path(dir: &Path, flow_id: &str) -> PathBuf {
     dir.join(format!("{flow_id}.pending"))
 }
@@ -1907,6 +2201,7 @@ fn format_qr_expiry(expires: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     #[test]
     fn dashboard_auth_accepts_matching_cookie() {
@@ -1941,5 +2236,42 @@ mod tests {
         assert_eq!(sanitize_session_name("Hello World"), "hello-world");
         assert_eq!(sanitize_session_name("test__name"), "test_name");
         assert!(sanitize_session_name("  ").starts_with("session-"));
+    }
+
+    #[test]
+    fn classify_session_failure_stops_on_unauthorized_rpc() {
+        let error = anyhow::Error::new(InvocationError::Rpc(grammers_client::sender::RpcError {
+            code: 401,
+            name: String::from("AUTH_KEY_UNREGISTERED"),
+            value: None,
+            caused_by: None,
+        }))
+        .context("update loop failed");
+
+        assert_eq!(
+            classify_session_failure(&error),
+            SessionFailureAction::Terminal(String::from("session is no longer authorized"))
+        );
+    }
+
+    #[test]
+    fn classify_session_failure_stops_on_missing_session_file() {
+        let error = anyhow::anyhow!("failed to load session");
+
+        assert_eq!(
+            classify_session_failure(&error),
+            SessionFailureAction::Terminal(String::from("failed to load session"))
+        );
+    }
+
+    #[test]
+    fn classify_session_failure_retries_on_transient_io_error() {
+        let error = anyhow::Error::new(InvocationError::Io(io::Error::other("temporary outage")))
+            .context("update loop failed");
+
+        assert_eq!(
+            classify_session_failure(&error),
+            SessionFailureAction::Retryable(String::from("update loop failed"))
+        );
     }
 }
