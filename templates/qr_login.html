@@ -1,0 +1,141 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Hanagram-web contributors -->
+<!DOCTYPE html>
+<html lang="{{ i18n.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="{{ auto_refresh_seconds }}">
+    <title>{{ i18n.qr_page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ["Noto Serif SC", "serif"],
+                        sans: ["Noto Sans SC", "sans-serif"],
+                        mono: ["Space Mono", "monospace"]
+                    },
+                    colors: {
+                        oat: "#f6f1e8",
+                        paper: "#fffaf2",
+                        latte: "#f0e5d6",
+                        line: "#ded3c6",
+                        ink: "#4b4038",
+                        sage: "#8ca38c",
+                        sageDeep: "#6f866f",
+                        peach: "#d9a69a"
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body {
+            background:
+                radial-gradient(circle at 14% 18%, rgba(140, 163, 140, 0.18), transparent 24%),
+                radial-gradient(circle at 86% 14%, rgba(217, 166, 154, 0.16), transparent 20%),
+                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f3ede3 100%);
+        }
+
+        .paper-shadow {
+            box-shadow: 0 22px 60px rgba(122, 106, 90, 0.08);
+        }
+    </style>
+</head>
+<body class="min-h-screen font-sans text-ink antialiased">
+    <main class="mx-auto flex min-h-screen max-w-6xl items-center px-4 py-8 sm:px-6 lg:px-8">
+        <section class="paper-shadow w-full overflow-hidden rounded-[2rem] border border-line/80 bg-paper/95">
+            <div class="grid gap-8 px-6 py-8 lg:grid-cols-[0.95fr,1.05fr] lg:px-8">
+                <div class="border-b border-line pb-6 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-8">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="inline-flex rounded-full border border-line bg-paper p-1">
+                            {% for option in languages %}
+                            <a
+                                href="{{ option.href }}"
+                                hreflang="{{ option.code }}"
+                                class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
+                            >
+                                {{ option.label }}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        <a
+                            href="{{ setup_href }}"
+                            class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                        >
+                            {{ i18n.back_to_setup }}
+                        </a>
+                    </div>
+
+                    <h1 class="mt-6 font-display text-4xl font-semibold tracking-tight text-ink">{{ i18n.qr_title }}</h1>
+                    <p class="mt-4 text-sm leading-7 text-ink/68">{{ i18n.qr_description }}</p>
+                    <p class="mt-4 rounded-[1.4rem] border border-line/80 bg-white/82 px-4 py-4 text-sm leading-7 text-ink/68">
+                        {{ i18n.qr_steps }}
+                    </p>
+
+                    <div class="mt-6 rounded-[1.4rem] border border-line/80 bg-white/82 p-4">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.phone_meta_session }}</p>
+                        <p class="mt-2 text-base font-medium text-ink">{{ flow.session_name }}</p>
+                    </div>
+                </div>
+
+                <div>
+                    {% if banner %}
+                    <div class="mb-5 rounded-[1.25rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm leading-7 text-[#98675f]">
+                        {{ banner.message }}
+                    </div>
+                    {% endif %}
+
+                    <div class="rounded-[1.8rem] border border-line/80 bg-white/85 p-6">
+                        <div class="mx-auto max-w-[18rem] overflow-hidden rounded-[1.6rem] border border-line bg-paper p-4">
+                            {{ flow.qr_svg | safe }}
+                        </div>
+
+                        <div class="mt-5 space-y-3">
+                            <div class="rounded-[1.2rem] border border-line/80 bg-paper px-4 py-3">
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.qr_expires_label }}</p>
+                                <p class="mt-2 text-sm font-medium text-ink/75">{{ flow.expires_at }}</p>
+                            </div>
+                            <div class="rounded-[1.2rem] border border-line/80 bg-paper px-4 py-3">
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.qr_link_label }}</p>
+                                <p class="mt-2 break-all font-mono text-sm text-ink/75">{{ flow.qr_link }}</p>
+                            </div>
+                        </div>
+
+                        <p class="mt-5 text-sm leading-7 text-ink/65">{{ i18n.qr_refresh_note }}</p>
+
+                        <div class="mt-5 flex flex-wrap gap-3">
+                            <a
+                                href="{{ flow.qr_link }}"
+                                class="rounded-[1.2rem] bg-sage px-5 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep"
+                            >
+                                {{ i18n.qr_open_link }}
+                            </a>
+                            <form method="post" action="{{ flow.cancel_action }}">
+                                <button
+                                    type="submit"
+                                    class="rounded-[1.2rem] border border-line bg-white px-5 py-3 text-sm font-medium text-ink/75 transition hover:border-sage hover:text-ink"
+                                >
+                                    {{ i18n.cancel }}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <a
+                        href="{{ dashboard_href }}"
+                        class="mt-4 inline-flex items-center rounded-full border border-line bg-white px-4 py-2 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                    >
+                        {{ i18n.back_to_dashboard }}
+                    </a>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

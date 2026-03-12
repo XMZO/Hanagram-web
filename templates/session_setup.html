@@ -1,0 +1,240 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Hanagram-web contributors -->
+<!DOCTYPE html>
+<html lang="{{ i18n.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ i18n.setup_page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ["Noto Serif SC", "serif"],
+                        sans: ["Noto Sans SC", "sans-serif"],
+                        mono: ["Space Mono", "monospace"]
+                    },
+                    colors: {
+                        oat: "#f6f1e8",
+                        paper: "#fffaf2",
+                        latte: "#f0e5d6",
+                        line: "#ded3c6",
+                        ink: "#4b4038",
+                        sage: "#8ca38c",
+                        sageDeep: "#6f866f",
+                        peach: "#d9a69a",
+                        butter: "#e8d3ad"
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body {
+            background:
+                radial-gradient(circle at 14% 18%, rgba(140, 163, 140, 0.18), transparent 24%),
+                radial-gradient(circle at 86% 14%, rgba(217, 166, 154, 0.16), transparent 20%),
+                radial-gradient(circle at 78% 80%, rgba(232, 211, 173, 0.2), transparent 24%),
+                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f3ede3 100%);
+        }
+
+        .paper-shadow {
+            box-shadow: 0 22px 60px rgba(122, 106, 90, 0.08);
+        }
+
+        .soft-grid {
+            background-image:
+                linear-gradient(rgba(222, 211, 198, 0.34) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(222, 211, 198, 0.34) 1px, transparent 1px);
+            background-size: 28px 28px;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 88%);
+        }
+    </style>
+</head>
+<body class="min-h-screen font-sans text-ink antialiased">
+    <div class="pointer-events-none fixed inset-0 -z-10 soft-grid opacity-40"></div>
+
+    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <section class="paper-shadow mb-6 rounded-[2rem] border border-line/80 bg-paper/95 px-6 py-6 sm:px-8">
+            <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div class="max-w-3xl">
+                    <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-4 py-2 text-[0.72rem] font-medium uppercase tracking-[0.28em] text-ink/60">
+                        {{ i18n.dashboard_add_session }}
+                    </span>
+                    <h1 class="mt-5 font-display text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{{ i18n.setup_title }}</h1>
+                    <p class="mt-4 text-[15px] leading-8 text-ink/72">{{ i18n.setup_description }}</p>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                        <div class="inline-flex rounded-full border border-line bg-paper p-1">
+                            {% for option in languages %}
+                            <a
+                                href="{{ option.href }}"
+                                hreflang="{{ option.code }}"
+                                class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
+                            >
+                                {{ option.label }}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        <a
+                            href="{{ dashboard_href }}"
+                            class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                        >
+                            {{ i18n.back_to_dashboard }}
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {% if banner %}
+        <section class="paper-shadow mb-6 rounded-[1.6rem] border border-peach/35 bg-[#fbefec] px-5 py-4 text-sm leading-7 text-[#98675f]">
+            {{ banner.message }}
+        </section>
+        {% endif %}
+
+        <section class="grid gap-5 lg:grid-cols-2">
+            <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-6">
+                <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_string_title }}</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_string_description }}</p>
+
+                <form method="post" action="/sessions/import/string" class="mt-6 space-y-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_session_name }}</span>
+                        <input
+                            type="text"
+                            name="session_name"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition focus:border-sage"
+                        >
+                        <span class="mt-2 block text-xs text-ink/45">{{ i18n.setup_session_name_hint }}</span>
+                    </label>
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_string_label }}</span>
+                        <textarea
+                            name="session_string"
+                            rows="7"
+                            placeholder="{{ i18n.setup_string_placeholder }}"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm leading-7 text-ink outline-none transition placeholder:text-ink/35 focus:border-sage"
+                        ></textarea>
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="rounded-[1.2rem] bg-sage px-5 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep"
+                    >
+                        {{ i18n.setup_string_title }}
+                    </button>
+                </form>
+            </article>
+
+            <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-6">
+                <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_file_title }}</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_file_description }}</p>
+
+                <form method="post" action="/sessions/import/upload" enctype="multipart/form-data" class="mt-6 space-y-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_session_name }}</span>
+                        <input
+                            type="text"
+                            name="session_name"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition focus:border-sage"
+                        >
+                        <span class="mt-2 block text-xs text-ink/45">{{ i18n.setup_session_name_hint }}</span>
+                    </label>
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_file_label }}</span>
+                        <input
+                            type="file"
+                            name="session_file"
+                            accept=".session"
+                            class="block w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm text-ink file:mr-3 file:rounded-full file:border-0 file:bg-latte file:px-4 file:py-2 file:text-sm file:font-medium file:text-ink"
+                        >
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="rounded-[1.2rem] bg-sage px-5 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep"
+                    >
+                        {{ i18n.setup_file_button }}
+                    </button>
+                </form>
+            </article>
+
+            <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-6">
+                <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_phone_title }}</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_phone_description }}</p>
+
+                <form method="post" action="/sessions/login/phone" class="mt-6 space-y-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_session_name }}</span>
+                        <input
+                            type="text"
+                            name="session_name"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition focus:border-sage"
+                        >
+                        <span class="mt-2 block text-xs text-ink/45">{{ i18n.setup_session_name_hint }}</span>
+                    </label>
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_phone_label }}</span>
+                        <input
+                            type="text"
+                            name="phone"
+                            placeholder="{{ i18n.setup_phone_placeholder }}"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage"
+                        >
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="rounded-[1.2rem] bg-sage px-5 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep"
+                    >
+                        {{ i18n.setup_phone_button }}
+                    </button>
+                </form>
+            </article>
+
+            <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-6">
+                <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_qr_title }}</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_qr_description }}</p>
+
+                <form method="post" action="/sessions/login/qr" class="mt-6 space-y-4">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.setup_session_name }}</span>
+                        <input
+                            type="text"
+                            name="session_name"
+                            class="w-full rounded-[1.2rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition focus:border-sage"
+                        >
+                        <span class="mt-2 block text-xs text-ink/45">{{ i18n.setup_session_name_hint }}</span>
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="rounded-[1.2rem] bg-sage px-5 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep"
+                    >
+                        {{ i18n.setup_qr_button }}
+                    </button>
+                </form>
+            </article>
+        </section>
+    </main>
+</body>
+</html>

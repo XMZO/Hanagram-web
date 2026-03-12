@@ -115,6 +115,12 @@
                                     </a>
                                     {% endfor %}
                                 </div>
+                                <a
+                                    href="{{ setup_href }}"
+                                    class="rounded-full border border-line bg-latte px-4 py-1.5 text-sm text-ink/80 transition hover:border-sage hover:bg-[#e9dfcf]"
+                                >
+                                    {{ i18n.dashboard_add_session }}
+                                </a>
                                 <form method="post" action="{{ logout_action }}">
                                     <button
                                         type="submit"
@@ -144,6 +150,12 @@
                 </div>
             </div>
         </section>
+
+        {% if banner %}
+        <section class="paper-shadow mb-6 rounded-[1.6rem] border border-peach/35 bg-[#fbefec] px-5 py-4 text-sm leading-7 text-[#98675f]">
+            {{ banner.message }}
+        </section>
+        {% endif %}
 
         {% if sessions | length == 0 %}
         <section class="paper-shadow rounded-[2rem] border border-dashed border-line bg-paper/95 px-6 py-16 text-center">

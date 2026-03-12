@@ -5,6 +5,8 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use anyhow::{Context, Result, anyhow, ensure};
+use base64::Engine;
 use grammers_session::storages::SqliteSession;
 use grammers_session::types::{
     ChannelState, DcOption, PeerId, PeerInfo, PeerKind, UpdateState, UpdatesState,
@@ -14,6 +16,10 @@ use libsql::{Builder, OpenFlags};
 use tracing::warn;
 
 type SessionFuture<'a, T> = std::pin::Pin<Box<dyn core::future::Future<Output = T> + Send + 'a>>;
+const TELETHON_STRING_VERSION: char = '1';
+const TELETHON_AUTH_KEY_LEN: usize = 256;
+const TELETHON_IPV4_BYTES: usize = 4;
+const TELETHON_IPV6_BYTES: usize = 16;
 
 pub(crate) enum LoadedSession {
     Native(SqliteSession),
@@ -103,6 +109,28 @@ pub(crate) async fn load_session(path: &Path) -> Option<LoadedSession> {
             }
         },
     }
+}
+
+pub(crate) async fn save_telethon_string_session(path: &Path, session_string: &str) -> Result<()> {
+    let record = parse_telethon_string_session(session_string)?;
+    let session_data = build_telethon_session_data(path, record)
+        .map_err(|error| anyhow!(error))
+        .with_context(|| {
+            format!(
+                "failed to import telethon string session into {}",
+                path.display()
+            )
+        })?;
+
+    persist_session_data(path, &session_data).await
+}
+
+pub(crate) async fn persist_session_data(path: &Path, session_data: &SessionData) -> Result<()> {
+    let session = SqliteSession::open(path)
+        .await
+        .with_context(|| format!("failed to open sqlite session {}", path.display()))?;
+    session_data.import_to(&session).await;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -199,27 +227,40 @@ fn build_converted_session(
     path: &Path,
     record: TelethonSessionRecord,
 ) -> Option<TelethonMemorySession> {
-    let port = match u16::try_from(record.port) {
-        Ok(port) if port > 0 => port,
-        Ok(_) | Err(_) => {
-            warn!(
-                "invalid port {} in telethon session {}; skipping",
-                record.port,
-                path.display()
-            );
+    let data = match build_telethon_session_data(path, record) {
+        Ok(data) => data,
+        Err(error) => {
+            warn!("{error}");
             return None;
         }
     };
 
-    let auth_key: [u8; 256] = match record.auth_key.try_into() {
+    Some(TelethonMemorySession::from(data))
+}
+
+fn build_telethon_session_data(
+    path: &Path,
+    record: TelethonSessionRecord,
+) -> std::result::Result<SessionData, String> {
+    let port = match u16::try_from(record.port) {
+        Ok(port) if port > 0 => port,
+        Ok(_) | Err(_) => {
+            return Err(format!(
+                "invalid port {} in telethon session {}; skipping",
+                record.port,
+                path.display()
+            ));
+        }
+    };
+
+    let auth_key: [u8; TELETHON_AUTH_KEY_LEN] = match record.auth_key.try_into() {
         Ok(auth_key) => auth_key,
         Err(auth_key) => {
-            warn!(
+            return Err(format!(
                 "unsupported auth_key length {} in telethon session {}; expected 256 bytes for current grammers-session",
                 auth_key.len(),
                 path.display()
-            );
-            return None;
+            ));
         }
     };
 
@@ -246,19 +287,96 @@ fn build_converted_session(
             );
         }
         None => {
-            warn!(
+            return Err(format!(
                 "could not parse server address '{}' in telethon session {}; skipping",
                 record.server_address,
                 path.display()
-            );
-            return None;
+            ));
         }
     }
 
     dc_option.auth_key = Some(auth_key);
     data.dc_options.insert(record.dc_id, dc_option);
 
-    Some(TelethonMemorySession::from(data))
+    Ok(data)
+}
+
+fn parse_telethon_string_session(session_string: &str) -> Result<TelethonSessionRecord> {
+    let session_string = session_string.trim();
+    ensure!(!session_string.is_empty(), "session string is empty");
+
+    let mut chars = session_string.chars();
+    let version = chars
+        .next()
+        .context("session string is missing a version prefix")?;
+    ensure!(
+        version == TELETHON_STRING_VERSION,
+        "unsupported telethon string session version {}",
+        version
+    );
+
+    let encoded = chars.as_str();
+    let payload = decode_telethon_string_payload(encoded)?;
+    let expected_ipv4_len = 1 + TELETHON_IPV4_BYTES + 2 + TELETHON_AUTH_KEY_LEN;
+    let expected_ipv6_len = 1 + TELETHON_IPV6_BYTES + 2 + TELETHON_AUTH_KEY_LEN;
+    let server_bytes_len = match payload.len() {
+        len if len == expected_ipv4_len => TELETHON_IPV4_BYTES,
+        len if len == expected_ipv6_len => TELETHON_IPV6_BYTES,
+        len => {
+            return Err(anyhow!(
+                "unexpected telethon string session payload length {}; expected {} or {} bytes",
+                len,
+                expected_ipv4_len,
+                expected_ipv6_len
+            ));
+        }
+    };
+
+    let dc_id = i32::from(payload[0]);
+    let server_end = 1 + server_bytes_len;
+    let port_end = server_end + 2;
+
+    let server_address = if server_bytes_len == TELETHON_IPV4_BYTES {
+        let bytes: [u8; TELETHON_IPV4_BYTES] = payload[1..server_end]
+            .try_into()
+            .map_err(|_| anyhow!("invalid IPv4 payload length in telethon string session"))?;
+        Ipv4Addr::from(bytes).to_string()
+    } else {
+        let bytes: [u8; TELETHON_IPV6_BYTES] = payload[1..server_end]
+            .try_into()
+            .map_err(|_| anyhow!("invalid IPv6 payload length in telethon string session"))?;
+        Ipv6Addr::from(bytes).to_string()
+    };
+
+    let port = u16::from_be_bytes(
+        payload[server_end..port_end]
+            .try_into()
+            .map_err(|_| anyhow!("invalid port bytes in telethon string session"))?,
+    );
+    let auth_key = payload[port_end..].to_vec();
+    ensure!(
+        auth_key.iter().any(|byte| *byte != 0),
+        "telethon string session does not contain an authorization key"
+    );
+
+    Ok(TelethonSessionRecord {
+        dc_id,
+        server_address,
+        port: i32::from(port),
+        auth_key,
+    })
+}
+
+fn decode_telethon_string_payload(encoded: &str) -> Result<Vec<u8>> {
+    let mut normalized = encoded.trim().to_owned();
+    let missing_padding = normalized.len() % 4;
+    if missing_padding != 0 {
+        normalized.push_str(&"=".repeat(4 - missing_padding));
+    }
+
+    base64::engine::general_purpose::URL_SAFE
+        .decode(normalized)
+        .context("failed to decode telethon string session as urlsafe base64")
 }
 
 fn default_dc_option(dc_id: i32, port: u16) -> DcOption {
