@@ -125,6 +125,23 @@ pub(crate) async fn save_telethon_string_session(path: &Path, session_string: &s
     persist_session_data(path, &session_data).await
 }
 
+pub(crate) async fn export_telethon_string_session(path: &Path) -> Result<String> {
+    let record = match probe_telethon_session(path).await {
+        TelethonProbe::Record(record) => record,
+        TelethonProbe::Empty => {
+            return Err(anyhow!(
+                "the session file does not contain any exportable session rows"
+            ));
+        }
+        TelethonProbe::Invalid => {
+            return Err(anyhow!("the session file could not be parsed for export"));
+        }
+        TelethonProbe::NotTelethon => load_grammers_export_record(path).await?,
+    };
+
+    encode_telethon_string_session(&record)
+}
+
 pub(crate) async fn persist_session_data(path: &Path, session_data: &SessionData) -> Result<()> {
     let session = SqliteSession::open(path)
         .await
@@ -379,6 +396,38 @@ fn decode_telethon_string_payload(encoded: &str) -> Result<Vec<u8>> {
         .context("failed to decode telethon string session as urlsafe base64")
 }
 
+fn encode_telethon_string_session(record: &TelethonSessionRecord) -> Result<String> {
+    let dc_id = u8::try_from(record.dc_id)
+        .context("telethon string export only supports dc identifiers in the 1-255 range")?;
+    let port = u16::try_from(record.port).context("session export contains an invalid port")?;
+    ensure!(
+        record.auth_key.len() == TELETHON_AUTH_KEY_LEN,
+        "telethon string export requires a 256-byte authorization key"
+    );
+
+    let mut payload = Vec::with_capacity(1 + TELETHON_IPV6_BYTES + 2 + TELETHON_AUTH_KEY_LEN);
+    payload.push(dc_id);
+
+    if let Ok(ipv4) = record.server_address.parse::<Ipv4Addr>() {
+        payload.extend_from_slice(&ipv4.octets());
+    } else if let Ok(ipv6) = record.server_address.parse::<Ipv6Addr>() {
+        payload.extend_from_slice(&ipv6.octets());
+    } else {
+        return Err(anyhow!(
+            "session export contains an unsupported server address '{}'",
+            record.server_address
+        ));
+    }
+
+    payload.extend_from_slice(&port.to_be_bytes());
+    payload.extend_from_slice(&record.auth_key);
+
+    Ok(format!(
+        "{TELETHON_STRING_VERSION}{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload)
+    ))
+}
+
 fn default_dc_option(dc_id: i32, port: u16) -> DcOption {
     DcOption {
         id: dc_id,
@@ -409,6 +458,93 @@ fn parse_dc_addresses(server_address: &str, port: u16) -> Option<(SocketAddrV4, 
     }
 
     None
+}
+
+async fn load_grammers_export_record(path: &Path) -> Result<TelethonSessionRecord> {
+    let database = Builder::new_local(path)
+        .flags(OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .build()
+        .await
+        .with_context(|| format!("failed to open {} for export", path.display()))?;
+    let connection = database
+        .connect()
+        .with_context(|| format!("failed to connect {} for export", path.display()))?;
+
+    let home_dc = read_grammers_home_dc(&connection).await?;
+    let (server_address, port, auth_key) = read_grammers_dc_option(&connection, home_dc).await?;
+
+    Ok(TelethonSessionRecord {
+        dc_id: home_dc,
+        server_address,
+        port: i32::from(port),
+        auth_key,
+    })
+}
+
+async fn read_grammers_home_dc(connection: &libsql::Connection) -> Result<i32> {
+    let mut statement = connection
+        .prepare("SELECT dc_id FROM dc_home LIMIT 1")
+        .await
+        .context("failed to prepare dc_home export query")?;
+
+    match statement.query_row(()).await {
+        Ok(row) => row.get(0).context("failed to decode home dc for export"),
+        Err(libsql::Error::QueryReturnedNoRows) => {
+            let mut fallback = connection
+                .prepare("SELECT dc_id FROM dc_option LIMIT 1")
+                .await
+                .context("failed to prepare dc_option export fallback query")?;
+            let row = fallback
+                .query_row(())
+                .await
+                .context("session file does not contain any datacenter options")?;
+            row.get(0)
+                .context("failed to decode fallback home dc for export")
+        }
+        Err(error) => Err(error).context("failed reading home dc for export"),
+    }
+}
+
+async fn read_grammers_dc_option(
+    connection: &libsql::Connection,
+    dc_id: i32,
+) -> Result<(String, u16, Vec<u8>)> {
+    let mut statement = connection
+        .prepare("SELECT ipv4, ipv6, auth_key FROM dc_option WHERE dc_id = ?1 LIMIT 1")
+        .await
+        .context("failed to prepare dc option export query")?;
+    let row = statement
+        .query_row(libsql::params![dc_id])
+        .await
+        .with_context(|| format!("failed reading dc option {dc_id} for export"))?;
+
+    let ipv4: String = row.get(0).context("failed to decode ipv4 dc option")?;
+    let ipv6: String = row.get(1).context("failed to decode ipv6 dc option")?;
+    let auth_key: Option<Vec<u8>> = row
+        .get(2)
+        .context("failed to decode session authorization key")?;
+    let auth_key = auth_key.context("the session does not contain an authorization key")?;
+    let (server_address, port) = choose_export_address(&ipv4, &ipv6)?;
+
+    Ok((server_address, port, auth_key))
+}
+
+fn choose_export_address(ipv4: &str, ipv6: &str) -> Result<(String, u16)> {
+    if let Ok(socket) = ipv4.parse::<SocketAddrV4>() {
+        if !socket.ip().is_unspecified() {
+            return Ok((socket.ip().to_string(), socket.port()));
+        }
+    }
+
+    if let Ok(socket) = ipv6.parse::<SocketAddrV6>() {
+        if !socket.ip().is_unspecified() {
+            return Ok((socket.ip().to_string(), socket.port()));
+        }
+    }
+
+    Err(anyhow!(
+        "the session file does not contain an exportable datacenter address"
+    ))
 }
 
 pub(crate) struct TelethonMemorySession(Mutex<SessionData>);

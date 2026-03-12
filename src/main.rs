@@ -25,8 +25,10 @@ use grammers_client::{
 use grammers_session::Session;
 use grammers_session::storages::SqliteSession;
 use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
+use phonenumber::Mode as PhoneNumberMode;
 use qrcodegen::{QrCode, QrCodeEcc};
 use regex::Regex;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use tera::{Context, Tera};
 use tokio::net::TcpListener;
@@ -44,15 +46,22 @@ mod session_handler;
 mod state;
 
 use i18n::{Language, language_options};
-use session_handler::{LoadedSession, load_session, save_telethon_string_session};
+use session_handler::{
+    LoadedSession, export_telethon_string_session, load_session, save_telethon_string_session,
+};
 use state::{OtpMessage, SessionInfo, SessionStatus, SharedState};
 
 const AUTH_COOKIE_NAME: &str = "hanagram_auth";
 const QR_AUTO_REFRESH_SECONDS: u64 = 5;
+const DASHBOARD_INCREMENTAL_SYNC_SECONDS: u64 = 3;
+const DASHBOARD_FULL_SYNC_SECONDS: u64 = 30;
+const BOT_SETTINGS_FILE_NAME: &str = ".hanagram-bot.json";
+const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 
 type PendingPhoneFlows = Arc<RwLock<HashMap<String, PendingPhoneLogin>>>;
 type PendingQrFlows = Arc<RwLock<HashMap<String, PendingQrLogin>>>;
 type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>>;
+type NotificationSettingsStore = Arc<RwLock<BotNotificationSettings>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -63,6 +72,8 @@ struct AppState {
     runtime: RuntimeConfig,
     phone_flows: PendingPhoneFlows,
     qr_flows: PendingQrFlows,
+    notification_settings: NotificationSettingsStore,
+    http_client: HttpClient,
 }
 
 struct Config {
@@ -80,6 +91,7 @@ struct RuntimeConfig {
     api_hash: String,
     sessions_dir: PathBuf,
     pending_dir: PathBuf,
+    notification_settings_path: PathBuf,
 }
 
 #[derive(Clone)]
@@ -153,6 +165,83 @@ struct SessionWorkerHandle {
     task: JoinHandle<()>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct BotNotificationSettings {
+    enabled: bool,
+    bot_token: String,
+    chat_id: String,
+    template: String,
+}
+
+impl BotNotificationSettings {
+    fn normalized(mut self) -> Self {
+        self.bot_token = self.bot_token.trim().to_owned();
+        self.chat_id = self.chat_id.trim().to_owned();
+        self.template = if self.template.trim().is_empty() {
+            String::from(DEFAULT_BOT_TEMPLATE)
+        } else {
+            self.template.trim().to_owned()
+        };
+        self
+    }
+
+    fn is_ready(&self) -> bool {
+        self.enabled && !self.bot_token.is_empty() && !self.chat_id.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BotNotificationSettingsView {
+    enabled: bool,
+    bot_token: String,
+    chat_id: String,
+    template: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BotPlaceholderHint {
+    key: &'static str,
+    description: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct OtpNotificationPayload {
+    session_key: String,
+    phone: String,
+    code: String,
+    message: String,
+    received_at: String,
+    session_file: String,
+    status: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BotNotificationSettingsForm {
+    enabled: Option<String>,
+    bot_token: String,
+    chat_id: String,
+    template: String,
+    lang: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DashboardSnapshot {
+    connected_count: usize,
+    generated_at: String,
+    sessions: Vec<SessionInfo>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SessionStringExportResponse {
+    session_key: String,
+    session_string: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ApiErrorResponse {
+    error: String,
+}
+
 impl TelegramClientSession {
     async fn open(path: &Path, api_id: i32) -> Result<Self> {
         let session = Arc::new(
@@ -199,6 +288,13 @@ impl PageBanner {
     fn error(message: impl Into<String>) -> Self {
         Self {
             kind: "error",
+            message: message.into(),
+        }
+    }
+
+    fn success(message: impl Into<String>) -> Self {
+        Self {
+            kind: "success",
             message: message.into(),
         }
     }
@@ -301,6 +397,7 @@ async fn main() -> Result<()> {
         api_id: config.api_id,
         api_hash: config.api_hash,
         pending_dir: config.sessions_dir.join(".pending"),
+        notification_settings_path: config.sessions_dir.join(BOT_SETTINGS_FILE_NAME),
         sessions_dir: config.sessions_dir.clone(),
     };
 
@@ -318,6 +415,9 @@ async fn main() -> Result<()> {
     let session_workers: SessionWorkers = Arc::new(Mutex::new(HashMap::new()));
     let phone_flows: PendingPhoneFlows = Arc::new(RwLock::new(HashMap::new()));
     let qr_flows: PendingQrFlows = Arc::new(RwLock::new(HashMap::new()));
+    let notification_settings = Arc::new(RwLock::new(
+        load_bot_notification_settings(&runtime.notification_settings_path).await,
+    ));
 
     let app_state = AppState {
         shared_state: Arc::clone(&shared_state),
@@ -327,6 +427,8 @@ async fn main() -> Result<()> {
         runtime,
         phone_flows,
         qr_flows,
+        notification_settings,
+        http_client: HttpClient::new(),
     };
 
     let session_files = collect_session_files(&app_state.runtime.sessions_dir)?;
@@ -350,8 +452,18 @@ async fn main() -> Result<()> {
             "/sessions/{session_key}/rename",
             post(rename_session_handler),
         )
+        .route(
+            "/sessions/{session_key}/export/file",
+            get(export_session_file_handler),
+        )
+        .route(
+            "/sessions/{session_key}/export/string",
+            get(export_string_session_handler),
+        )
         .route("/sessions/login/phone", post(start_phone_login_handler))
         .route("/sessions/login/qr", post(start_qr_login_handler))
+        .route("/settings/bot", post(save_bot_settings_handler))
+        .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
         .route("/sessions/phone/{flow_id}", get(phone_flow_page_handler))
         .route(
             "/sessions/phone/{flow_id}/code",
@@ -432,6 +544,64 @@ fn load_config() -> Result<Config> {
 
 fn required_env(name: &str) -> Result<String> {
     std::env::var(name).with_context(|| format!("missing required env var {name}"))
+}
+
+async fn load_bot_notification_settings(path: &Path) -> BotNotificationSettings {
+    let env_defaults = BotNotificationSettings {
+        enabled: std::env::var("BOT_NOTIFY_ENABLED")
+            .ok()
+            .as_deref()
+            .map(parse_env_bool)
+            .unwrap_or(false),
+        bot_token: std::env::var("BOT_NOTIFY_TOKEN").unwrap_or_default(),
+        chat_id: std::env::var("BOT_NOTIFY_CHAT_ID").unwrap_or_default(),
+        template: std::env::var("BOT_NOTIFY_TEMPLATE")
+            .unwrap_or_else(|_| String::from(DEFAULT_BOT_TEMPLATE)),
+    }
+    .normalized();
+
+    let raw = match tokio::fs::read(path).await {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return env_defaults,
+        Err(error) => {
+            warn!(
+                "failed reading bot notification settings {}: {}",
+                path.display(),
+                error
+            );
+            return env_defaults;
+        }
+    };
+
+    match serde_json::from_slice::<BotNotificationSettings>(&raw) {
+        Ok(settings) => settings.normalized(),
+        Err(error) => {
+            warn!(
+                "failed parsing bot notification settings {}: {}",
+                path.display(),
+                error
+            );
+            env_defaults
+        }
+    }
+}
+
+async fn save_bot_notification_settings(
+    path: &Path,
+    settings: &BotNotificationSettings,
+) -> Result<()> {
+    let payload = serde_json::to_vec_pretty(settings)
+        .context("failed to serialize bot notification settings")?;
+    tokio::fs::write(path, payload)
+        .await
+        .with_context(|| format!("failed writing {}", path.display()))
+}
+
+fn parse_env_bool(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 async fn cleanup_pending_dir(dir: &Path) -> Result<()> {
@@ -518,6 +688,36 @@ fn fallback_phone(session_file: &Path) -> String {
     }
 }
 
+fn sanitize_phone_input(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_digit() || *ch == '+')
+        .collect()
+}
+
+fn format_phone_display(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let candidate = if trimmed.starts_with('+') {
+        trimmed.to_owned()
+    } else if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        format!("+{trimmed}")
+    } else {
+        trimmed.to_owned()
+    };
+
+    match phonenumber::parse(None, &candidate) {
+        Ok(phone) => phone
+            .format()
+            .mode(PhoneNumberMode::International)
+            .to_string(),
+        Err(_) => trimmed.split_whitespace().collect::<Vec<_>>().join(" "),
+    }
+}
+
 async fn initialize_session_entry(shared_state: &SharedState, key: &str, session_file: &Path) {
     let mut state = shared_state.write().await;
     state.entry(key.to_owned()).or_insert_with(|| SessionInfo {
@@ -539,16 +739,109 @@ async fn set_session_status(shared_state: &SharedState, key: &str, status: Sessi
 async fn set_session_phone(shared_state: &SharedState, key: &str, phone: String) {
     let mut state = shared_state.write().await;
     if let Some(info) = state.get_mut(key) {
-        info.phone = phone;
+        info.phone = format_phone_display(&phone);
     }
 }
 
-async fn push_otp_message(shared_state: &SharedState, key: &str, otp: OtpMessage) {
+async fn push_otp_message(
+    shared_state: &SharedState,
+    key: &str,
+    otp: OtpMessage,
+) -> Option<SessionInfo> {
     let mut state = shared_state.write().await;
     if let Some(info) = state.get_mut(key) {
+        if info
+            .messages
+            .front()
+            .is_some_and(|message| message.text == otp.text && message.code == otp.code)
+        {
+            return None;
+        }
+
         info.messages.push_front(otp);
         info.messages.truncate(20);
+        return Some(info.clone());
     }
+
+    None
+}
+
+async fn maybe_dispatch_bot_notification(
+    settings_store: &NotificationSettingsStore,
+    http_client: &HttpClient,
+    session: &SessionInfo,
+    otp: &OtpMessage,
+) {
+    let Some(code) = otp.code.clone() else {
+        return;
+    };
+
+    let settings = settings_store.read().await.clone();
+    if !settings.is_ready() {
+        return;
+    }
+
+    let payload = OtpNotificationPayload {
+        session_key: session.key.clone(),
+        phone: session.phone.clone(),
+        code,
+        message: otp.text.clone(),
+        received_at: otp.received_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        session_file: session.session_file.display().to_string(),
+        status: String::from(current_status_label(&session.status)),
+    };
+    let text = render_bot_notification_text(&settings.template, &payload);
+    let http_client = http_client.clone();
+
+    tokio::spawn(async move {
+        if let Err(error) = send_bot_notification(&http_client, &settings, &text).await {
+            warn!(
+                "failed sending bot notification for {}: {}",
+                payload.session_key, error
+            );
+        }
+    });
+}
+
+fn render_bot_notification_text(template: &str, payload: &OtpNotificationPayload) -> String {
+    [
+        ("{code}", payload.code.as_str()),
+        ("{phone}", payload.phone.as_str()),
+        ("{session_key}", payload.session_key.as_str()),
+        ("{session_file}", payload.session_file.as_str()),
+        ("{received_at}", payload.received_at.as_str()),
+        ("{status}", payload.status.as_str()),
+        ("{message}", payload.message.as_str()),
+    ]
+    .into_iter()
+    .fold(template.to_owned(), |message, (placeholder, value)| {
+        message.replace(placeholder, value)
+    })
+}
+
+async fn send_bot_notification(
+    http_client: &HttpClient,
+    settings: &BotNotificationSettings,
+    text: &str,
+) -> Result<()> {
+    let response = http_client
+        .post(format!(
+            "https://api.telegram.org/bot{}/sendMessage",
+            settings.bot_token
+        ))
+        .json(&serde_json::json!({
+            "chat_id": settings.chat_id,
+            "text": text,
+            "disable_web_page_preview": true,
+        }))
+        .send()
+        .await
+        .context("telegram bot request failed")?;
+
+    response
+        .error_for_status()
+        .context("telegram bot request returned an error status")?;
+    Ok(())
 }
 
 async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
@@ -565,6 +858,8 @@ async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
     let worker_file = session_file;
     let worker_state = Arc::clone(&app_state.shared_state);
     let api_id = app_state.runtime.api_id;
+    let notification_settings = Arc::clone(&app_state.notification_settings);
+    let http_client = app_state.http_client.clone();
     let cancellation = CancellationToken::new();
     let worker_cancellation = cancellation.clone();
 
@@ -574,6 +869,8 @@ async fn register_session_file(app_state: &AppState, session_file: PathBuf) {
             worker_file,
             worker_state,
             api_id,
+            notification_settings,
+            http_client,
             worker_cancellation,
         )
         .await;
@@ -630,6 +927,8 @@ async fn run_session_worker(
     session_file: PathBuf,
     shared_state: SharedState,
     api_id: i32,
+    notification_settings: NotificationSettingsStore,
+    http_client: HttpClient,
     cancellation: CancellationToken,
 ) {
     let retry_delays = [5_u64, 10, 20, 40, 80];
@@ -642,7 +941,17 @@ async fn run_session_worker(
 
         set_session_status(&shared_state, &key, SessionStatus::Connecting).await;
 
-        match run_session_once(&key, &session_file, &shared_state, api_id, &cancellation).await {
+        match run_session_once(
+            &key,
+            &session_file,
+            &shared_state,
+            api_id,
+            &notification_settings,
+            &http_client,
+            &cancellation,
+        )
+        .await
+        {
             Ok(()) => break,
             Err(error) => {
                 warn!("session {} failed: {error:#}", session_file.display());
@@ -679,6 +988,8 @@ async fn run_session_once(
     session_file: &Path,
     shared_state: &SharedState,
     api_id: i32,
+    notification_settings: &NotificationSettingsStore,
+    http_client: &HttpClient,
     cancellation: &CancellationToken,
 ) -> Result<()> {
     let session = match load_session(session_file).await {
@@ -735,7 +1046,16 @@ async fn run_session_once(
                                 text,
                                 code,
                             };
-                            push_otp_message(shared_state, key, otp).await;
+                            let session_snapshot = push_otp_message(shared_state, key, otp.clone()).await;
+                            if let Some(session_snapshot) = session_snapshot {
+                                maybe_dispatch_bot_notification(
+                                    notification_settings,
+                                    http_client,
+                                    &session_snapshot,
+                                    &otp,
+                                )
+                                .await;
+                            }
                         }
                         Ok(_) => {}
                         Err(error) => {
@@ -837,14 +1157,58 @@ fn render_template(
     }
 }
 
-async fn render_dashboard_page(
-    app_state: &AppState,
-    language: Language,
-    banner: Option<PageBanner>,
-) -> std::result::Result<Html<String>, StatusCode> {
-    let translations = language.translations();
-    let languages = language_options(language, "/");
+fn current_status_label(status: &SessionStatus) -> &'static str {
+    match status {
+        SessionStatus::Connecting => "connecting",
+        SessionStatus::Connected => "connected",
+        SessionStatus::Error(_) => "error",
+    }
+}
 
+fn build_bot_settings_view(settings: &BotNotificationSettings) -> BotNotificationSettingsView {
+    BotNotificationSettingsView {
+        enabled: settings.enabled,
+        bot_token: settings.bot_token.clone(),
+        chat_id: settings.chat_id.clone(),
+        template: settings.template.clone(),
+    }
+}
+
+fn build_bot_placeholder_hints(language: Language) -> [BotPlaceholderHint; 7] {
+    let i18n = language.translations();
+    [
+        BotPlaceholderHint {
+            key: "{code}",
+            description: i18n.bot_placeholder_code,
+        },
+        BotPlaceholderHint {
+            key: "{phone}",
+            description: i18n.bot_placeholder_phone,
+        },
+        BotPlaceholderHint {
+            key: "{session_key}",
+            description: i18n.bot_placeholder_session_key,
+        },
+        BotPlaceholderHint {
+            key: "{session_file}",
+            description: i18n.bot_placeholder_session_file,
+        },
+        BotPlaceholderHint {
+            key: "{received_at}",
+            description: i18n.bot_placeholder_received_at,
+        },
+        BotPlaceholderHint {
+            key: "{status}",
+            description: i18n.bot_placeholder_status,
+        },
+        BotPlaceholderHint {
+            key: "{message}",
+            description: i18n.bot_placeholder_message,
+        },
+    ]
+}
+
+async fn build_dashboard_snapshot(app_state: &AppState) -> DashboardSnapshot {
     let sessions = {
         let state = app_state.shared_state.read().await;
         let mut sessions: Vec<SessionInfo> = state.values().cloned().collect();
@@ -867,6 +1231,25 @@ async fn render_dashboard_page(
         .filter(|session| matches!(session.status, SessionStatus::Connected))
         .count();
 
+    DashboardSnapshot {
+        connected_count,
+        generated_at: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        sessions,
+    }
+}
+
+async fn render_dashboard_page(
+    app_state: &AppState,
+    language: Language,
+    banner: Option<PageBanner>,
+) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
+    let languages = language_options(language, "/");
+    let snapshot = build_dashboard_snapshot(app_state).await;
+    let notification_settings = app_state.notification_settings.read().await.clone();
+    let bot_settings = build_bot_settings_view(&notification_settings);
+    let bot_placeholder_hints = build_bot_placeholder_hints(language);
+
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
@@ -877,11 +1260,26 @@ async fn render_dashboard_page(
     );
     context.insert("setup_href", &setup_href(language));
     context.insert("banner", &banner);
-    context.insert("sessions", &sessions);
-    context.insert("connected_count", &connected_count);
+    context.insert("sessions", &snapshot.sessions);
+    context.insert("connected_count", &snapshot.connected_count);
+    context.insert("now", &snapshot.generated_at);
+    context.insert("bot_settings", &bot_settings);
+    context.insert("bot_placeholders", &bot_placeholder_hints);
     context.insert(
-        "now",
-        &Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        "bot_settings_action",
+        &format!("/settings/bot?lang={}", language.code()),
+    );
+    context.insert(
+        "snapshot_api",
+        &format!("/api/dashboard/snapshot?lang={}", language.code()),
+    );
+    context.insert(
+        "dashboard_incremental_refresh_seconds",
+        &DASHBOARD_INCREMENTAL_SYNC_SECONDS,
+    );
+    context.insert(
+        "dashboard_full_refresh_seconds",
+        &DASHBOARD_FULL_SYNC_SECONDS,
     );
 
     render_template(&app_state.tera, "index.html", &context)
@@ -1079,6 +1477,66 @@ async fn index_handler(
     render_dashboard_page(&app_state, language, None).await
 }
 
+async fn dashboard_snapshot_handler(State(app_state): State<AppState>) -> Json<DashboardSnapshot> {
+    Json(build_dashboard_snapshot(&app_state).await)
+}
+
+async fn save_bot_settings_handler(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<BotNotificationSettingsForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+    let settings = BotNotificationSettings {
+        enabled: form.enabled.is_some(),
+        bot_token: form.bot_token,
+        chat_id: form.chat_id,
+        template: form.template,
+    }
+    .normalized();
+
+    if settings.enabled && settings.bot_token.is_empty() {
+        return render_dashboard_error_response(
+            &app_state,
+            language,
+            translations.bot_error_missing_token,
+        )
+        .await;
+    }
+
+    if settings.enabled && settings.chat_id.is_empty() {
+        return render_dashboard_error_response(
+            &app_state,
+            language,
+            translations.bot_error_missing_chat_id,
+        )
+        .await;
+    }
+
+    if let Err(error) =
+        save_bot_notification_settings(&app_state.runtime.notification_settings_path, &settings)
+            .await
+    {
+        warn!("failed saving bot notification settings: {}", error);
+        return render_dashboard_error_response(&app_state, language, translations.bot_error_save)
+            .await;
+    }
+
+    *app_state.notification_settings.write().await = settings;
+
+    match render_dashboard_page(
+        &app_state,
+        language,
+        Some(PageBanner::success(translations.bot_saved)),
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
 async fn session_setup_page_handler(
     State(app_state): State<AppState>,
     Query(query): Query<LangQuery>,
@@ -1141,6 +1599,101 @@ async fn import_string_session_handler(
                 translations.setup_error_invalid_string,
             )
             .await
+        }
+    }
+}
+
+async fn export_session_file_handler(
+    State(app_state): State<AppState>,
+    AxumPath(session_key): AxumPath<String>,
+) -> Response {
+    let session = {
+        let state = app_state.shared_state.read().await;
+        state.get(&session_key).cloned()
+    };
+
+    let Some(session) = session else {
+        return (StatusCode::NOT_FOUND, String::from("session not found")).into_response();
+    };
+
+    match tokio::fs::read(&session.session_file).await {
+        Ok(bytes) => {
+            let mut response = bytes.into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            match HeaderValue::from_str(&format!(
+                "attachment; filename=\"{}.session\"",
+                session.key
+            )) {
+                Ok(value) => {
+                    response
+                        .headers_mut()
+                        .insert(header::CONTENT_DISPOSITION, value);
+                    response
+                }
+                Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
+        Err(error) => {
+            warn!(
+                "failed reading session file {} for export: {}",
+                session.session_file.display(),
+                error
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                String::from("failed to read session file"),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn export_string_session_handler(
+    State(app_state): State<AppState>,
+    AxumPath(session_key): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let session_file = {
+        let state = app_state.shared_state.read().await;
+        state
+            .get(&session_key)
+            .map(|session| session.session_file.clone())
+    };
+
+    let Some(session_file) = session_file else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorResponse {
+                error: String::from(language.translations().dashboard_session_missing),
+            }),
+        )
+            .into_response();
+    };
+
+    match export_telethon_string_session(&session_file).await {
+        Ok(session_string) => Json(SessionStringExportResponse {
+            session_key,
+            session_string,
+        })
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed exporting telethon string session {}: {}",
+                session_file.display(),
+                error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiErrorResponse {
+                    error: String::from(language.translations().export_string_error),
+                }),
+            )
+                .into_response()
         }
     }
 }
@@ -1400,8 +1953,9 @@ async fn start_phone_login_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
     let phone = form.phone.trim();
+    let login_phone = sanitize_phone_input(phone);
 
-    if phone.is_empty() {
+    if login_phone.is_empty() {
         return render_setup_error_response(
             &app_state,
             language,
@@ -1446,7 +2000,7 @@ async fn start_phone_login_handler(
 
     let result = client_session
         .client
-        .request_login_code(phone, &app_state.runtime.api_hash)
+        .request_login_code(&login_phone, &app_state.runtime.api_hash)
         .await;
     client_session.shutdown().await;
 
@@ -1454,7 +2008,7 @@ async fn start_phone_login_handler(
         Ok(token) => {
             let flow = PendingPhoneLogin {
                 session_name,
-                phone: phone.to_owned(),
+                phone: format_phone_display(phone),
                 temp_path,
                 final_path,
                 stage: PhoneLoginStage::AwaitingCode { token },
@@ -2273,5 +2827,39 @@ mod tests {
             classify_session_failure(&error),
             SessionFailureAction::Retryable(String::from("update loop failed"))
         );
+    }
+
+    #[test]
+    fn format_phone_display_formats_plain_digits() {
+        let display = format_phone_display("13146288470");
+
+        assert!(display.starts_with("+1 "));
+        assert!(display.contains("314"));
+    }
+
+    #[test]
+    fn render_bot_notification_text_replaces_placeholders() {
+        let payload = OtpNotificationPayload {
+            session_key: String::from("alpha"),
+            phone: String::from("+1 314 628 8470"),
+            code: String::from("58670"),
+            message: String::from("Login code: 58670"),
+            received_at: String::from("2026-03-12 14:20:00 UTC"),
+            session_file: String::from("./sessions/alpha.session"),
+            status: String::from("connected"),
+        };
+
+        let rendered = render_bot_notification_text(
+            "Code={code}\nPhone={phone}\nName={session_key}\nFile={session_file}\nAt={received_at}\nStatus={status}\nBody={message}",
+            &payload,
+        );
+
+        assert!(rendered.contains("Code=58670"));
+        assert!(rendered.contains("Phone=+1 314 628 8470"));
+        assert!(rendered.contains("Name=alpha"));
+        assert!(rendered.contains("File=./sessions/alpha.session"));
+        assert!(rendered.contains("At=2026-03-12 14:20:00 UTC"));
+        assert!(rendered.contains("Status=connected"));
+        assert!(rendered.contains("Body=Login code: 58670"));
     }
 }
