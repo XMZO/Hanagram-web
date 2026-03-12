@@ -3,7 +3,7 @@
 
 services:
   hanagram-web:
-    image: ${HANAGRAM_IMAGE:-hanagram-web:latest}
+    image: ${HANAGRAM_IMAGE:-ghcr.io/xmzo/hanagram-web:latest}
     container_name: hanagram-web
     restart: unless-stopped
     env_file:
