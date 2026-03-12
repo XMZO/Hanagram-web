@@ -1,0 +1,9 @@
+.git
+.gitignore
+target
+sessions
+.env
+.env.*
+!.env.example
+todo.md
+*.log
