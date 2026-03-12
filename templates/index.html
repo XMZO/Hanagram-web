@@ -73,7 +73,14 @@
         }
         .float-in { animation: float-in 0.72s ease both; }
         .card-flash { animation: card-flash 1.35s ease; }
-        .modal-panel { animation: modal-rise 0.28s ease; }
+        .modal-panel {
+            animation: modal-rise 0.28s ease;
+            background: rgba(255, 250, 242, 0.985);
+            box-shadow: 0 28px 72px rgba(79, 67, 59, 0.16);
+        }
+        .modal-sheet {
+            width: min(100%, 52rem);
+        }
         @keyframes float-in {
             from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
@@ -90,6 +97,11 @@
         @media (prefers-reduced-motion: reduce) {
             .float-in, .card-flash, .modal-panel { animation: none; }
             * { scroll-behavior: auto !important; transition: none !important; }
+        }
+        @media (max-width: 640px) {
+            .modal-sheet {
+                width: 100%;
+            }
         }
     </style>
     <script>
@@ -521,7 +533,7 @@
         </section>
         {% endif %}
 
-        <section class="mt-6 grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+        <section class="mt-6 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:90ms]">
                 <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ i18n.bot_settings_title }}</p>
                 <h2 class="mt-3 font-display text-2xl font-semibold text-ink">{{ i18n.bot_settings_title }}</h2>
@@ -598,7 +610,7 @@
             </a>
         </section>
         {% else %}
-        <section class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <section class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {% for session in sessions %}
             <article
                 class="paper-shadow float-in rounded-[1.7rem] border border-line/80 bg-paper/95 p-5 transition hover:-translate-y-1 hover:border-sage/45"
@@ -656,19 +668,19 @@
 
         {% for session in sessions %}
         <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.key }}" class="hidden fixed inset-0 z-50">
-            <div class="absolute inset-0 bg-[rgba(79,67,59,0.24)] backdrop-blur-[2px]" data-modal-close="session-modal-{{ loop.index }}"></div>
+            <div class="absolute inset-0 bg-[rgba(79,67,59,0.18)] backdrop-blur-[6px] sm:bg-[rgba(79,67,59,0.24)]" data-modal-close="session-modal-{{ loop.index }}"></div>
 
-            <div class="relative flex min-h-screen items-center justify-center px-4 py-8">
-                <section class="paper-shadow modal-panel relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[2rem] border border-line/80 bg-paper/98 p-6 sm:p-7">
-                    <div class="flex flex-col gap-5 border-b border-line pb-5 sm:flex-row sm:items-start sm:justify-between">
+            <div class="relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-center sm:px-4 sm:py-8">
+                <section class="modal-sheet modal-panel relative max-h-[88vh] w-full overflow-y-auto overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:max-h-[90vh] sm:rounded-[1.9rem] sm:p-6 lg:p-7">
+                    <div class="flex flex-col gap-4 border-b border-line pb-4 sm:gap-5 sm:pb-5 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
-                            <h2 data-role="session-phone" class="mt-3 font-display text-3xl font-semibold text-ink">{{ session.phone }}</h2>
+                            <h2 data-role="session-phone" class="mt-3 font-display text-[2rem] font-semibold leading-tight text-ink sm:text-3xl">{{ session.phone }}</h2>
                             <p class="mt-3 text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_file_label }}</p>
                             <p data-role="session-file" class="mt-2 break-all font-mono text-[0.76rem] text-ink/46">{{ session.session_file }}</p>
                         </div>
 
-                        <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-2 sm:justify-end">
                             <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-sm {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
                                 {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
                             </span>
@@ -678,18 +690,18 @@
                         </div>
                     </div>
 
-                    <div class="mt-5 grid gap-4 xl:grid-cols-[0.95fr,1.05fr]">
+                    <div class="mt-4 grid gap-4 lg:mt-5 lg:grid-cols-[0.92fr,1.08fr]">
                         <div class="space-y-4">
-                            <div class="rounded-[1.5rem] border border-line/80 bg-white/88 px-5 py-5">
+                            <div class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] px-4 py-4 sm:rounded-[1.5rem] sm:px-5 sm:py-5">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
-                                <p data-role="latest-code" class="mt-4 font-mono text-[2.4rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.8rem]">
+                                <p data-role="latest-code" class="mt-4 font-mono text-[2rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.5rem]">
                                     {{ session.latest_code | default(value=i18n.otp_placeholder) }}
                                 </p>
                                 <p class="mt-4 text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
                                 <p data-role="latest-update" class="mt-2 font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
                             </div>
 
-                            <div class="rounded-[1.5rem] border border-line/80 bg-white/88 p-4">
+                            <div class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.5rem]">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.export_session_title }}</p>
                                 <div class="mt-4 flex flex-wrap gap-3">
                                     <a href="/sessions/{{ session.key }}/export/file" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>
@@ -706,7 +718,7 @@
                                         {{ i18n.export_string }}
                                     </button>
                                 </div>
-                                <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="mt-4 hidden rounded-[1.2rem] border border-line/70 bg-[#fcf8f2] p-4">
+                                <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="mt-4 hidden rounded-[1.15rem] border border-line/70 bg-[rgba(252,248,242,0.98)] p-4">
                                     <div class="flex flex-wrap items-center justify-between gap-3">
                                         <p data-role="export-title" class="text-sm font-medium text-ink">{{ i18n.export_string_ready }}</p>
                                         <button
@@ -728,7 +740,7 @@
                         </div>
 
                         <div class="space-y-4">
-                            <form method="post" action="/sessions/{{ session.key }}/rename" class="rounded-[1.4rem] border border-line/80 bg-white/88 p-4">
+                            <form method="post" action="/sessions/{{ session.key }}/rename" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
                                     <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.rename_session }}</span>
@@ -767,8 +779,8 @@
                         {{ session.status.error | default(value="") }}
                     </p>
 
-                    <div class="mt-6 rounded-[1.6rem] border border-line/80 bg-[#fdf8f1] p-5">
-                        <div class="mb-4 flex items-center justify-between">
+                    <div class="mt-5 rounded-[1.35rem] border border-line/80 bg-[rgba(253,248,241,0.99)] p-4 sm:mt-6 sm:rounded-[1.6rem] sm:p-5">
+                        <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
                             <h3 class="text-sm font-semibold uppercase tracking-[0.25em] text-ink/48">{{ i18n.recent_messages }}</h3>
                             <span class="text-xs text-ink/42">{{ i18n.newest_first }}</span>
                         </div>
