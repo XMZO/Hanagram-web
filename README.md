@@ -312,11 +312,13 @@ docker compose -f docker-compose.build.yml up -d
 
 普通用户没有自助“忘记密码”入口。管理员需要在 `/admin` 中对该用户执行重置。重置后：
 
-- 该用户的密码、TOTP、恢复码会被清空
+- 系统会为该用户生成一个新的临时随机密码
+- 该用户的 TOTP、恢复码会被清空
 - 该用户当前所有网页登录会话会被强制失效
 - 该用户的加密 Telegram 会话数据会被删除
 - 该用户的个人 Bot 设置会被清空
-- 该用户需要使用相同用户名重新注册
+- 管理员需要把临时密码发给该用户
+- 该用户必须使用临时密码登录，并在进入其他工作区功能前立刻修改密码
 
 #### 管理员忘记密码
 
@@ -325,15 +327,18 @@ docker compose -f docker-compose.build.yml up -d
 重置管理员后：
 
 - 管理员账号本身仍然保留
-- 管理员的密码、TOTP、恢复码会被清空
+- 系统会为管理员生成一个新的临时随机密码
+- 管理员的 TOTP、恢复码会被清空
 - 管理员当前所有网页登录会话会被强制失效
 - 管理员自己的加密 Telegram 会话数据会被删除
 - 管理员自己的个人 Bot 设置会被清空
 - 系统级 Telegram API 设置会保留
 - 其他普通用户不受影响
-- 之后用相同的管理员用户名重新注册，就会重新接管原管理员账号
+- 需要使用临时密码重新登录，并立即修改为自己的正式密码
 
 #### 管理员恢复命令
+
+执行后，命令会直接输出新的临时密码。
 
 Docker Compose 容器内执行：
 
@@ -742,11 +747,13 @@ From `/admin`, the admin can:
 
 There is no self-service password reset flow for regular users. The admin must reset that user from `/admin`. After the reset:
 
-- the user's password, TOTP, and recovery codes are cleared
+- a new temporary random password is generated for that user
+- the user's TOTP and recovery codes are cleared
 - all of the user's active browser sessions are revoked
 - the user's encrypted Telegram session data is removed
 - the user's personal bot settings are cleared
-- the user must register again with the same username
+- the admin must deliver the temporary password to the user
+- the user must sign in with that temporary password and change it before using the rest of the workspace
 
 #### Admin Forgot Password
 
@@ -755,15 +762,18 @@ The admin also has no email recovery, no env-based backdoor, and no second recov
 After the admin reset:
 
 - the admin account itself still exists
-- the admin password, TOTP, and recovery codes are cleared
+- a new temporary random password is generated for the admin
+- the admin TOTP and recovery codes are cleared
 - all of the admin's active browser sessions are revoked
 - the admin's own encrypted Telegram session data is removed
 - the admin's personal bot settings are cleared
 - the system-level Telegram API settings remain intact
 - other regular users are not affected
-- registering again with the same admin username reclaims the original admin account
+- sign in again with the temporary password and immediately change it to a permanent one
 
 #### Admin Recovery Commands
+
+After running it, the command prints the new temporary password directly.
 
 Run inside Docker Compose:
 

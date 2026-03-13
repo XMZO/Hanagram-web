@@ -22,6 +22,10 @@ pub(crate) fn routes() -> Router<AppState> {
             post(admin_reset_user_handler),
         )
         .route(
+            "/admin/users/{user_id}/delete",
+            post(admin_delete_user_handler),
+        )
+        .route(
             "/admin/users/{user_id}/sessions/revoke",
             post(admin_revoke_user_sessions_handler),
         )
@@ -131,6 +135,7 @@ pub(crate) async fn render_admin_page(
             locked,
             totp_enabled: user.security.totp_enabled,
             password_ready: user.security.password_hash.is_some(),
+            password_reset_required: user.security.password_needs_reset,
             active_sessions,
             recovery_codes_remaining,
             last_login_ip: user.security.last_login_ip,
@@ -178,10 +183,7 @@ pub(crate) async fn render_admin_page(
         &translations.admin_personal_bot_description,
     );
     context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
-    context.insert(
-        "bot_settings_action",
-        &format!("/settings/bot?lang={}", language.code()),
-    );
+    context.insert("bot_settings_action", "/settings/bot");
     context.insert("registration_label", &translations.admin_registration_label);
     context.insert("registration_options", &registration_options);
     context.insert(
@@ -272,6 +274,7 @@ pub(crate) async fn render_admin_page(
         &translations.admin_revoke_sessions_label,
     );
     context.insert("reset_label", &translations.admin_reset_label);
+    context.insert("delete_label", &translations.admin_delete_label);
     context.insert("role_admin_label", &translations.admin_role_admin_label);
     context.insert("role_user_label", &translations.admin_role_user_label);
     context.insert("locked_badge_label", &translations.admin_locked_badge_label);
@@ -290,6 +293,10 @@ pub(crate) async fn render_admin_page(
     context.insert(
         "password_reset_badge_label",
         &translations.admin_password_reset_badge_label,
+    );
+    context.insert(
+        "password_missing_badge_label",
+        &translations.admin_password_missing_badge_label,
     );
     context.insert(
         "user_active_sessions_label",
@@ -354,6 +361,10 @@ pub(crate) async fn render_admin_page(
     context.insert("users", &users);
     context.insert("audit_logs", &audit_logs);
     context.insert("audit_rollups", &audit_rollups);
+    context.insert(
+        "delete_confirm_message",
+        &translations.admin_delete_confirm_message,
+    );
     context.insert("system_settings", &system_settings);
     context.insert(
         "system_max_idle_timeout_minutes",
@@ -597,6 +608,64 @@ async fn admin_unlock_user_handler(
     }
 }
 
+async fn stop_user_session_workers(app_state: &AppState, user_id: &str) {
+    let Ok(session_records) = app_state
+        .meta_store
+        .list_session_records_for_user(user_id)
+        .await
+    else {
+        return;
+    };
+
+    let mut workers_to_stop = Vec::new();
+    {
+        let mut workers = app_state.session_workers.lock().await;
+        for record in session_records {
+            if let Some(worker) = workers.remove(&record.id) {
+                workers_to_stop.push(worker);
+            }
+        }
+    }
+
+    for worker in workers_to_stop {
+        worker.cancellation.cancel();
+        let _ = worker.task.await;
+    }
+}
+
+async fn clear_user_runtime_state(
+    app_state: &AppState,
+    user_id: &str,
+    auth_session_ids: &[String],
+    session_record_ids: &[String],
+) {
+    for auth_session_id in auth_session_ids {
+        clear_auth_session_sensitive_state(app_state, auth_session_id).await;
+    }
+    app_state.user_keys.write().await.remove(user_id);
+    clear_pending_flows_for_user(app_state, user_id).await;
+
+    {
+        let mut shared_state = app_state.shared_state.write().await;
+        for session_record_id in session_record_ids {
+            shared_state.remove(session_record_id);
+        }
+    }
+
+    for session_record_id in session_record_ids {
+        if let Err(error) = app_state
+            .runtime_cache
+            .remove_session(session_record_id)
+            .await
+        {
+            warn!(
+                "failed deleting runtime cache for cleared session {}: {}",
+                session_record_id, error
+            );
+        }
+    }
+}
+
 async fn admin_reset_user_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
@@ -621,22 +690,14 @@ async fn admin_reset_user_handler(
         return Redirect::to(&admin_href(language)).into_response();
     }
 
-    if let Ok(session_records) = app_state
-        .meta_store
-        .list_session_records_for_user(&user.id)
-        .await
-    {
-        for record in session_records {
-            if let Some(worker) = app_state.session_workers.lock().await.remove(&record.id) {
-                worker.cancellation.cancel();
-                let _ = worker.task.await;
-            }
-        }
-    }
+    let settings = app_state.system_settings.read().await.clone();
+    stop_user_session_workers(&app_state, &user.id).await;
+
     let reset_result = match reset_user_account(
         &app_state.meta_store,
         &mut user,
         &app_state.runtime.users_dir,
+        &settings.argon_policy,
     )
     .await
     {
@@ -657,29 +718,13 @@ async fn admin_reset_user_handler(
         }
     };
 
-    for auth_session_id in &reset_result.auth_session_ids {
-        clear_auth_session_sensitive_state(&app_state, auth_session_id).await;
-    }
-    app_state.user_keys.write().await.remove(&user.id);
-    clear_pending_flows_for_user(&app_state, &user.id).await;
-    {
-        let mut shared_state = app_state.shared_state.write().await;
-        for session_record_id in &reset_result.session_record_ids {
-            shared_state.remove(session_record_id);
-        }
-    }
-    for session_record_id in &reset_result.session_record_ids {
-        if let Err(error) = app_state
-            .runtime_cache
-            .remove_session(session_record_id)
-            .await
-        {
-            warn!(
-                "failed deleting runtime cache for reset session {}: {}",
-                session_record_id, error
-            );
-        }
-    }
+    clear_user_runtime_state(
+        &app_state,
+        &user.id,
+        &reset_result.auth_session_ids,
+        &reset_result.session_record_ids,
+    )
+    .await;
     let _ = app_state
         .meta_store
         .record_audit(&NewAuditEntry {
@@ -690,9 +735,100 @@ async fn admin_reset_user_handler(
             success: true,
             details_json: serde_json::json!({
                 "username": user.username,
-                "credentials_cleared": true,
+                "temporary_password_issued": true,
                 "session_records_removed": reset_result.session_record_ids.len(),
                 "auth_sessions_revoked": reset_result.auth_session_ids.len()
+            })
+            .to_string(),
+        })
+        .await;
+
+    let banner_message = language
+        .translations()
+        .admin_reset_temporary_password_message
+        .replace("{username}", &user.username)
+        .replace("{password}", &reset_result.temporary_password);
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        Some(PageBanner::success(banner_message)),
+        &headers,
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_delete_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+    let Some(user) = app_state
+        .meta_store
+        .get_user_by_id(&user_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to(&admin_href(language)).into_response();
+    };
+    if user.role == UserRole::Admin {
+        return Redirect::to(&admin_href(language)).into_response();
+    }
+
+    stop_user_session_workers(&app_state, &user.id).await;
+
+    let delete_result =
+        match delete_user_account(&app_state.meta_store, &user, &app_state.runtime.users_dir).await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                return match render_admin_page(
+                    &app_state,
+                    &authenticated,
+                    language,
+                    Some(PageBanner::error(error.to_string())),
+                    &headers,
+                )
+                .await
+                {
+                    Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+                    Err(status) => status.into_response(),
+                };
+            }
+        };
+
+    clear_user_runtime_state(
+        &app_state,
+        &user.id,
+        &delete_result.auth_session_ids,
+        &delete_result.session_record_ids,
+    )
+    .await;
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_deleted"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({
+                "username": user.username,
+                "session_records_removed": delete_result.session_record_ids.len(),
+                "auth_sessions_revoked": delete_result.auth_session_ids.len()
             })
             .to_string(),
         })
@@ -703,7 +839,7 @@ async fn admin_reset_user_handler(
         &authenticated,
         language,
         Some(PageBanner::success(
-            language.translations().admin_reset_completed_message,
+            language.translations().admin_user_deleted_message,
         )),
         &headers,
     )

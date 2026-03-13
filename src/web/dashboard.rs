@@ -108,9 +108,18 @@ async fn build_dashboard_snapshot(
     };
     let translations = language.translations();
 
+    let total_count = session_records.len();
     let connected_count = session_records
         .iter()
         .filter(|session| matches!(session.status, SessionStatus::Connected))
+        .count();
+    let connecting_count = session_records
+        .iter()
+        .filter(|session| matches!(session.status, SessionStatus::Connecting))
+        .count();
+    let error_count = session_records
+        .iter()
+        .filter(|session| matches!(session.status, SessionStatus::Error(_)))
         .count();
     let sessions = session_records
         .into_iter()
@@ -118,7 +127,10 @@ async fn build_dashboard_snapshot(
         .collect();
 
     DashboardSnapshot {
+        total_count,
         connected_count,
+        connecting_count,
+        error_count,
         generated_at: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         sessions,
     }
@@ -134,6 +146,19 @@ pub(crate) async fn render_dashboard_page(
     let translations = language.translations();
     let languages = language_options(language, "/");
     let snapshot = build_dashboard_snapshot(app_state, authenticated, language).await;
+    let attention_sessions = snapshot
+        .sessions
+        .iter()
+        .filter(|session| session.status.kind != "connected")
+        .take(8)
+        .cloned()
+        .collect::<Vec<_>>();
+    let recent_activity_sessions = snapshot
+        .sessions
+        .iter()
+        .take(8)
+        .cloned()
+        .collect::<Vec<_>>();
     let settings_page_href = settings_href(language);
 
     let mut context = Context::new();
@@ -142,10 +167,7 @@ pub(crate) async fn render_dashboard_page(
     context.insert("languages", &languages);
     context.insert("current_username", &authenticated.user.username);
     context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
-    context.insert(
-        "logout_action",
-        &format!("/logout?lang={}", language.code()),
-    );
+    context.insert("logout_action", "/logout");
     context.insert("setup_href", &setup_href(language));
     context.insert("settings_href", &settings_page_href);
     context.insert("admin_href", &admin_href(language));
@@ -169,12 +191,18 @@ pub(crate) async fn render_dashboard_page(
     );
     context.insert("banner", &banner);
     context.insert("sessions", &snapshot.sessions);
+    context.insert("attention_sessions", &attention_sessions);
+    context.insert("recent_activity_sessions", &recent_activity_sessions);
+    context.insert("total_sessions", &snapshot.total_count);
     context.insert("connected_count", &snapshot.connected_count);
-    context.insert("now", &snapshot.generated_at);
+    context.insert("connecting_count", &snapshot.connecting_count);
+    context.insert("error_count", &snapshot.error_count);
     context.insert(
-        "snapshot_api",
-        &format!("/api/dashboard/snapshot?lang={}", language.code()),
+        "attention_count",
+        &(snapshot.connecting_count + snapshot.error_count),
     );
+    context.insert("now", &snapshot.generated_at);
+    context.insert("snapshot_api", "/api/dashboard/snapshot");
     context.insert(
         "dashboard_incremental_refresh_seconds",
         &DASHBOARD_INCREMENTAL_SYNC_SECONDS,

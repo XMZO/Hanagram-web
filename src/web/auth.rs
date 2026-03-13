@@ -17,6 +17,7 @@ pub(crate) fn public_routes() -> Router<AppState> {
         )
         .route("/login", get(login_page_handler).post(login_submit_handler))
         .route("/logout", post(logout_handler))
+        .route("/language/{language_code}", get(select_language_handler))
 }
 
 pub(crate) fn protected_routes() -> Router<AppState> {
@@ -31,6 +32,48 @@ pub(crate) fn protected_routes() -> Router<AppState> {
             "/settings/security/totp/setup",
             get(totp_setup_page_handler).post(confirm_totp_setup_handler),
         )
+}
+
+fn security_settings_target() -> String {
+    String::from("/settings#security")
+}
+
+fn sanitized_language_return_path(headers: &HeaderMap) -> String {
+    let fallback = String::from("/login");
+    let Some(raw_referer) = headers
+        .get(header::REFERER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return fallback;
+    };
+
+    let (path, query) = if raw_referer.starts_with('/') {
+        let (path, query) = raw_referer.split_once('?').unwrap_or((raw_referer, ""));
+        (path.to_owned(), query.to_owned())
+    } else {
+        let Ok(url) = reqwest::Url::parse(raw_referer) else {
+            return fallback;
+        };
+        (
+            url.path().to_owned(),
+            url.query().unwrap_or_default().to_owned(),
+        )
+    };
+
+    if path.is_empty() || path.starts_with("/language/") {
+        return fallback;
+    }
+
+    let filtered_query = query
+        .split('&')
+        .filter(|pair| !pair.is_empty() && !pair.starts_with("lang="))
+        .collect::<Vec<_>>();
+
+    if filtered_query.is_empty() {
+        path
+    } else {
+        format!("{path}?{}", filtered_query.join("&"))
+    }
 }
 
 async fn render_login_page(
@@ -50,10 +93,7 @@ async fn render_login_page(
     context.insert("languages", &languages);
     context.insert("error_message", &error_message);
     context.insert("show_register", &show_register);
-    context.insert(
-        "register_href",
-        &format!("/register?lang={}", language.code()),
-    );
+    context.insert("register_href", "/register");
     context.insert("register_label", &translations.register_title);
     context.insert("mfa_label", &translations.login_mfa_label);
     context.insert("recovery_label", &translations.login_recovery_label);
@@ -84,7 +124,7 @@ async fn render_register_page(
     context.insert("confirm_label", &translations.register_confirm_label);
     context.insert("submit_label", &translations.register_submit_label);
     context.insert("back_label", &translations.back_to_login_label);
-    context.insert("back_href", &format!("/login?lang={}", language.code()));
+    context.insert("back_href", "/login");
     context.insert("error_message", &error_message);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -99,6 +139,15 @@ pub(crate) async fn render_settings_page(
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
+    let banner = if banner.is_some() {
+        banner
+    } else if authenticated.requires_password_reset {
+        Some(PageBanner::error(
+            translations.settings_password_reset_required_message,
+        ))
+    } else {
+        None
+    };
     let active_sessions = app_state
         .meta_store
         .list_auth_sessions_for_user(&authenticated.user.id)
@@ -170,6 +219,14 @@ pub(crate) async fn render_settings_page(
     context.insert("title", &translations.settings_page_title);
     context.insert("description", &translations.settings_page_description);
     context.insert("current_username", &authenticated.user.username);
+    context.insert(
+        "password_reset_required",
+        &authenticated.requires_password_reset,
+    );
+    context.insert(
+        "show_workspace_links",
+        &(!authenticated.requires_password_reset),
+    );
     context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
     context.insert("admin_href", &admin_href(language));
     context.insert("dashboard_href", &dashboard_href(language));
@@ -212,10 +269,7 @@ pub(crate) async fn render_settings_page(
         &translations.settings_idle_summary_label,
     );
     context.insert("idle_form_title", &translations.settings_idle_form_title);
-    context.insert(
-        "idle_form_action",
-        &format!("/settings/security/idle-timeout?lang={}", language.code()),
-    );
+    context.insert("idle_form_action", "/settings/security/idle-timeout");
     context.insert("idle_input_label", &translations.settings_idle_input_label);
     context.insert("idle_timeout_field_value", &idle_timeout_field_value);
     context.insert("idle_timeout_hint", &idle_timeout_hint);
@@ -223,16 +277,10 @@ pub(crate) async fn render_settings_page(
         "idle_submit_label",
         &translations.settings_idle_submit_label,
     );
-    context.insert(
-        "totp_setup_href",
-        &format!("/settings/security/totp/setup?lang={}", language.code()),
-    );
+    context.insert("totp_setup_href", "/settings/security/totp/setup");
     context.insert("totp_setup_label", &translations.settings_totp_setup_label);
     context.insert("password_title", &translations.settings_password_title);
-    context.insert(
-        "password_action",
-        &format!("/settings/security/password?lang={}", language.code()),
-    );
+    context.insert("password_action", "/settings/security/password");
     context.insert(
         "current_password_label",
         &translations.settings_current_password_label,
@@ -282,10 +330,7 @@ pub(crate) async fn render_settings_page(
     context.insert("notification_template_preview", &bot_template_preview);
     context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
     context.insert("bot_placeholders", &bot_placeholders);
-    context.insert(
-        "bot_settings_action",
-        &format!("/settings/bot?lang={}", language.code()),
-    );
+    context.insert("bot_settings_action", "/settings/bot");
     context.insert("sessions_title", &translations.settings_sessions_title);
     context.insert(
         "sessions_description",
@@ -300,11 +345,7 @@ pub(crate) async fn render_settings_page(
     context.insert("revoke_label", &translations.settings_revoke_label);
     context.insert(
         "revoke_all_action",
-        &format!(
-            "/admin/users/{}/sessions/revoke?lang={}",
-            authenticated.user.id,
-            language.code()
-        ),
+        &format!("/admin/users/{}/sessions/revoke", authenticated.user.id),
     );
     context.insert("revoke_all_label", &translations.settings_revoke_all_label);
     context.insert(
@@ -404,16 +445,35 @@ async fn render_totp_setup_page(
         .map(|code| code.as_ref().as_str().to_owned())
         .collect::<Vec<_>>();
     context.insert("recovery_codes", &recovery_codes);
-    context.insert(
-        "confirm_action",
-        &format!("/settings/security/totp/setup?lang={}", language.code()),
-    );
+    context.insert("confirm_action", "/settings/security/totp/setup");
     context.insert("confirm_label", &translations.totp_setup_confirm_label);
     context.insert("confirm_submit", &translations.totp_setup_confirm_submit);
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "totp_setup.html", &context)
+}
+
+async fn select_language_handler(
+    State(app_state): State<AppState>,
+    AxumPath(language_code): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(language) = Language::parse(&language_code) else {
+        return Redirect::to(&sanitized_language_return_path(&headers)).into_response();
+    };
+
+    let settings = app_state.system_settings.read().await.clone();
+    let mut response = Redirect::to(&sanitized_language_return_path(&headers)).into_response();
+    let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
+
+    match set_cookie_header(&build_language_cookie(language, cookie_secure)) {
+        Ok(cookie) => {
+            response.headers_mut().append(header::SET_COOKIE, cookie);
+            response
+        }
+        Err(status) => status.into_response(),
+    }
 }
 
 async fn login_page_handler(
@@ -427,12 +487,13 @@ async fn login_page_handler(
     if let Ok(Some(authenticated)) =
         resolve_authenticated_session(&app_state.meta_store, &settings, &headers).await
     {
-        let target =
-            if authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0 {
-                format!("/settings/security/totp/setup?lang={}", language.code())
-            } else {
-                login_redirect_target(language)
-            };
+        let target = if authenticated.requires_password_reset {
+            security_settings_target()
+        } else if authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0 {
+            String::from("/settings/security/totp/setup")
+        } else {
+            login_redirect_target(language)
+        };
         return Redirect::to(&target).into_response();
     }
     clear_invalid_cookie_state(&app_state, &headers).await;
@@ -453,7 +514,7 @@ async fn register_page_handler(
     let allowed = registration_page_allowed(&app_state.meta_store, &settings).await;
 
     if !allowed {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     }
 
     match render_register_page(&app_state, language, None, &headers).await {
@@ -494,8 +555,10 @@ async fn login_submit_handler(
             .await;
 
             let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
-            let redirect_target = if login_result.requires_totp_setup {
-                format!("/settings/security/totp/setup?lang={}", language.code())
+            let redirect_target = if login_result.requires_password_reset {
+                security_settings_target()
+            } else if login_result.requires_totp_setup {
+                String::from("/settings/security/totp/setup")
             } else {
                 login_redirect_target(language)
             };
@@ -565,7 +628,7 @@ async fn register_submit_handler(
         registration_submit_allowed(&app_state.meta_store, &settings, &form.username).await;
 
     if !allowed {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     }
     if form.password != form.confirm_password {
         let message = language.translations().password_fields_must_match_message;
@@ -594,11 +657,7 @@ async fn register_submit_handler(
             cache_user_master_key(&app_state, &user.id, &auth_session.id, master_key).await;
 
             let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
-            let mut response = Redirect::to(&format!(
-                "/settings/security/totp/setup?lang={}",
-                language.code()
-            ))
-            .into_response();
+            let mut response = Redirect::to("/settings/security/totp/setup").into_response();
             let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
             match set_cookie_header(&build_auth_cookie(&session_token, max_age, cookie_secure)) {
                 Ok(cookie) => {
@@ -665,7 +724,7 @@ async fn change_password_handler(
         .ok()
         .flatten()
     else {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     };
 
     match web_auth::change_password(
@@ -732,7 +791,7 @@ async fn update_idle_timeout_handler(
         .ok()
         .flatten()
     else {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     };
 
     let preferred_idle_timeout_minutes =
@@ -935,7 +994,7 @@ async fn confirm_totp_setup_handler(
         .ok()
         .flatten()
     else {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     };
 
     match web_auth::save_totp_setup(
@@ -975,8 +1034,8 @@ async fn logout_handler(
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
 ) -> Response {
-    let language = detect_language(&headers, query.lang.as_deref());
-    let mut response = Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+    let _language = detect_language(&headers, query.lang.as_deref());
+    let mut response = Redirect::to("/login").into_response();
     let settings = app_state.system_settings.read().await.clone();
     let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
     if let Some(token) = find_cookie(&headers, AUTH_COOKIE_NAME) {

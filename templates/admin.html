@@ -121,7 +121,7 @@
         {% endif %}
 
         {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">{{ banner.message }}</section>
+        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 whitespace-pre-line {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">{{ banner.message }}</section>
         {% endif %}
 
         <section class="mt-4 paper-shadow section-card rounded-[1.75rem] p-4 sm:p-5">
@@ -165,7 +165,7 @@
                                                 <p class="truncate text-lg font-semibold">{{ user.username }}</p>
                                                 <span class="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium">{% if user.role == 'admin' %}{{ role_admin_label }}{% else %}{{ role_user_label }}{% endif %}</span>
                                                 <span class="rounded-full border {% if user.totp_enabled %}border-sage/35 bg-mist text-sageDeep{% else %}border-line bg-white text-ink/72{% endif %} px-3 py-1 text-xs font-medium">{% if user.totp_enabled %}{{ totp_enabled_badge_label }}{% else %}{{ totp_missing_badge_label }}{% endif %}</span>
-                                                <span class="rounded-full border {% if user.password_ready %}border-line bg-white text-ink/72{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %} px-3 py-1 text-xs font-medium">{% if user.password_ready %}{{ password_ready_badge_label }}{% else %}{{ password_reset_badge_label }}{% endif %}</span>
+                                                <span class="rounded-full border {% if not user.password_ready %}border-peach/35 bg-[#fbefec] text-[#98675f]{% elif user.password_reset_required %}border-butter/60 bg-[#f7f0e4] text-ink/78{% else %}border-line bg-white text-ink/72{% endif %} px-3 py-1 text-xs font-medium">{% if not user.password_ready %}{{ password_missing_badge_label }}{% elif user.password_reset_required %}{{ password_reset_badge_label }}{% else %}{{ password_ready_badge_label }}{% endif %}</span>
                                                 {% if user.locked %}<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">{{ locked_badge_label }}</span>{% endif %}
                                             </div>
 
@@ -177,10 +177,11 @@
                                         </div>
 
                                         {% if user.role != 'admin' %}
-                                        <div class="flex flex-wrap gap-2 xl:max-w-[14rem] xl:justify-end">
-                                            <form method="post" action="/admin/users/{{ user.id }}/unlock?lang={{ lang }}"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ unlock_label }}</button></form>
-                                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke?lang={{ lang }}"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ revoke_sessions_label }}</button></form>
-                                            <form method="post" action="/admin/users/{{ user.id }}/reset?lang={{ lang }}"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ reset_label }}</button></form>
+                                        <div class="flex flex-wrap gap-2 xl:max-w-[20rem] xl:justify-end">
+                                            <form method="post" action="/admin/users/{{ user.id }}/unlock"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ unlock_label }}</button></form>
+                                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ revoke_sessions_label }}</button></form>
+                                            <form method="post" action="/admin/users/{{ user.id }}/reset"><button type="submit" class="rounded-full border border-butter/60 bg-[#f7f0e4] px-4 py-2 text-sm text-ink/78 transition hover:border-[#ddc48f] hover:bg-[#f3ead6]">{{ reset_label }}</button></form>
+                                            <form method="post" action="/admin/users/{{ user.id }}/delete" data-confirm="{{ delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ delete_label }}</button></form>
                                         </div>
                                         {% endif %}
                                     </div>

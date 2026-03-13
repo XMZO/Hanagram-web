@@ -46,6 +46,10 @@ pub struct TranslationSet {
     pub dashboard_workspace_eyebrow: &'static str,
     pub dashboard_workspace_title: &'static str,
     pub dashboard_workspace_description: &'static str,
+    pub dashboard_attention_title: &'static str,
+    pub dashboard_attention_empty: &'static str,
+    pub dashboard_recent_activity_title: &'static str,
+    pub dashboard_recent_activity_empty: &'static str,
     pub dashboard_lane_sessions_title: &'static str,
     pub dashboard_lane_sessions_body: &'static str,
     pub dashboard_lane_settings_title: &'static str,
@@ -275,6 +279,7 @@ pub struct TranslationSet {
     pub admin_policy_description: &'static str,
     pub admin_personal_bot_title: &'static str,
     pub admin_personal_bot_description: &'static str,
+    pub admin_delete_label: &'static str,
     pub admin_registration_label: &'static str,
     pub admin_public_registration_label: &'static str,
     pub admin_session_ttl_label: &'static str,
@@ -308,6 +313,7 @@ pub struct TranslationSet {
     pub admin_totp_missing_badge_label: &'static str,
     pub admin_password_ready_badge_label: &'static str,
     pub admin_password_reset_badge_label: &'static str,
+    pub admin_password_missing_badge_label: &'static str,
     pub admin_user_active_sessions_label: &'static str,
     pub admin_user_recovery_codes_label: &'static str,
     pub admin_user_last_ip_label: &'static str,
@@ -355,6 +361,7 @@ pub struct TranslationSet {
     pub settings_idle_timeout_hint_capped: &'static str,
     pub settings_idle_timeout_hint_unlimited: &'static str,
     pub settings_access_other_sessions_hint: &'static str,
+    pub settings_password_reset_required_message: &'static str,
     pub login_locked_until_message: &'static str,
     pub login_require_mfa_message: &'static str,
     pub login_invalid_mfa_message: &'static str,
@@ -369,7 +376,10 @@ pub struct TranslationSet {
     pub admin_user_created_message: &'static str,
     pub admin_user_unlocked_message: &'static str,
     pub admin_reset_completed_message: &'static str,
+    pub admin_reset_temporary_password_message: &'static str,
     pub admin_user_sessions_revoked_message: &'static str,
+    pub admin_user_deleted_message: &'static str,
+    pub admin_delete_confirm_message: &'static str,
     pub admin_selected_sessions_revoked_message: &'static str,
     pub admin_settings_refresh_failed_prefix: &'static str,
     pub admin_settings_saved_message: &'static str,
@@ -420,18 +430,18 @@ impl Language {
     }
 }
 
-pub fn language_options(current: Language, path: &str) -> [LanguageOption; 2] {
+pub fn language_options(current: Language, _path: &str) -> [LanguageOption; 2] {
     [
         LanguageOption {
             code: Language::ZhCn.code(),
             label: "中文",
-            href: format!("{path}?lang=zh-CN"),
+            href: String::from("/language/zh-CN"),
             active: current == Language::ZhCn,
         },
         LanguageOption {
             code: Language::En.code(),
             label: "English",
-            href: format!("{path}?lang=en"),
+            href: String::from("/language/en"),
             active: current == Language::En,
         },
     ]

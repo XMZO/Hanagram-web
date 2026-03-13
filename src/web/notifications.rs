@@ -124,10 +124,7 @@ async fn render_notification_settings_page(
         "bot_placeholders",
         &build_bot_placeholder_hints(language).to_vec(),
     );
-    context.insert(
-        "bot_settings_action",
-        &format!("/settings/bot?lang={}", language.code()),
-    );
+    context.insert("bot_settings_action", "/settings/bot");
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -236,7 +233,7 @@ async fn save_bot_settings_handler(
         .ok()
         .flatten()
     else {
-        return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
+        return Redirect::to("/login").into_response();
     };
     user.security.bot_notification_settings = settings.clone();
     user.updated_at_unix = Utc::now().timestamp();

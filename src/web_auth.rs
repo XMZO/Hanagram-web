@@ -21,7 +21,10 @@ use hanagram_web::store::{
 };
 use serde_json::json;
 
+use crate::i18n::Language;
+
 pub const AUTH_COOKIE_NAME: &str = "hanagram_auth";
+pub const LANGUAGE_COOKIE_NAME: &str = "hanagram_lang";
 pub const AUTH_AUDIT_LOGIN_SUCCESS: &str = "login_success";
 pub const AUTH_AUDIT_LOGIN_FAILURE: &str = "login_failure";
 pub const AUTH_AUDIT_REGISTER: &str = "user_registered";
@@ -34,6 +37,7 @@ pub struct AuthenticatedSession {
     pub auth_session: AuthSessionRecord,
     pub recovery_codes_remaining: i64,
     pub requires_totp_setup: bool,
+    pub requires_password_reset: bool,
 }
 
 pub struct RegistrationResult {
@@ -48,6 +52,7 @@ pub struct LoginResult {
     pub session_token: String,
     pub master_key: MasterKey,
     pub requires_totp_setup: bool,
+    pub requires_password_reset: bool,
 }
 
 pub struct TotpSetupMaterial {
@@ -242,6 +247,7 @@ pub async fn authenticate_user(
     let requires_totp = settings
         .totp_policy
         .applies_to(user.role == UserRole::Admin);
+    let requires_password_reset = user.security.password_needs_reset;
 
     if user.security.totp_enabled {
         let secret = decrypt_user_totp_secret(&user, master_key.as_slice())
@@ -328,6 +334,7 @@ pub async fn authenticate_user(
             session_token,
             master_key,
             requires_totp_setup: true,
+            requires_password_reset,
         });
     }
 
@@ -350,6 +357,7 @@ pub async fn authenticate_user(
         session_token,
         master_key,
         requires_totp_setup: false,
+        requires_password_reset,
     })
 }
 
@@ -395,12 +403,14 @@ pub async fn resolve_authenticated_session(
         .totp_policy
         .applies_to(user.role == UserRole::Admin)
         && !user.security.totp_enabled;
+    let requires_password_reset = user.security.password_needs_reset;
 
     Ok(Some(AuthenticatedSession {
         user,
         auth_session,
         recovery_codes_remaining,
         requires_totp_setup,
+        requires_password_reset,
     }))
 }
 
@@ -522,6 +532,14 @@ pub fn build_auth_cookie(token: &str, max_age_seconds: i64, secure: bool) -> Str
 pub fn clear_auth_cookie(secure: bool) -> String {
     let secure_fragment = if secure { "; Secure" } else { "" };
     format!("{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_fragment}")
+}
+
+pub fn build_language_cookie(language: Language, secure: bool) -> String {
+    let secure_fragment = if secure { "; Secure" } else { "" };
+    format!(
+        "{LANGUAGE_COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000{secure_fragment}",
+        language.code()
+    )
 }
 
 pub fn effective_auth_cookie_secure(settings: &SystemSettings, headers: &HeaderMap) -> bool {

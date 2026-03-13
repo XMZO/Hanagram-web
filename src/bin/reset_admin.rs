@@ -47,7 +47,9 @@ async fn main() -> Result<()> {
 
     let mut admin = admins.remove(0);
     let username = admin.username.clone();
-    let reset_result = reset_user_account(&store, &mut admin, &users_dir).await?;
+    let settings = store.load_system_settings().await?;
+    let reset_result =
+        reset_user_account(&store, &mut admin, &users_dir, &settings.argon_policy).await?;
 
     let _ = store
         .record_audit(&NewAuditEntry {
@@ -66,8 +68,8 @@ async fn main() -> Result<()> {
         .await;
 
     println!(
-        "Admin account '{}' was reset. Register again with the same username to reclaim it.",
-        admin.username
+        "Admin account '{}' was reset.\nTemporary password: {}\nSign in with it, then change the password immediately.",
+        admin.username, reset_result.temporary_password
     );
 
     Ok(())

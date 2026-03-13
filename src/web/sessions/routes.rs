@@ -155,11 +155,31 @@ async fn render_setup_page(
     render_template(&app_state.tera, "session_setup.html", &context)
 }
 
-fn build_phone_flow_view(
-    flow_id: &str,
-    flow: &PendingPhoneLogin,
-    language: Language,
-) -> PhoneFlowView {
+fn phone_flow_href(flow_id: &str) -> String {
+    format!("/sessions/phone/{flow_id}")
+}
+
+fn phone_flow_error_href(flow_id: &str, error: &str) -> String {
+    format!("{}?error={error}", phone_flow_href(flow_id))
+}
+
+fn phone_flow_cancel_href(flow_id: &str) -> String {
+    format!("/sessions/phone/{flow_id}/cancel")
+}
+
+fn qr_flow_href(flow_id: &str) -> String {
+    format!("/sessions/qr/{flow_id}")
+}
+
+fn qr_flow_error_href(flow_id: &str, error: &str) -> String {
+    format!("{}?error={error}", qr_flow_href(flow_id))
+}
+
+fn qr_flow_cancel_href(flow_id: &str) -> String {
+    format!("/sessions/qr/{flow_id}/cancel")
+}
+
+fn build_phone_flow_view(flow_id: &str, flow: &PendingPhoneLogin) -> PhoneFlowView {
     let awaiting_password = matches!(flow.stage, PhoneLoginStage::AwaitingPassword { .. });
     let submit_action = if awaiting_password {
         format!("/sessions/phone/{flow_id}/password")
@@ -177,7 +197,7 @@ fn build_phone_flow_view(
         awaiting_password,
         password_hint,
         submit_action,
-        cancel_action: format!("/sessions/phone/{flow_id}/cancel?lang={}", language.code()),
+        cancel_action: phone_flow_cancel_href(flow_id),
     }
 }
 
@@ -191,7 +211,7 @@ async fn render_phone_flow_page(
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, &format!("/sessions/phone/{flow_id}"));
-    let flow_view = build_phone_flow_view(flow_id, flow, language);
+    let flow_view = build_phone_flow_view(flow_id, flow);
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -222,7 +242,7 @@ async fn render_qr_flow_page(
         qr_link: pending.qr_link,
         qr_svg: pending.qr_svg,
         expires_at: pending.expires_at,
-        cancel_action: format!("/sessions/qr/{flow_id}/cancel?lang={}", language.code()),
+        cancel_action: qr_flow_cancel_href(flow_id),
     };
 
     let mut context = Context::new();
@@ -820,11 +840,7 @@ async fn start_phone_login_handler(
                 .await
                 .insert(flow_id.clone(), flow);
 
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_href(&flow_id)).into_response()
         }
         Err(error) => {
             warn!("failed requesting login code: {}", error);
@@ -890,7 +906,7 @@ async fn start_qr_login_handler(
         },
     );
 
-    Redirect::to(&format!("/sessions/qr/{flow_id}?lang={}", language.code())).into_response()
+    Redirect::to(&qr_flow_href(&flow_id)).into_response()
 }
 
 async fn phone_flow_page_handler(
@@ -938,11 +954,7 @@ async fn verify_phone_code_handler(
     let code = form.code.trim();
 
     if code.is_empty() {
-        return Redirect::to(&format!(
-            "/sessions/phone/{flow_id}?lang={}&error=missing_code",
-            language.code()
-        ))
-        .into_response();
+        return Redirect::to(&phone_flow_error_href(&flow_id, "missing_code")).into_response();
     }
 
     let owner_matches = app_state
@@ -978,11 +990,7 @@ async fn verify_phone_code_handler(
             flow.stage = PhoneLoginStage::AwaitingPassword { token };
             flows.insert(flow_id.clone(), flow);
             drop(flows);
-            return Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}",
-                language.code()
-            ))
-            .into_response();
+            return Redirect::to(&phone_flow_href(&flow_id)).into_response();
         }
     };
     drop(flows);
@@ -1014,11 +1022,7 @@ async fn verify_phone_code_handler(
                     ..flow
                 },
             );
-            return Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}&error=code_failed",
-                language.code()
-            ))
-            .into_response();
+            return Redirect::to(&phone_flow_error_href(&flow_id, "code_failed")).into_response();
         }
     };
 
@@ -1076,11 +1080,7 @@ async fn verify_phone_code_handler(
                 .write()
                 .await
                 .insert(flow_id.clone(), flow);
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_href(&flow_id)).into_response()
         }
         Err(SignInError::InvalidCode) => {
             flow.stage = PhoneLoginStage::AwaitingCode { token };
@@ -1090,11 +1090,7 @@ async fn verify_phone_code_handler(
                 .write()
                 .await
                 .insert(flow_id.clone(), flow);
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}&error=invalid_code",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_error_href(&flow_id, "invalid_code")).into_response()
         }
         Err(SignInError::SignUpRequired) => {
             render_setup_error_response(
@@ -1113,17 +1109,11 @@ async fn verify_phone_code_handler(
                 .write()
                 .await
                 .insert(flow_id.clone(), flow);
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}&error=code_failed",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_error_href(&flow_id, "code_failed")).into_response()
         }
-        Err(SignInError::InvalidPassword(_)) => Redirect::to(&format!(
-            "/sessions/phone/{flow_id}?lang={}&error=password_retry",
-            language.code()
-        ))
-        .into_response(),
+        Err(SignInError::InvalidPassword(_)) => {
+            Redirect::to(&phone_flow_error_href(&flow_id, "password_retry")).into_response()
+        }
     }
 }
 
@@ -1138,11 +1128,7 @@ async fn verify_phone_password_handler(
     let password = form.password.trim();
 
     if password.is_empty() {
-        return Redirect::to(&format!(
-            "/sessions/phone/{flow_id}?lang={}&error=missing_password",
-            language.code()
-        ))
-        .into_response();
+        return Redirect::to(&phone_flow_error_href(&flow_id, "missing_password")).into_response();
     }
 
     let owner_matches = app_state
@@ -1178,11 +1164,7 @@ async fn verify_phone_password_handler(
             flow.stage = PhoneLoginStage::AwaitingCode { token };
             flows.insert(flow_id.clone(), flow);
             drop(flows);
-            return Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}",
-                language.code()
-            ))
-            .into_response();
+            return Redirect::to(&phone_flow_href(&flow_id)).into_response();
         }
     };
     drop(flows);
@@ -1271,11 +1253,7 @@ async fn verify_phone_password_handler(
                 .write()
                 .await
                 .insert(flow_id.clone(), flow);
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}&error=invalid_password",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_error_href(&flow_id, "invalid_password")).into_response()
         }
         Err(SignInError::Other(error)) => {
             warn!("failed verifying 2fa password: {}", error);
@@ -1297,17 +1275,11 @@ async fn verify_phone_password_handler(
                 .write()
                 .await
                 .insert(flow_id.clone(), flow);
-            Redirect::to(&format!(
-                "/sessions/phone/{flow_id}?lang={}",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&phone_flow_href(&flow_id)).into_response()
         }
-        Err(SignInError::InvalidCode) => Redirect::to(&format!(
-            "/sessions/phone/{flow_id}?lang={}&error=code_failed",
-            language.code()
-        ))
-        .into_response(),
+        Err(SignInError::InvalidCode) => {
+            Redirect::to(&phone_flow_error_href(&flow_id, "code_failed")).into_response()
+        }
         Err(SignInError::SignUpRequired) => {
             render_setup_error_response(
                 &app_state,
@@ -1426,11 +1398,7 @@ async fn qr_flow_page_handler(
         }
         Err(error) => {
             warn!("failed polling qr login flow: {}", error);
-            Redirect::to(&format!(
-                "/sessions/qr/{flow_id}?lang={}&error=qr_failed",
-                language.code()
-            ))
-            .into_response()
+            Redirect::to(&qr_flow_error_href(&flow_id, "qr_failed")).into_response()
         }
     }
 }

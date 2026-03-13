@@ -42,7 +42,7 @@ pub(crate) use tracing::{info, warn};
 pub(crate) use tracing_subscriber::EnvFilter;
 pub(crate) use uuid::Uuid;
 
-pub(crate) use hanagram_web::account_reset::reset_user_account;
+pub(crate) use hanagram_web::account_reset::{delete_user_account, reset_user_account};
 pub(crate) use hanagram_web::security::{
     EncryptedBlob, EnforcementMode, MasterKey, RegistrationPolicy, SensitiveBytes, SharedMasterKey,
     SharedSensitiveBytes, SharedSensitiveString, TotpVerification, decrypt_bytes, encrypt_bytes,
@@ -65,10 +65,11 @@ pub(crate) use crate::state::{
     SharedState,
 };
 pub(crate) use crate::web_auth::{
-    AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
-    build_totp_setup_material, clear_auth_cookie, effective_auth_cookie_secure, extract_client_ip,
-    extract_user_agent, find_cookie, initialize_user_credentials, normalize_username,
-    request_uses_https, resolve_authenticated_session,
+    AUTH_COOKIE_NAME, AuthenticatedSession, LANGUAGE_COOKIE_NAME, LoginError, RegistrationResult,
+    build_auth_cookie, build_language_cookie, build_totp_setup_material, clear_auth_cookie,
+    effective_auth_cookie_secure, extract_client_ip, extract_user_agent, find_cookie,
+    initialize_user_credentials, normalize_username, request_uses_https,
+    resolve_authenticated_session,
 };
 
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
@@ -300,7 +301,10 @@ pub(crate) struct DashboardSessionView {
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct DashboardSnapshot {
+    pub(crate) total_count: usize,
     pub(crate) connected_count: usize,
+    pub(crate) connecting_count: usize,
+    pub(crate) error_count: usize,
     pub(crate) generated_at: String,
     pub(crate) sessions: Vec<DashboardSessionView>,
 }
@@ -340,6 +344,7 @@ pub(crate) struct AdminUserView {
     pub(crate) locked: bool,
     pub(crate) totp_enabled: bool,
     pub(crate) password_ready: bool,
+    pub(crate) password_reset_required: bool,
     pub(crate) active_sessions: usize,
     pub(crate) recovery_codes_remaining: i64,
     pub(crate) last_login_ip: Option<String>,
@@ -539,27 +544,33 @@ pub(crate) struct FlowPageQuery {
 }
 
 pub(crate) fn login_redirect_target(language: Language) -> String {
-    format!("/?lang={}", language.code())
+    let _ = language;
+    String::from("/")
 }
 
 pub(crate) fn dashboard_href(language: Language) -> String {
-    format!("/?lang={}", language.code())
+    let _ = language;
+    String::from("/")
 }
 
 pub(crate) fn setup_href(language: Language) -> String {
-    format!("/sessions/new?lang={}", language.code())
+    let _ = language;
+    String::from("/sessions/new")
 }
 
 pub(crate) fn settings_href(language: Language) -> String {
-    format!("/settings?lang={}", language.code())
+    let _ = language;
+    String::from("/settings")
 }
 
 pub(crate) fn notifications_href(language: Language) -> String {
-    format!("/settings/notifications?lang={}", language.code())
+    let _ = language;
+    String::from("/settings/notifications")
 }
 
 pub(crate) fn admin_href(language: Language) -> String {
-    format!("/admin?lang={}", language.code())
+    let _ = language;
+    String::from("/admin")
 }
 
 pub(crate) fn format_unix_timestamp(unix: i64) -> String {
@@ -875,7 +886,13 @@ pub(crate) fn detect_language(headers: &HeaderMap, query_lang: Option<&str>) -> 
     let accept_language = headers
         .get(header::ACCEPT_LANGUAGE)
         .and_then(|value| value.to_str().ok());
-    Language::detect(query_lang, accept_language)
+    if let Some(language) = query_lang.and_then(Language::parse) {
+        return language;
+    }
+    if let Some(language) = find_cookie(headers, LANGUAGE_COOKIE_NAME).and_then(Language::parse) {
+        return language;
+    }
+    Language::detect(None, accept_language)
 }
 
 pub(crate) fn build_transport_security_warning(

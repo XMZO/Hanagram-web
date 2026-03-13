@@ -9,7 +9,6 @@ pub(crate) async fn require_login(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let language = detect_language(request.headers(), None);
     let settings = app_state.system_settings.read().await.clone();
     let Some(authenticated) =
         resolve_authenticated_session(&app_state.meta_store, &settings, request.headers())
@@ -33,17 +32,17 @@ pub(crate) async fn require_login(
     };
 
     let path = request.uri().path();
-    let allow_totp_setup = path.starts_with("/settings/security/totp")
-        || path == "/logout"
-        || path == "/api/dashboard/snapshot";
+    let allow_password_reset =
+        path == "/settings" || path == "/settings/security/password" || path == "/logout";
+    if authenticated.requires_password_reset && !allow_password_reset {
+        return Redirect::to("/settings#security").into_response();
+    }
+
+    let allow_totp_setup = path.starts_with("/settings/security/totp") || path == "/logout";
     if (authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0)
         && !allow_totp_setup
     {
-        return Redirect::to(&format!(
-            "/settings/security/totp/setup?lang={}",
-            language.code()
-        ))
-        .into_response();
+        return Redirect::to("/settings/security/totp/setup").into_response();
     }
 
     request.extensions_mut().insert(authenticated);

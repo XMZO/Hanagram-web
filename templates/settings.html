@@ -34,7 +34,7 @@
             }
         };
 
-        const SETTINGS_PANES = ["security", "notifications", "access"];
+        const SETTINGS_PANES = [{% if show_workspace_links %}"security", "notifications", "access"{% else %}"security"{% endif %}];
 
         function activateSettingsPane(rawHash) {
             const requested = String(rawHash || window.location.hash || "#security").replace(/^#/, "");
@@ -95,11 +95,13 @@
                 </div>
 
                 <div class="flex flex-wrap gap-2 lg:justify-end">
+                    {% if show_workspace_links %}
                     <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ dashboard_label }}</a>
                     {% if show_admin %}
                     <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ admin_label }}</a>
                     {% endif %}
                     <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
+                    {% endif %}
                 </div>
             </div>
 
@@ -133,7 +135,7 @@
         {% endif %}
 
         {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 whitespace-pre-line {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
             {{ banner.message }}
         </section>
         {% endif %}
@@ -143,12 +145,14 @@
                 <a href="#security" data-settings-tab="security" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
                     {{ settings_nav_security }}
                 </a>
+                {% if show_workspace_links %}
                 <a href="#notifications" data-settings-tab="notifications" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
                     {{ settings_nav_notifications }}
                 </a>
                 <a href="#access" data-settings-tab="access" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
                     {{ settings_nav_access }}
                 </a>
+                {% endif %}
             </div>
 
             <div class="mt-4">
@@ -159,7 +163,9 @@
                             <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ security_title }}</h2>
                             <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ security_description }}</p>
                         </div>
+                        {% if show_workspace_links %}
                         <a href="{{ totp_setup_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
+                        {% endif %}
                     </div>
 
                     <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr),minmax(0,1.05fr)]">
@@ -197,6 +203,7 @@
                     </div>
                 </section>
 
+                {% if show_workspace_links %}
                 <section data-settings-pane="notifications" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
@@ -273,7 +280,9 @@
                         </article>
                     </div>
                 </section>
+                {% endif %}
 
+                {% if show_workspace_links %}
                 <section data-settings-pane="access" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
@@ -374,7 +383,7 @@
 
                                         <div class="flex items-start xl:justify-end">
                                             {% if not session.is_current %}
-                                            <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke?lang={{ lang }}" class="w-full xl:w-auto">
+                                            <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke" class="w-full xl:w-auto">
                                                 <input type="hidden" name="session_id" value="{{ session.id }}">
                                                 <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] xl:w-auto">{{ revoke_label }}</button>
                                             </form>
@@ -388,6 +397,7 @@
                         </article>
                     </div>
                 </section>
+                {% endif %}
             </div>
         </section>
     </main>
