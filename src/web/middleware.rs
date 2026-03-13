@@ -4,6 +4,29 @@
 use super::sessions;
 use super::shared::*;
 
+fn enforced_redirect_target(
+    path: &str,
+    requires_password_reset: bool,
+    requires_totp_setup: bool,
+    recovery_codes_remaining: i64,
+) -> Option<&'static str> {
+    let allow_password_reset =
+        path == "/settings" || path == "/settings/security/password" || path == "/logout";
+    if requires_password_reset {
+        if allow_password_reset {
+            return None;
+        }
+        return Some("/settings#security");
+    }
+
+    let allow_totp_setup = path.starts_with("/settings/security/totp") || path == "/logout";
+    if (requires_totp_setup || recovery_codes_remaining == 0) && !allow_totp_setup {
+        return Some("/settings/security/totp/setup");
+    }
+
+    None
+}
+
 pub(crate) async fn require_login(
     State(app_state): State<AppState>,
     mut request: Request,
@@ -31,18 +54,13 @@ pub(crate) async fn require_login(
         return response;
     };
 
-    let path = request.uri().path();
-    let allow_password_reset =
-        path == "/settings" || path == "/settings/security/password" || path == "/logout";
-    if authenticated.requires_password_reset && !allow_password_reset {
-        return Redirect::to("/settings#security").into_response();
-    }
-
-    let allow_totp_setup = path.starts_with("/settings/security/totp") || path == "/logout";
-    if (authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0)
-        && !allow_totp_setup
-    {
-        return Redirect::to("/settings/security/totp/setup").into_response();
+    if let Some(target) = enforced_redirect_target(
+        request.uri().path(),
+        authenticated.requires_password_reset,
+        authenticated.requires_totp_setup,
+        authenticated.recovery_codes_remaining,
+    ) {
+        return Redirect::to(target).into_response();
     }
 
     request.extensions_mut().insert(authenticated);
@@ -220,4 +238,38 @@ pub(crate) async fn clear_invalid_cookie_state(app_state: &AppState, headers: &H
     }
     clear_auth_session_sensitive_state(app_state, &auth_session.id).await;
     drop_user_master_key_if_no_active_sessions(app_state, &auth_session.user_id).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enforced_redirect_target;
+
+    #[test]
+    fn password_reset_takes_precedence_over_totp_setup() {
+        assert_eq!(enforced_redirect_target("/settings", true, true, 0), None);
+        assert_eq!(
+            enforced_redirect_target("/settings/security/password", true, true, 0),
+            None
+        );
+        assert_eq!(
+            enforced_redirect_target("/settings/security/totp/setup", true, true, 0),
+            Some("/settings#security")
+        );
+        assert_eq!(
+            enforced_redirect_target("/sessions/new", true, true, 0),
+            Some("/settings#security")
+        );
+    }
+
+    #[test]
+    fn totp_redirect_applies_after_password_reset_is_cleared() {
+        assert_eq!(
+            enforced_redirect_target("/settings", false, true, 0),
+            Some("/settings/security/totp/setup")
+        );
+        assert_eq!(
+            enforced_redirect_target("/settings/security/totp/setup", false, true, 0),
+            None
+        );
+    }
 }
