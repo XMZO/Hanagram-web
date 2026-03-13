@@ -110,6 +110,7 @@ async fn render_notification_settings_page(
     authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let bot_settings = current_user_bot_settings(&authenticated.user);
@@ -134,6 +135,7 @@ async fn render_notification_settings_page(
         &format!("/settings/bot?lang={}", language.code()),
     );
     context.insert("banner", &banner);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "notifications.html", &context)
 }
@@ -144,15 +146,19 @@ async fn render_notification_workspace_page(
     language: Language,
     banner: Option<PageBanner>,
     return_to: Option<&str>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     match return_to {
         Some("settings") => {
-            auth::render_settings_page(app_state, authenticated, language, banner).await
+            auth::render_settings_page(app_state, authenticated, language, banner, headers).await
         }
         Some("admin") if authenticated.user.role == UserRole::Admin => {
-            admin::render_admin_page(app_state, authenticated, language, banner).await
+            admin::render_admin_page(app_state, authenticated, language, banner, headers).await
         }
-        _ => render_notification_settings_page(app_state, authenticated, language, banner).await,
+        _ => {
+            render_notification_settings_page(app_state, authenticated, language, banner, headers)
+                .await
+        }
     }
 }
 
@@ -172,7 +178,9 @@ async fn notification_settings_page_handler(
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    match render_notification_settings_page(&app_state, &authenticated, language, None).await {
+    match render_notification_settings_page(&app_state, &authenticated, language, None, &headers)
+        .await
+    {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -202,6 +210,7 @@ async fn save_bot_settings_handler(
             language,
             Some(PageBanner::error(translations.bot_error_missing_token)),
             return_to,
+            &headers,
         )
         .await
         {
@@ -217,6 +226,7 @@ async fn save_bot_settings_handler(
             language,
             Some(PageBanner::error(translations.bot_error_missing_chat_id)),
             return_to,
+            &headers,
         )
         .await
         {
@@ -245,6 +255,7 @@ async fn save_bot_settings_handler(
             language,
             Some(PageBanner::error(translations.bot_error_save)),
             return_to,
+            &headers,
         )
         .await
         {
@@ -262,6 +273,7 @@ async fn save_bot_settings_handler(
         language,
         Some(PageBanner::success(translations.bot_saved)),
         return_to,
+        &headers,
     )
     .await
     {

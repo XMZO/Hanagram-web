@@ -87,6 +87,13 @@
                 </div>
 
                 <div>
+                    {% if transport_warning %}
+                    <div class="mb-5 rounded-[1.25rem] border border-butter/70 bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
+                        <p class="font-semibold">{{ transport_warning.title }}</p>
+                        <p class="mt-2">{{ transport_warning.message }}</p>
+                    </div>
+                    {% endif %}
+
                     {% if banner %}
                     <div class="mb-5 rounded-[1.25rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm leading-7 text-[#98675f]">
                         {{ banner.message }}

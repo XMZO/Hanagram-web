@@ -65,8 +65,9 @@ pub(crate) use crate::state::{
 };
 pub(crate) use crate::web_auth::{
     AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
-    build_totp_setup_material, clear_auth_cookie, extract_client_ip, extract_user_agent,
-    find_cookie, initialize_user_credentials, normalize_username, resolve_authenticated_session,
+    build_totp_setup_material, clear_auth_cookie, effective_auth_cookie_secure,
+    extract_client_ip, extract_user_agent, find_cookie, initialize_user_credentials,
+    normalize_username, request_uses_https, resolve_authenticated_session,
 };
 
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
@@ -341,6 +342,12 @@ impl PageBanner {
             message: message.into(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct TransportSecurityWarning {
+    pub(crate) title: String,
+    pub(crate) message: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -885,6 +892,41 @@ pub(crate) fn detect_language(headers: &HeaderMap, query_lang: Option<&str>) -> 
         .get(header::ACCEPT_LANGUAGE)
         .and_then(|value| value.to_str().ok());
     Language::detect(query_lang, accept_language)
+}
+
+pub(crate) fn build_transport_security_warning(
+    language: Language,
+    headers: &HeaderMap,
+) -> Option<TransportSecurityWarning> {
+    if request_uses_https(headers) {
+        return None;
+    }
+
+    Some(TransportSecurityWarning {
+        title: match language {
+            Language::En => String::from("Plain HTTP is in use"),
+            Language::ZhCn => String::from("当前正在使用明文 HTTP"),
+        },
+        message: match language {
+            Language::En => String::from(
+                "Passwords, TOTP codes, recovery codes, bot tokens, Telegram API credentials, and session management requests can be intercepted or modified in transit. Only use plain HTTP for temporary local testing. For shared or public access, enable HTTPS directly or place Hanagram Web behind an HTTPS reverse proxy that forwards proto=https.",
+            ),
+            Language::ZhCn => String::from(
+                "密码、TOTP 动态码、恢复码、Bot Token、Telegram API 凭据以及会话管理请求都可能在传输过程中被窃听或篡改。明文 HTTP 只建议用于本机临时调试；如果要给局域网或公网使用，请启用 HTTPS，或者放在 HTTPS 反向代理后面并正确转发 proto=https。",
+            ),
+        },
+    })
+}
+
+pub(crate) fn insert_transport_security_warning(
+    context: &mut Context,
+    language: Language,
+    headers: &HeaderMap,
+) {
+    context.insert(
+        "transport_warning",
+        &build_transport_security_warning(language, headers),
+    );
 }
 
 pub(crate) fn render_template(

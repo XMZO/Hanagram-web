@@ -49,6 +49,13 @@
 
             <p class="mt-4 text-sm leading-7 text-ink/70">{{ description }}</p>
 
+            {% if transport_warning %}
+            <section class="mt-5 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
+                <p class="font-semibold">{{ transport_warning.title }}</p>
+                <p class="mt-2">{{ transport_warning.message }}</p>
+            </section>
+            {% endif %}
+
             {% if error_message %}
             <div class="mt-5 rounded-[1.25rem] border border-peach/40 bg-[#fbefec] px-4 py-3 text-sm text-[#98675f]">
                 {{ error_message }}

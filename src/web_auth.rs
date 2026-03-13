@@ -524,6 +524,60 @@ pub fn clear_auth_cookie(secure: bool) -> String {
     format!("{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_fragment}")
 }
 
+pub fn effective_auth_cookie_secure(settings: &SystemSettings, headers: &HeaderMap) -> bool {
+    settings.cookie_secure && request_uses_https(headers)
+}
+
+pub fn request_uses_https(headers: &HeaderMap) -> bool {
+    if header_has_https_value(headers, "x-forwarded-proto") {
+        return true;
+    }
+    if header_has_https_value(headers, "x-forwarded-ssl") {
+        return true;
+    }
+    if header_has_https_value(headers, "front-end-https") {
+        return true;
+    }
+
+    if let Some(value) = headers.get("forwarded").and_then(|value| value.to_str().ok()) {
+        for entry in value.split(',') {
+            for segment in entry.split(';') {
+                let Some((key, raw_value)) = segment.trim().split_once('=') else {
+                    continue;
+                };
+                if key.trim().eq_ignore_ascii_case("proto")
+                    && raw_value.trim().trim_matches('"').eq_ignore_ascii_case("https")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    header_scheme_is_https(headers, header::ORIGIN) || header_scheme_is_https(headers, header::REFERER)
+}
+
+fn header_has_https_value(headers: &HeaderMap, header_name: &str) -> bool {
+    headers
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value.split(',').any(|segment| {
+                let normalized = segment.trim();
+                normalized.eq_ignore_ascii_case("https") || normalized.eq_ignore_ascii_case("on")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn header_scheme_is_https(headers: &HeaderMap, header_name: header::HeaderName) -> bool {
+    headers
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim_start().to_ascii_lowercase().starts_with("https://"))
+        .unwrap_or(false)
+}
+
 pub fn normalize_username(raw: &str) -> Result<String> {
     let normalized = raw
         .trim()
@@ -834,5 +888,25 @@ mod tests {
         );
 
         assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), None);
+    }
+
+    #[test]
+    fn effective_auth_cookie_secure_disables_secure_flag_for_plain_http() {
+        let settings = SystemSettings::default();
+        let headers = HeaderMap::new();
+
+        assert!(!effective_auth_cookie_secure(&settings, &headers));
+    }
+
+    #[test]
+    fn effective_auth_cookie_secure_respects_forwarded_https() {
+        let settings = SystemSettings::default();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-proto",
+            axum::http::HeaderValue::from_static("https"),
+        );
+
+        assert!(effective_auth_cookie_secure(&settings, &headers));
     }
 }

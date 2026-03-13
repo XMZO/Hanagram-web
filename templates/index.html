@@ -603,6 +603,13 @@
             </article>
         </section>
 
+        {% if transport_warning %}
+        <section class="paper-shadow mt-6 rounded-[1.6rem] border border-butter/70 bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
+            <p class="font-semibold">{{ transport_warning.title }}</p>
+            <p class="mt-2">{{ transport_warning.message }}</p>
+        </section>
+        {% endif %}
+
         {% if sessions | length == 0 %}
         <section class="paper-shadow mt-6 rounded-[2rem] border border-dashed border-line bg-paper/95 px-6 py-16 text-center">
             <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>

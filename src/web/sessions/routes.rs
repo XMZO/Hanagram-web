@@ -128,6 +128,7 @@ async fn render_setup_page(
     app_state: &AppState,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/sessions/new");
@@ -155,6 +156,7 @@ async fn render_setup_page(
             Language::ZhCn => "在手机号登录、扫码登录和实时连接可用之前，管理员还需要先在后台保存 Telegram API ID 和 API Hash。",
         },
     );
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "session_setup.html", &context)
 }
@@ -191,6 +193,7 @@ async fn render_phone_flow_page(
     flow_id: &str,
     flow: &PendingPhoneLogin,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, &format!("/sessions/phone/{flow_id}"));
@@ -204,6 +207,7 @@ async fn render_phone_flow_page(
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("setup_href", &setup_href(language));
     context.insert("flow", &flow_view);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "phone_login.html", &context)
 }
@@ -215,6 +219,7 @@ async fn render_qr_flow_page(
     flow: &PendingQrLogin,
     pending: QrPendingState,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, &format!("/sessions/qr/{flow_id}"));
@@ -235,6 +240,7 @@ async fn render_qr_flow_page(
     context.insert("setup_href", &setup_href(language));
     context.insert("flow", &flow_view);
     context.insert("auto_refresh_seconds", &QR_AUTO_REFRESH_SECONDS);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "qr_login.html", &context)
 }
@@ -246,7 +252,7 @@ async fn session_setup_page_handler(
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
 
-    match render_setup_page(&app_state, language, None).await {
+    match render_setup_page(&app_state, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -266,6 +272,7 @@ async fn import_string_session_handler(
             &app_state,
             language,
             translations.setup_error_missing_string,
+            &headers,
         )
         .await;
     }
@@ -278,6 +285,7 @@ async fn import_string_session_handler(
             &app_state,
             language,
             translations.setup_error_path_alloc,
+            &headers,
         )
         .await;
     }
@@ -297,6 +305,7 @@ async fn import_string_session_handler(
                     &app_state,
                     language,
                     translations.setup_error_path_alloc,
+                    &headers,
                 )
                 .await;
             }
@@ -308,6 +317,7 @@ async fn import_string_session_handler(
                 &app_state,
                 language,
                 translations.setup_error_invalid_string,
+                &headers,
             )
             .await
         }
@@ -445,6 +455,7 @@ async fn import_session_file_handler(
                                     &app_state,
                                     language,
                                     language.translations().setup_error_upload_read,
+                                    &headers,
                                 )
                                 .await;
                             }
@@ -460,6 +471,7 @@ async fn import_session_file_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_upload_read,
+                    &headers,
                 )
                 .await;
             }
@@ -473,6 +485,7 @@ async fn import_session_file_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_missing_upload,
+                &headers,
             )
             .await;
         }
@@ -493,6 +506,7 @@ async fn import_session_file_handler(
             &app_state,
             language,
             language.translations().setup_error_path_alloc,
+            &headers,
         )
         .await;
     }
@@ -513,6 +527,7 @@ async fn import_session_file_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_upload_write,
+                    &headers,
                 )
                 .await;
             }
@@ -524,6 +539,7 @@ async fn import_session_file_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_upload_write,
+                &headers,
             )
             .await
         }
@@ -570,6 +586,7 @@ async fn delete_session_handler(
             Some(PageBanner::error(
                 language.translations().dashboard_delete_error,
             )),
+            &headers,
         )
         .await
         {
@@ -612,6 +629,7 @@ async fn rename_session_handler(
             &authenticated,
             language,
             Some(PageBanner::error(translations.dashboard_rename_missing)),
+            &headers,
         )
         .await
         {
@@ -634,6 +652,7 @@ async fn rename_session_handler(
             &authenticated,
             language,
             Some(PageBanner::error(translations.dashboard_session_missing)),
+            &headers,
         )
         .await
         {
@@ -657,6 +676,7 @@ async fn rename_session_handler(
             &authenticated,
             language,
             Some(PageBanner::error(translations.dashboard_rename_error)),
+            &headers,
         )
         .await
         {
@@ -706,6 +726,7 @@ async fn update_session_note_handler(
                 Language::En => "Failed to update session note.",
                 Language::ZhCn => "更新会话备注失败。",
             })),
+            &headers,
         )
         .await
         {
@@ -733,6 +754,7 @@ async fn start_phone_login_handler(
             &app_state,
             language,
             translations.setup_error_missing_phone,
+            &headers,
         )
         .await;
     }
@@ -746,6 +768,7 @@ async fn start_phone_login_handler(
             &app_state,
             language,
             translations.setup_error_path_alloc,
+            &headers,
         )
         .await;
     }
@@ -755,6 +778,7 @@ async fn start_phone_login_handler(
             &app_state,
             language,
             telegram_api_missing_message(language),
+            &headers,
         )
         .await;
     };
@@ -779,6 +803,7 @@ async fn start_phone_login_handler(
                         &app_state,
                         language,
                         translations.setup_error_phone_unavailable,
+                        &headers,
                     )
                     .await;
                 }
@@ -807,8 +832,13 @@ async fn start_phone_login_handler(
         }
         Err(error) => {
             warn!("failed requesting login code: {}", error);
-            render_setup_error_response(&app_state, language, translations.setup_error_phone_start)
-                .await
+            render_setup_error_response(
+                &app_state,
+                language,
+                translations.setup_error_phone_start,
+                &headers,
+            )
+            .await
         }
     }
 }
@@ -830,6 +860,7 @@ async fn start_qr_login_handler(
             &app_state,
             language,
             translations.setup_error_path_alloc,
+            &headers,
         )
         .await;
     }
@@ -845,6 +876,7 @@ async fn start_qr_login_handler(
                 &app_state,
                 language,
                 translations.setup_error_qr_unavailable,
+                &headers,
             )
             .await;
         }
@@ -886,13 +918,14 @@ async fn phone_flow_page_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_phone_flow_missing,
+                &headers,
             )
             .await;
         }
     };
     let banner = phone_flow_error_banner(language, query.error.as_deref());
 
-    match render_phone_flow_page(&app_state, language, &flow_id, flow, banner).await {
+    match render_phone_flow_page(&app_state, language, &flow_id, flow, banner, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -934,6 +967,7 @@ async fn verify_phone_code_handler(
             &app_state,
             language,
             language.translations().setup_error_phone_flow_missing,
+            &headers,
         )
         .await;
     };
@@ -963,6 +997,7 @@ async fn verify_phone_code_handler(
             &app_state,
             language,
             telegram_api_missing_message(language),
+            &headers,
         )
         .await;
     };
@@ -1005,6 +1040,7 @@ async fn verify_phone_code_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_finalize,
+                &headers,
             )
             .await;
         }
@@ -1027,6 +1063,7 @@ async fn verify_phone_code_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_finalize,
+                    &headers,
                 )
                 .await;
             }
@@ -1068,6 +1105,7 @@ async fn verify_phone_code_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_signup_required,
+                &headers,
             )
             .await
         }
@@ -1129,6 +1167,7 @@ async fn verify_phone_password_handler(
             &app_state,
             language,
             language.translations().setup_error_phone_flow_missing,
+            &headers,
         )
         .await;
     };
@@ -1158,6 +1197,7 @@ async fn verify_phone_password_handler(
             &app_state,
             language,
             telegram_api_missing_message(language),
+            &headers,
         )
         .await;
     };
@@ -1175,6 +1215,7 @@ async fn verify_phone_password_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_phone_password_reset,
+                &headers,
             )
             .await;
         }
@@ -1194,6 +1235,7 @@ async fn verify_phone_password_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_phone_password_reset,
+                &headers,
             )
             .await;
         }
@@ -1216,6 +1258,7 @@ async fn verify_phone_password_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_finalize,
+                    &headers,
                 )
                 .await;
             }
@@ -1244,6 +1287,7 @@ async fn verify_phone_password_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_phone_password_reset,
+                &headers,
             )
             .await
         }
@@ -1273,6 +1317,7 @@ async fn verify_phone_password_handler(
                 &app_state,
                 language,
                 language.translations().setup_error_signup_required,
+                &headers,
             )
             .await
         }
@@ -1326,6 +1371,7 @@ async fn qr_flow_page_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_qr_flow_missing,
+                    &headers,
                 )
                 .await;
             }
@@ -1339,6 +1385,7 @@ async fn qr_flow_page_handler(
             &app_state,
             language,
             telegram_api_missing_message(language),
+            &headers,
         )
         .await;
     };
@@ -1347,7 +1394,16 @@ async fn qr_flow_page_handler(
             if let Some(active_flow) = app_state.qr_flows.write().await.get_mut(&flow_id) {
                 active_flow.session_data = share_sensitive_bytes(session_data);
             }
-            match render_qr_flow_page(&app_state, language, &flow_id, &flow, pending, banner).await
+            match render_qr_flow_page(
+                &app_state,
+                language,
+                &flow_id,
+                &flow,
+                pending,
+                banner,
+                &headers,
+            )
+            .await
             {
                 Ok(html) => html.into_response(),
                 Err(status) => status.into_response(),
@@ -1371,6 +1427,7 @@ async fn qr_flow_page_handler(
                     &app_state,
                     language,
                     language.translations().setup_error_finalize,
+                    &headers,
                 )
                 .await;
             }
@@ -1437,8 +1494,9 @@ async fn render_setup_error_response(
     app_state: &AppState,
     language: Language,
     message: &str,
+    headers: &HeaderMap,
 ) -> Response {
-    match render_setup_page(app_state, language, Some(PageBanner::error(message))).await {
+    match render_setup_page(app_state, language, Some(PageBanner::error(message)), headers).await {
         Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
         Err(status) => status.into_response(),
     }

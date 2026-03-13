@@ -37,6 +37,7 @@ async fn render_login_page(
     app_state: &AppState,
     language: Language,
     error_message: Option<&str>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/login");
@@ -75,6 +76,7 @@ async fn render_login_page(
     context.insert("mfa_label", &mfa_label);
     context.insert("recovery_label", &recovery_label);
     context.insert("mfa_hint", &mfa_hint);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "login.html", &context)
 }
@@ -83,6 +85,7 @@ async fn render_register_page(
     app_state: &AppState,
     language: Language,
     error_message: Option<&str>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let languages = language_options(language, "/register");
     let mut context = Context::new();
@@ -130,6 +133,7 @@ async fn render_register_page(
     context.insert("back_label", &back_label);
     context.insert("back_href", &format!("/login?lang={}", language.code()));
     context.insert("error_message", &error_message);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "register.html", &context)
 }
@@ -139,6 +143,7 @@ pub(crate) async fn render_settings_page(
     authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let active_sessions = app_state
@@ -594,6 +599,7 @@ pub(crate) async fn render_settings_page(
         },
     );
     context.insert("banner", &banner);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "settings.html", &context)
 }
@@ -603,6 +609,7 @@ async fn render_totp_setup_page(
     authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let pending = {
         let mut setups = app_state.totp_setups.write().await;
@@ -704,6 +711,7 @@ async fn render_totp_setup_page(
         },
     );
     context.insert("banner", &banner);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "totp_setup.html", &context)
 }
@@ -729,7 +737,7 @@ async fn login_page_handler(
     }
     clear_invalid_cookie_state(&app_state, &headers).await;
 
-    match render_login_page(&app_state, language, None).await {
+    match render_login_page(&app_state, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -748,7 +756,7 @@ async fn register_page_handler(
         return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
     }
 
-    match render_register_page(&app_state, language, None).await {
+    match render_register_page(&app_state, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -792,11 +800,12 @@ async fn login_submit_handler(
                 login_redirect_target(language)
             };
             let mut response = Redirect::to(&redirect_target).into_response();
+            let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
 
             match set_cookie_header(&build_auth_cookie(
                 &login_result.session_token,
                 max_age,
-                settings.cookie_secure,
+                cookie_secure,
             )) {
                 Ok(cookie) => {
                     response.headers_mut().insert(header::SET_COOKIE, cookie);
@@ -810,7 +819,7 @@ async fn login_submit_handler(
                 Language::En => format!("This account is locked until {locked_until}."),
                 Language::ZhCn => format!("这个账号已被锁定，解锁时间戳：{locked_until}。"),
             };
-            match render_login_page(&app_state, language, Some(&message)).await {
+            match render_login_page(&app_state, language, Some(&message), &headers).await {
                 Ok(html) => (StatusCode::TOO_MANY_REQUESTS, html).into_response(),
                 Err(status) => status.into_response(),
             }
@@ -820,7 +829,7 @@ async fn login_submit_handler(
                 Language::En => "Enter a TOTP code or recovery code to finish signing in.",
                 Language::ZhCn => "请输入 TOTP 动态码或恢复码以完成登录。",
             };
-            match render_login_page(&app_state, language, Some(message)).await {
+            match render_login_page(&app_state, language, Some(message), &headers).await {
                 Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
                 Err(status) => status.into_response(),
             }
@@ -830,7 +839,7 @@ async fn login_submit_handler(
                 Language::En => "The TOTP code or recovery code was invalid.",
                 Language::ZhCn => "TOTP 动态码或恢复码不正确。",
             };
-            match render_login_page(&app_state, language, Some(message)).await {
+            match render_login_page(&app_state, language, Some(message), &headers).await {
                 Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
                 Err(status) => status.into_response(),
             }
@@ -840,6 +849,7 @@ async fn login_submit_handler(
                 &app_state,
                 language,
                 Some(language.translations().login_error_invalid),
+                &headers,
             )
             .await
             {
@@ -868,7 +878,7 @@ async fn register_submit_handler(
             Language::En => "The two password fields must match.",
             Language::ZhCn => "两次输入的密码必须一致。",
         };
-        return match render_register_page(&app_state, language, Some(message)).await {
+        return match render_register_page(&app_state, language, Some(message), &headers).await {
             Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
             Err(status) => status.into_response(),
         };
@@ -898,10 +908,11 @@ async fn register_submit_handler(
                 language.code()
             ))
             .into_response();
+            let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
             match set_cookie_header(&build_auth_cookie(
                 &session_token,
                 max_age,
-                settings.cookie_secure,
+                cookie_secure,
             )) {
                 Ok(cookie) => {
                     response.headers_mut().insert(header::SET_COOKIE, cookie);
@@ -911,7 +922,9 @@ async fn register_submit_handler(
             }
         }
         Err(error) => {
-            match render_register_page(&app_state, language, Some(&error.to_string())).await {
+            match render_register_page(&app_state, language, Some(&error.to_string()), &headers)
+                .await
+            {
                 Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
                 Err(status) => status.into_response(),
             }
@@ -926,7 +939,7 @@ async fn settings_page_handler(
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    match render_settings_page(&app_state, &authenticated, language, None).await {
+    match render_settings_page(&app_state, &authenticated, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -949,6 +962,7 @@ async fn change_password_handler(
             &authenticated,
             language,
             Some(PageBanner::error(message)),
+            &headers,
         )
         .await
         {
@@ -995,6 +1009,7 @@ async fn change_password_handler(
                     Language::En => "Password updated.",
                     Language::ZhCn => "密码已更新。",
                 })),
+                &headers,
             )
             .await
             {
@@ -1007,6 +1022,7 @@ async fn change_password_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -1043,6 +1059,7 @@ async fn update_idle_timeout_handler(
                     &authenticated,
                     language,
                     Some(PageBanner::error(error.to_string())),
+                    &headers,
                 )
                 .await
                 {
@@ -1061,6 +1078,7 @@ async fn update_idle_timeout_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -1080,6 +1098,7 @@ async fn update_idle_timeout_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -1116,6 +1135,7 @@ async fn update_idle_timeout_handler(
             Language::En => "Idle timeout updated.",
             Language::ZhCn => "空闲登出设置已更新。",
         })),
+        &headers,
     )
     .await
     {
@@ -1131,7 +1151,7 @@ async fn totp_setup_page_handler(
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    match render_totp_setup_page(&app_state, &authenticated, language, None).await {
+    match render_totp_setup_page(&app_state, &authenticated, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -1154,6 +1174,7 @@ async fn confirm_totp_setup_handler(
                 Language::En => "Enter a TOTP code to confirm setup.",
                 Language::ZhCn => "请输入一个 TOTP 动态码完成确认。",
             })),
+            &headers,
         )
         .await
         {
@@ -1193,6 +1214,7 @@ async fn confirm_totp_setup_handler(
                 Language::En => "That TOTP code did not match the new secret.",
                 Language::ZhCn => "这个 TOTP 动态码与新的密钥不匹配。",
             })),
+            &headers,
         )
         .await
         {
@@ -1216,6 +1238,7 @@ async fn confirm_totp_setup_handler(
                 Language::En => "Your unlock state expired. Sign in again and retry TOTP setup.",
                 Language::ZhCn => "当前解锁状态已失效，请重新登录后再完成 TOTP 设置。",
             })),
+            &headers,
         )
         .await
         {
@@ -1256,6 +1279,7 @@ async fn confirm_totp_setup_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -1273,6 +1297,7 @@ async fn logout_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let mut response = Redirect::to(&format!("/login?lang={}", language.code())).into_response();
     let settings = app_state.system_settings.read().await.clone();
+    let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
     if let Some(token) = find_cookie(&headers, AUTH_COOKIE_NAME) {
         let token_hash = hash_session_token(token);
         if let Ok(Some(session)) = app_state
@@ -1288,7 +1313,7 @@ async fn logout_handler(
         }
     }
 
-    match set_cookie_header(&clear_auth_cookie(settings.cookie_secure)) {
+    match set_cookie_header(&clear_auth_cookie(cookie_secure)) {
         Ok(cookie) => {
             response.headers_mut().insert(header::SET_COOKIE, cookie);
             response

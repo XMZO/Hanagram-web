@@ -51,6 +51,7 @@ pub(crate) async fn render_dashboard_page(
     authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/");
@@ -270,6 +271,7 @@ pub(crate) async fn render_dashboard_page(
         "dashboard_full_refresh_seconds",
         &DASHBOARD_FULL_SYNC_SECONDS,
     );
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "index.html", &context)
 }
@@ -281,7 +283,7 @@ async fn index_handler(
     headers: HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let language = detect_language(&headers, query.lang.as_deref());
-    render_dashboard_page(&app_state, &authenticated, language, None).await
+    render_dashboard_page(&app_state, &authenticated, language, None, &headers).await
 }
 
 async fn dashboard_snapshot_handler(

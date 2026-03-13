@@ -24,7 +24,8 @@ pub(crate) async fn require_login(
         };
         let mut response = Redirect::to(&location).into_response();
         if find_cookie(request.headers(), AUTH_COOKIE_NAME).is_some() {
-            if let Ok(cookie) = set_cookie_header(&clear_auth_cookie(settings.cookie_secure)) {
+            let cookie_secure = effective_auth_cookie_secure(&settings, request.headers());
+            if let Ok(cookie) = set_cookie_header(&clear_auth_cookie(cookie_secure)) {
                 response.headers_mut().insert(header::SET_COOKIE, cookie);
             }
         }

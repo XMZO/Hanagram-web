@@ -102,6 +102,13 @@
                     </div>
                 </div>
 
+                {% if transport_warning %}
+                <section class="mb-6 rounded-[1.5rem] border border-butter/70 bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
+                    <p class="font-semibold">{{ transport_warning.title }}</p>
+                    <p class="mt-2">{{ transport_warning.message }}</p>
+                </section>
+                {% endif %}
+
                 <div class="rounded-[1.8rem] border border-line/80 bg-white/82 p-6">
                     <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.login_title }}</h2>
                     <p class="mt-3 text-sm leading-7 text-ink/62">{{ i18n.login_description }}</p>

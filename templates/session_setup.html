@@ -94,6 +94,13 @@
             </div>
         </section>
 
+        {% if transport_warning %}
+        <section class="paper-shadow mb-6 rounded-[1.6rem] border border-[#e8d3ad] bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
+            <p class="font-semibold">{{ transport_warning.title }}</p>
+            <p class="mt-2">{{ transport_warning.message }}</p>
+        </section>
+        {% endif %}
+
         {% if banner %}
         <section class="paper-shadow mb-6 rounded-[1.6rem] border border-peach/35 bg-[#fbefec] px-5 py-4 text-sm leading-7 text-[#98675f]">
             {{ banner.message }}

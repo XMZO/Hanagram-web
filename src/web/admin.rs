@@ -33,6 +33,7 @@ pub(crate) async fn render_admin_page(
     authenticated: &AuthenticatedSession,
     language: Language,
     banner: Option<PageBanner>,
+    headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let system_settings = app_state.system_settings.read().await.clone();
@@ -715,6 +716,7 @@ pub(crate) async fn render_admin_page(
     );
     context.insert("banner", &banner);
     context.insert("current_admin_username", &authenticated.user.username);
+    insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "admin.html", &context)
 }
@@ -729,7 +731,7 @@ async fn admin_page_handler(
     if authenticated.user.role != UserRole::Admin {
         return Redirect::to(&dashboard_href(language)).into_response();
     }
-    match render_admin_page(&app_state, &authenticated, language, None).await {
+    match render_admin_page(&app_state, &authenticated, language, None, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -755,6 +757,7 @@ async fn admin_create_user_handler(
                 &authenticated,
                 language,
                 Some(PageBanner::error(error.to_string())),
+                &headers,
             )
             .await
             {
@@ -771,6 +774,7 @@ async fn admin_create_user_handler(
             &authenticated,
             language,
             Some(PageBanner::error(strength.reasons.join("; "))),
+            &headers,
         )
         .await
         {
@@ -794,6 +798,7 @@ async fn admin_create_user_handler(
                 Language::En => "That username already exists.",
                 Language::ZhCn => "这个用户名已经存在。",
             })),
+            &headers,
         )
         .await
         {
@@ -811,6 +816,7 @@ async fn admin_create_user_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -826,6 +832,7 @@ async fn admin_create_user_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -854,6 +861,7 @@ async fn admin_create_user_handler(
             Language::En => "User created.",
             Language::ZhCn => "用户已创建。",
         })),
+        &headers,
     )
     .await
     {
@@ -896,6 +904,7 @@ async fn admin_unlock_user_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -924,6 +933,7 @@ async fn admin_unlock_user_handler(
             Language::En => "User unlocked.",
             Language::ZhCn => "用户已解锁。",
         })),
+        &headers,
     )
     .await
     {
@@ -982,6 +992,7 @@ async fn admin_reset_user_handler(
                 &authenticated,
                 language,
                 Some(PageBanner::error(error.to_string())),
+                &headers,
             )
             .await
             {
@@ -1040,6 +1051,7 @@ async fn admin_reset_user_handler(
             Language::En => "User credentials and encrypted data were cleared. They must register again with the same username.",
             Language::ZhCn => "该用户的凭据和加密数据已清空。对方需要使用相同用户名重新注册。",
         })),
+        &headers,
     )
     .await
     {
@@ -1114,6 +1126,7 @@ async fn admin_revoke_user_sessions_handler(
                 Language::En => "User sessions revoked.",
                 Language::ZhCn => "该用户的登录会话已强制下线。",
             })),
+            &headers,
         )
         .await
         {
@@ -1130,6 +1143,7 @@ async fn admin_revoke_user_sessions_handler(
             Language::En => "Selected sessions were revoked.",
             Language::ZhCn => "选中的登录会话已被强制下线。",
         })),
+        &headers,
     )
     .await
     {
@@ -1160,6 +1174,7 @@ async fn admin_save_system_settings_handler(
                     &authenticated,
                     language,
                     Some(PageBanner::error(error.to_string())),
+                    &headers,
                 )
                 .await
                 {
@@ -1194,6 +1209,7 @@ async fn admin_save_system_settings_handler(
                     &authenticated,
                     language,
                     Some(PageBanner::error(error.to_string())),
+                    &headers,
                 )
                 .await
                 {
@@ -1228,6 +1244,7 @@ async fn admin_save_system_settings_handler(
             &authenticated,
             language,
             Some(PageBanner::error(error.to_string())),
+            &headers,
         )
         .await
         {
@@ -1250,6 +1267,7 @@ async fn admin_save_system_settings_handler(
                 },
                 error
             ))),
+            &headers,
         )
         .await
         {
@@ -1290,6 +1308,7 @@ async fn admin_save_system_settings_handler(
             Language::En => "System settings saved.",
             Language::ZhCn => "系统设置已保存。",
         })),
+        &headers,
     )
     .await
     {
