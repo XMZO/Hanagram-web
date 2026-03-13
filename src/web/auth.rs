@@ -20,7 +20,7 @@ use webauthn_rp::response::register::error::RegCeremonyErr;
 
 use super::middleware::{
     cache_user_master_key, clear_auth_session_sensitive_state, clear_invalid_cookie_state,
-    drop_user_master_key_if_no_active_sessions,
+    drop_user_master_key_if_no_active_sessions, resolved_user_master_key,
 };
 use super::shared::*;
 
@@ -651,6 +651,16 @@ pub(crate) async fn render_settings_page(
     render_template(&app_state.tera, "settings.html", &context)
 }
 
+fn build_pending_totp_setup(username: &str, is_rotation: bool) -> PendingTotpSetup {
+    let material = build_totp_setup_material(username);
+    PendingTotpSetup {
+        secret: material.secret,
+        recovery_codes: material.recovery_codes,
+        otp_auth_uri: material.otp_auth_uri,
+        is_rotation,
+    }
+}
+
 async fn render_totp_setup_page(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
@@ -661,51 +671,214 @@ async fn render_totp_setup_page(
     let translations = language.translations();
     let pending = {
         let mut setups = app_state.totp_setups.write().await;
-        setups
-            .entry(authenticated.auth_session.id.clone())
-            .or_insert_with(|| {
-                let material = build_totp_setup_material(&authenticated.user.username);
-                PendingTotpSetup {
-                    secret: material.secret,
-                    recovery_codes: material.recovery_codes,
-                    otp_auth_uri: material.otp_auth_uri,
-                }
-            })
-            .clone()
+        if authenticated.user.security.totp_enabled {
+            setups.get(&authenticated.auth_session.id).cloned()
+        } else {
+            Some(
+                setups
+                    .entry(authenticated.auth_session.id.clone())
+                    .or_insert_with(|| {
+                        build_pending_totp_setup(&authenticated.user.username, false)
+                    })
+                    .clone(),
+            )
+        }
     };
-    let qr_svg = render_qr_svg(pending.otp_auth_uri.as_ref().as_str()).map_err(|error| {
-        warn!(
-            "failed rendering totp qr for {}: {}",
-            authenticated.user.username, error
+    let pending_qr_svg = if let Some(pending) = pending.as_ref() {
+        Some(
+            render_qr_svg(pending.otp_auth_uri.as_ref().as_str()).map_err(|error| {
+                warn!(
+                    "failed rendering pending totp qr for {}: {}",
+                    authenticated.user.username, error
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+        )
+    } else {
+        None
+    };
+    let pending_recovery_codes = pending
+        .as_ref()
+        .map(|setup| {
+            setup
+                .recovery_codes
+                .iter()
+                .map(|code| code.as_ref().as_str().to_owned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let current_secret = if authenticated.user.security.totp_enabled {
+        match resolved_user_master_key(app_state, authenticated).await {
+            Some(master_key) => match web_auth::decrypt_user_totp_secret(
+                &authenticated.user,
+                master_key.as_ref().as_slice(),
+            ) {
+                Ok(secret) => Some(secret),
+                Err(error) => {
+                    warn!(
+                        "failed decrypting current totp secret for {}: {}",
+                        authenticated.user.username, error
+                    );
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
+    let current_qr_svg = if let Some(secret) = current_secret.as_ref() {
+        let current_uri = hanagram_web::security::build_totp_uri(
+            "Hanagram Web",
+            &authenticated.user.username,
+            secret.as_str(),
         );
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+        Some(render_qr_svg(&current_uri).map_err(|error| {
+            warn!(
+                "failed rendering current totp qr for {}: {}",
+                authenticated.user.username, error
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?)
+    } else {
+        None
+    };
+    let pending_is_rotation = pending.as_ref().is_some_and(|setup| setup.is_rotation);
+    let show_current_totp = authenticated.user.security.totp_enabled;
+    let title = if show_current_totp {
+        translations.totp_manage_title
+    } else {
+        translations.totp_setup_title
+    };
+    let description = if show_current_totp {
+        translations.totp_manage_description
+    } else {
+        translations.totp_setup_description
+    };
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
-    context.insert("title", &translations.totp_setup_title);
-    context.insert("description", &translations.totp_setup_description);
+    context.insert("title", &title);
+    context.insert("description", &description);
     context.insert("settings_href", &settings_href(language));
     context.insert("back_label", &translations.back_to_settings_label);
-    context.insert("qr_title", &translations.totp_setup_qr_title);
-    context.insert("qr_svg", &qr_svg);
-    context.insert("secret_label", &translations.totp_setup_secret_label);
-    context.insert("secret", pending.secret.as_ref().as_str());
+    context.insert("show_current_totp", &show_current_totp);
+    context.insert("current_title", &translations.totp_current_title);
+    context.insert(
+        "current_description",
+        &translations.totp_current_description,
+    );
+    context.insert("current_qr_title", &translations.totp_setup_qr_title);
+    context.insert("current_qr_svg", &current_qr_svg.unwrap_or_default());
+    context.insert(
+        "current_secret_label",
+        &translations.totp_setup_secret_label,
+    );
+    context.insert(
+        "current_secret",
+        &current_secret
+            .as_ref()
+            .map(|value| value.as_str().to_owned())
+            .unwrap_or_default(),
+    );
+    context.insert("current_secret_available", &current_secret.is_some());
+    context.insert(
+        "current_secret_unavailable_message",
+        &translations.totp_current_secret_unavailable_message,
+    );
+    context.insert(
+        "current_recovery_remaining_label",
+        &translations.totp_current_recovery_remaining_label,
+    );
+    context.insert(
+        "current_recovery_remaining",
+        &authenticated.recovery_codes_remaining.to_string(),
+    );
+    context.insert(
+        "current_recovery_hidden_message",
+        &translations.totp_current_recovery_hidden_message,
+    );
+    context.insert(
+        "show_start_rotation",
+        &(show_current_totp && pending.is_none()),
+    );
+    context.insert(
+        "rotation_start_label",
+        &translations.totp_rotation_start_label,
+    );
+    context.insert(
+        "rotation_required",
+        &(show_current_totp && authenticated.recovery_codes_remaining == 0),
+    );
+    context.insert(
+        "rotation_required_message",
+        &translations.totp_rotation_required_message,
+    );
+    context.insert("show_pending_setup", &pending.is_some());
+    context.insert("pending_is_rotation", &pending_is_rotation);
+    context.insert(
+        "pending_title",
+        &(if pending_is_rotation {
+            translations.totp_rotation_title
+        } else {
+            translations.totp_setup_title
+        }),
+    );
+    context.insert(
+        "pending_description",
+        &(if pending_is_rotation {
+            translations.totp_rotation_description
+        } else {
+            translations.totp_setup_description
+        }),
+    );
+    context.insert("pending_qr_title", &translations.totp_setup_qr_title);
+    context.insert("pending_qr_svg", &pending_qr_svg.unwrap_or_default());
+    context.insert(
+        "pending_secret_label",
+        &translations.totp_setup_secret_label,
+    );
+    context.insert(
+        "pending_secret",
+        &pending
+            .as_ref()
+            .map(|value| value.secret.as_ref().as_str().to_owned())
+            .unwrap_or_default(),
+    );
     context.insert("recovery_title", &translations.totp_setup_recovery_title);
     context.insert(
         "recovery_description",
         &translations.totp_setup_recovery_description,
     );
-    let recovery_codes = pending
-        .recovery_codes
-        .iter()
-        .map(|code| code.as_ref().as_str().to_owned())
-        .collect::<Vec<_>>();
-    context.insert("recovery_codes", &recovery_codes);
+    context.insert("recovery_codes", &pending_recovery_codes);
     context.insert("confirm_action", "/settings/security/totp/setup");
     context.insert("confirm_label", &translations.totp_setup_confirm_label);
-    context.insert("confirm_submit", &translations.totp_setup_confirm_submit);
+    context.insert(
+        "confirm_submit",
+        &(if pending_is_rotation {
+            translations.totp_rotation_confirm_submit
+        } else {
+            translations.totp_setup_confirm_submit
+        }),
+    );
+    context.insert(
+        "rotation_cancel_label",
+        &translations.totp_rotation_cancel_label,
+    );
+    context.insert(
+        "confirm_saved_codes_label",
+        &translations.totp_setup_saved_codes_confirm_label,
+    );
+    context.insert(
+        "confirm_replace_totp_label",
+        &translations.totp_setup_replace_totp_confirm_label,
+    );
+    context.insert(
+        "confirm_replace_recovery_label",
+        &translations.totp_setup_replace_recovery_confirm_label,
+    );
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -2051,6 +2224,51 @@ async fn confirm_totp_setup_handler(
     Form(form): Form<TotpConfirmForm>,
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
+    match form.action.as_deref() {
+        Some("start_rotation") => {
+            app_state.totp_setups.write().await.insert(
+                authenticated.auth_session.id.clone(),
+                build_pending_totp_setup(&authenticated.user.username, true),
+            );
+            return match render_totp_setup_page(
+                &app_state,
+                &authenticated,
+                language,
+                Some(PageBanner::success(
+                    language.translations().totp_rotation_start_message,
+                )),
+                &headers,
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+        Some("cancel_rotation") => {
+            app_state
+                .totp_setups
+                .write()
+                .await
+                .remove(&authenticated.auth_session.id);
+            return match render_totp_setup_page(
+                &app_state,
+                &authenticated,
+                language,
+                Some(PageBanner::success(
+                    language.translations().totp_rotation_cancelled_message,
+                )),
+                &headers,
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+        _ => {}
+    }
+
     let code = form.code.trim();
     if code.is_empty() {
         return match render_totp_setup_page(
@@ -2071,18 +2289,55 @@ async fn confirm_totp_setup_handler(
 
     let pending = {
         let mut setups = app_state.totp_setups.write().await;
-        setups
-            .entry(authenticated.auth_session.id.clone())
-            .or_insert_with(|| {
-                let material = build_totp_setup_material(&authenticated.user.username);
-                PendingTotpSetup {
-                    secret: material.secret,
-                    recovery_codes: material.recovery_codes,
-                    otp_auth_uri: material.otp_auth_uri,
+        if authenticated.user.security.totp_enabled {
+            match setups.get(&authenticated.auth_session.id).cloned() {
+                Some(pending) => pending,
+                None => {
+                    return match render_totp_setup_page(
+                        &app_state,
+                        &authenticated,
+                        language,
+                        Some(PageBanner::error(
+                            language.translations().totp_rotation_not_started_message,
+                        )),
+                        &headers,
+                    )
+                    .await
+                    {
+                        Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+                        Err(status) => status.into_response(),
+                    };
                 }
-            })
-            .clone()
+            }
+        } else {
+            setups
+                .entry(authenticated.auth_session.id.clone())
+                .or_insert_with(|| build_pending_totp_setup(&authenticated.user.username, false))
+                .clone()
+        }
     };
+    let confirmations_ready = form.confirm_saved_codes.as_deref() == Some("1")
+        && (!pending.is_rotation
+            || (form.confirm_replace_totp.as_deref() == Some("1")
+                && form.confirm_replace_recovery.as_deref() == Some("1")));
+    if !confirmations_ready {
+        return match render_totp_setup_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(
+                language
+                    .translations()
+                    .totp_setup_confirm_checks_required_message,
+            )),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
     let verification = verify_totp(
         pending.secret.as_ref().as_str(),
         code,
@@ -2108,13 +2363,7 @@ async fn confirm_totp_setup_handler(
         };
     }
 
-    let Some(master_key) = app_state
-        .unlock_cache
-        .read()
-        .await
-        .get(&authenticated.auth_session.id)
-        .cloned()
-    else {
+    let Some(master_key) = resolved_user_master_key(&app_state, &authenticated).await else {
         return match render_totp_setup_page(
             &app_state,
             &authenticated,
@@ -2156,7 +2405,24 @@ async fn confirm_totp_setup_handler(
                 .write()
                 .await
                 .remove(&authenticated.auth_session.id);
-            Redirect::to(&settings_href(language)).into_response()
+            let mut refreshed = authenticated.clone();
+            refreshed.user = user;
+            refreshed.recovery_codes_remaining = pending.recovery_codes.len() as i64;
+            refreshed.requires_totp_setup = false;
+            match render_totp_setup_page(
+                &app_state,
+                &refreshed,
+                language,
+                Some(PageBanner::success(
+                    language.translations().totp_updated_message,
+                )),
+                &headers,
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            }
         }
         Err(error) => match render_totp_setup_page(
             &app_state,

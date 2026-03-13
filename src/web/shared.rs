@@ -193,6 +193,7 @@ pub(crate) struct PendingTotpSetup {
     pub(crate) secret: SharedSensitiveString,
     pub(crate) recovery_codes: Vec<SharedSensitiveString>,
     pub(crate) otp_auth_uri: SharedSensitiveString,
+    pub(crate) is_rotation: bool,
 }
 
 pub(crate) struct PendingPasskeyRegistration {
@@ -586,7 +587,11 @@ pub(crate) struct IdleTimeoutForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct TotpConfirmForm {
+    pub(crate) action: Option<String>,
     pub(crate) code: String,
+    pub(crate) confirm_saved_codes: Option<String>,
+    pub(crate) confirm_replace_totp: Option<String>,
+    pub(crate) confirm_replace_recovery: Option<String>,
     pub(crate) lang: Option<String>,
 }
 

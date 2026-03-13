@@ -794,7 +794,9 @@
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_workspace_eyebrow }}</p>
                             <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_workspace_title }}</h2>
                         </div>
+                        {% if i18n.dashboard_workspace_description | length > 0 %}
                         <p class="max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_workspace_description }}</p>
+                        {% endif %}
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
