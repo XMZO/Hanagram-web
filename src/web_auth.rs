@@ -805,4 +805,34 @@ mod tests {
 
         assert_eq!(effective_idle_timeout_minutes(&user, &settings), Some(60));
     }
+
+    #[test]
+    fn find_cookie_extracts_named_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            axum::http::HeaderValue::from_static(
+                "theme=light; hanagram_auth=session-token; other=value",
+            ),
+        );
+
+        assert_eq!(
+            find_cookie(&headers, AUTH_COOKIE_NAME),
+            Some("session-token")
+        );
+    }
+
+    #[test]
+    fn find_cookie_rejects_missing_cookie() {
+        let mut headers = HeaderMap::new();
+
+        assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), None);
+
+        headers.insert(
+            header::COOKIE,
+            axum::http::HeaderValue::from_static("other=value"),
+        );
+
+        assert_eq!(find_cookie(&headers, AUTH_COOKIE_NAME), None);
+    }
 }

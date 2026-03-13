@@ -135,6 +135,19 @@
                         <input type="hidden" name="lang" value="{{ lang }}">
                         <div class="grid gap-5 xl:grid-cols-2">
                             <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
+                                <h3 class="text-xl font-semibold">{{ api_title }}</h3>
+                                <p class="mt-3 text-sm leading-7 text-ink/68">{{ api_description }}</p>
+                                <div class="mt-5 grid gap-4">
+                                    <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                        <span class="block text-xs uppercase tracking-[0.2em] text-ink/42">{{ api_status_label }}</span>
+                                        <span class="mt-2 block text-lg font-semibold">{{ api_status_value }}</span>
+                                    </div>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ api_id_label }}</span><input type="number" min="1" name="telegram_api_id" value="{{ telegram_api_id }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ api_hash_label }}</span><input type="text" name="telegram_api_hash" value="{{ telegram_api_hash }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3 font-mono text-sm"></label>
+                                    <p class="text-sm leading-7 text-ink/68">{{ api_hint }}</p>
+                                </div>
+                            </article>
+                            <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
                                 <h3 class="text-xl font-semibold">{{ registration_label }}</h3>
                                 <div class="mt-5 grid gap-4">
                                     <label class="block"><span class="mb-2 block text-sm">{{ registration_label }}</span><select name="registration_policy" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3">{% for option in registration_options %}<option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
@@ -178,6 +191,45 @@
                         </div>
                         <div class="rounded-[1.4rem] border border-line bg-latte px-5 py-4"><button type="submit" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-paper">{{ save_policy_label }}</button></div>
                     </form>
+
+                    <article class="mt-5 rounded-[1.5rem] border border-line bg-white/92 p-5">
+                        <h3 class="text-xl font-semibold">{{ personal_bot_title }}</h3>
+                        <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/68">{{ personal_bot_description }}</p>
+                        <div class="mt-5 grid gap-5 xl:grid-cols-[1fr,0.9fr]">
+                            <form method="post" action="{{ bot_settings_action }}" class="grid gap-4">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <input type="hidden" name="return_to" value="admin">
+                                <label class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <span class="flex items-center justify-between gap-4">
+                                        <span>
+                                            <span class="block text-sm font-medium">{{ i18n.bot_enabled_label }}</span>
+                                            <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
+                                        </span>
+                                        <span class="relative inline-flex items-center">
+                                            <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
+                                            <span class="h-7 w-12 rounded-full bg-line transition peer-checked:bg-sage"></span>
+                                            <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+                                        </span>
+                                    </span>
+                                </label>
+                                <label class="block"><span class="mb-2 block text-sm">{{ i18n.bot_token_label }}</span><input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3 text-sm"></label>
+                                <label class="block"><span class="mb-2 block text-sm">{{ i18n.bot_chat_id_label }}</span><input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3 text-sm"></label>
+                                <label class="block"><span class="mb-2 block text-sm">{{ i18n.bot_template_label }}</span><textarea name="template" rows="7" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3 font-mono text-sm">{{ bot_settings.template }}</textarea></label>
+                                <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ i18n.bot_save }}</button>
+                            </form>
+                            <article class="rounded-[1.2rem] border border-line bg-paper px-4 py-4">
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.bot_placeholders_title }}</p>
+                                <div class="mt-4 grid gap-3">
+                                    {% for placeholder in bot_placeholders %}
+                                    <div class="rounded-[1rem] border border-line bg-white px-4 py-3">
+                                        <p class="font-mono text-sm font-semibold">{{ placeholder.key }}</p>
+                                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ placeholder.description }}</p>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </article>
+                        </div>
+                    </article>
                 </section>
 
                 <section id="audit" class="paper-shadow section-card rounded-[1.9rem] p-5 sm:p-6">

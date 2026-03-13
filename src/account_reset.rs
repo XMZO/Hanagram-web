@@ -27,6 +27,7 @@ pub fn clear_user_credentials(user: &mut UserRecord) {
     user.security.locked_until_unix = None;
     user.security.last_login_ip = None;
     user.security.preferred_idle_timeout_minutes = None;
+    user.security.bot_notification_settings = Default::default();
     user.updated_at_unix = Utc::now().timestamp();
 }
 
@@ -101,6 +102,8 @@ mod tests {
         user.security.totp_enabled = true;
         user.security.last_login_ip = Some(String::from("127.0.0.1"));
         user.security.preferred_idle_timeout_minutes = Some(30);
+        user.security.bot_notification_settings.enabled = true;
+        user.security.bot_notification_settings.bot_token = String::from("bot-token");
         store.save_user(&user).await.expect("user should save");
 
         store
@@ -149,6 +152,8 @@ mod tests {
         assert!(!user.security.totp_enabled);
         assert!(user.security.last_login_ip.is_none());
         assert!(user.security.preferred_idle_timeout_minutes.is_none());
+        assert!(!user.security.bot_notification_settings.enabled);
+        assert!(user.security.bot_notification_settings.bot_token.is_empty());
 
         let saved_user = store
             .get_user_by_id(&user.id)

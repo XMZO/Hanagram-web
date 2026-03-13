@@ -18,7 +18,22 @@ const SCHEMA_VERSION_KEY: &str = "schema_version";
 const APP_SCHEMA_VERSION: i64 = 2;
 const INCOMPATIBLE_SCHEMA_MESSAGE: &str = "existing metadata database schema is incompatible with this build; delete .hanagram/app.db and restart";
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TelegramApiSettings {
+    pub api_id: Option<i32>,
+    pub api_hash: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BotNotificationSettings {
+    pub enabled: bool,
+    pub bot_token: String,
+    pub chat_id: String,
+    pub template: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct SystemSettings {
     pub registration_policy: RegistrationPolicy,
     pub public_registration_open: bool,
@@ -31,6 +46,7 @@ pub struct SystemSettings {
     pub cookie_secure: bool,
     pub max_idle_timeout_minutes: Option<u32>,
     pub argon_policy: ArgonPolicy,
+    pub telegram_api: TelegramApiSettings,
 }
 
 impl Default for SystemSettings {
@@ -47,6 +63,7 @@ impl Default for SystemSettings {
             cookie_secure: true,
             max_idle_timeout_minutes: None,
             argon_policy: ArgonPolicy::minimum(),
+            telegram_api: TelegramApiSettings::default(),
         }
     }
 }
@@ -76,6 +93,7 @@ impl UserRole {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct UserSecurityState {
     pub password_hash: Option<String>,
     pub password_argon_version: i64,
@@ -89,6 +107,7 @@ pub struct UserSecurityState {
     pub locked_until_unix: Option<i64>,
     pub last_login_ip: Option<String>,
     pub preferred_idle_timeout_minutes: Option<u32>,
+    pub bot_notification_settings: BotNotificationSettings,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

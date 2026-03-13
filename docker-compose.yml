@@ -15,5 +15,4 @@ services:
       # Persist the entire SESSIONS_DIR tree:
       # - users/<user>/ encrypted Telegram session blobs
       # - .hanagram/app.db metadata database
-      # - .hanagram/.hanagram-bot.json reminder settings
       - ./sessions:/app/sessions

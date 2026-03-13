@@ -29,7 +29,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     dashboard_add_session: "添加会话",
     dashboard_delete_error: "会话文件从磁盘删除失败。",
     bot_settings_title: "Bot 提醒",
-    bot_settings_description: "新验证码可以通过 Telegram Bot 转发到指定账号或聊天。模板支持占位符，自定义内容会直接作为消息正文发送。",
+    bot_settings_description: "这里的 Bot 提醒只属于当前用户自己。新验证码会通过你自己的 Telegram Bot 转发到指定账号或聊天，模板支持占位符。",
     bot_enabled_label: "启用 Bot 提醒",
     bot_enabled_hint: "保存后，只有新验证码才会触发提醒。",
     bot_token_label: "Bot Token",

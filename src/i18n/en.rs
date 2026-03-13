@@ -29,7 +29,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     dashboard_add_session: "Add Session",
     dashboard_delete_error: "The session file could not be deleted from disk.",
     bot_settings_title: "Bot Alerts",
-    bot_settings_description: "Forward fresh OTPs to a target Telegram account or chat through a bot. The message body is template-driven and supports placeholders.",
+    bot_settings_description: "These bot alerts belong to the current user only. Forward fresh OTPs to your own target Telegram account or chat, with a template that supports placeholders.",
     bot_enabled_label: "Enable bot alerts",
     bot_enabled_hint: "Only newly received OTPs trigger alerts after saving.",
     bot_token_label: "Bot Token",

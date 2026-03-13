@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Hanagram-web contributors
+
+pub(crate) mod admin;
+pub(crate) mod auth;
+pub(crate) mod bootstrap;
+pub(crate) mod dashboard;
+pub(crate) mod middleware;
+pub(crate) mod notifications;
+pub(crate) mod sessions;
+pub(crate) mod shared;
+
+pub(crate) use bootstrap::run;
