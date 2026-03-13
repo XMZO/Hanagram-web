@@ -289,7 +289,9 @@ pub(crate) async fn export_owned_session_file(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
     session_id: &str,
+    language: Language,
 ) -> Response {
+    let translations = language.translations();
     let session =
         match load_owned_session_record(app_state, &authenticated.user.id, session_id).await {
             Ok(record) => record,
@@ -300,13 +302,17 @@ pub(crate) async fn export_owned_session_file(
         };
 
     let Some(session) = session else {
-        return (StatusCode::NOT_FOUND, String::from("session not found")).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            String::from(translations.dashboard_session_missing),
+        )
+            .into_response();
     };
     let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await
     else {
         return (
             StatusCode::LOCKED,
-            String::from("session data is locked; sign out and sign in again"),
+            String::from(translations.session_data_locked_message),
         )
             .into_response();
     };
@@ -341,7 +347,7 @@ pub(crate) async fn export_owned_session_file(
                 );
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    String::from("failed to export session file"),
+                    String::from(translations.export_file_error_message),
                 )
                     .into_response()
             }
@@ -354,7 +360,7 @@ pub(crate) async fn export_owned_session_file(
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                String::from("failed to read session file"),
+                String::from(translations.export_file_error_message),
             )
                 .into_response()
         }

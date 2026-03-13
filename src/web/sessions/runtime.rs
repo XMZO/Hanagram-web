@@ -17,7 +17,7 @@ const WORKER_RECYCLE_CHANNEL_THRESHOLD: usize = 128;
 fn fallback_phone(session_file: &Path) -> String {
     match session_file.file_stem().and_then(|stem| stem.to_str()) {
         Some(stem) if !stem.is_empty() => stem.to_owned(),
-        _ => String::from("unknown"),
+        _ => String::new(),
     }
 }
 
@@ -145,9 +145,7 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
         set_session_status(
             &app_state.shared_state,
             &worker_key,
-            SessionStatus::Error(String::from(
-                "Encrypted at rest. Sign in again to unlock this session.",
-            )),
+            SessionStatus::Error(SessionErrorKind::UnlockRequired),
         )
         .await;
         return;
@@ -164,9 +162,7 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
         set_session_status(
             &app_state.shared_state,
             &worker_key,
-            SessionStatus::Error(String::from(
-                "Telegram API credentials are not configured by the admin.",
-            )),
+            SessionStatus::Error(SessionErrorKind::TelegramApiMissing),
         )
         .await;
         return;
@@ -184,7 +180,7 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
                 set_session_status(
                     &app_state.shared_state,
                     &worker_key,
-                    SessionStatus::Error(String::from("failed to unlock encrypted session")),
+                    SessionStatus::Error(SessionErrorKind::UnlockFailed),
                 )
                 .await;
                 return;
@@ -244,8 +240,8 @@ pub(crate) async fn reload_all_session_workers(app_state: &AppState) {
 
 #[derive(Debug, Eq, PartialEq)]
 enum SessionFailureAction {
-    Retryable(String),
-    Terminal(String),
+    Retryable(SessionErrorKind),
+    Terminal(SessionErrorKind),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -256,35 +252,34 @@ enum SessionRunOutcome {
 
 fn classify_session_failure(error: &anyhow::Error) -> SessionFailureAction {
     const SESSION_LOAD_FAILED: &str = "failed to load session";
-    const SESSION_UNAUTHORIZED: &str = "session is no longer authorized";
 
     if error.to_string() == SESSION_LOAD_FAILED {
-        return SessionFailureAction::Terminal(String::from(SESSION_LOAD_FAILED));
+        return SessionFailureAction::Terminal(SessionErrorKind::LoadFailed);
     }
 
     if error.to_string() == "session is not authorized" {
-        return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+        return SessionFailureAction::Terminal(SessionErrorKind::Unauthorized);
     }
 
     for cause in error.chain() {
         if let Some(invocation_error) = cause.downcast_ref::<InvocationError>() {
             match invocation_error {
                 InvocationError::Rpc(rpc_error) if rpc_error.code == 401 => {
-                    return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+                    return SessionFailureAction::Terminal(SessionErrorKind::Unauthorized);
                 }
                 InvocationError::Transport(transport_error)
                     if transport_error
                         .to_string()
                         .contains("bad status (negative length -404)") =>
                 {
-                    return SessionFailureAction::Terminal(String::from(SESSION_UNAUTHORIZED));
+                    return SessionFailureAction::Terminal(SessionErrorKind::Unauthorized);
                 }
                 _ => {}
             }
         }
     }
 
-    SessionFailureAction::Retryable(error.to_string())
+    SessionFailureAction::Retryable(SessionErrorKind::UpdateFailed)
 }
 
 async fn run_session_worker(
@@ -349,13 +344,13 @@ async fn run_session_worker(
                 );
 
                 match classify_session_failure(&error) {
-                    SessionFailureAction::Terminal(message) => {
-                        set_session_status(&shared_state, &key, SessionStatus::Error(message))
+                    SessionFailureAction::Terminal(error_kind) => {
+                        set_session_status(&shared_state, &key, SessionStatus::Error(error_kind))
                             .await;
                         break;
                     }
-                    SessionFailureAction::Retryable(message) => {
-                        set_session_status(&shared_state, &key, SessionStatus::Error(message))
+                    SessionFailureAction::Retryable(error_kind) => {
+                        set_session_status(&shared_state, &key, SessionStatus::Error(error_kind))
                             .await;
 
                         if attempt >= retry_delays.len() {
@@ -578,7 +573,7 @@ mod tests {
 
         assert_eq!(
             classify_session_failure(&error),
-            SessionFailureAction::Terminal(String::from("session is no longer authorized"))
+            SessionFailureAction::Terminal(SessionErrorKind::Unauthorized)
         );
     }
 
@@ -588,7 +583,7 @@ mod tests {
 
         assert_eq!(
             classify_session_failure(&error),
-            SessionFailureAction::Terminal(String::from("failed to load session"))
+            SessionFailureAction::Terminal(SessionErrorKind::LoadFailed)
         );
     }
 
@@ -599,7 +594,7 @@ mod tests {
 
         assert_eq!(
             classify_session_failure(&error),
-            SessionFailureAction::Retryable(String::from("update loop failed"))
+            SessionFailureAction::Retryable(SessionErrorKind::UpdateFailed)
         );
     }
 }

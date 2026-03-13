@@ -118,13 +118,7 @@ async fn render_notification_settings_page(
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("settings_href", &settings_href(language));
-    context.insert(
-        "back_label",
-        &match language {
-            Language::En => "Back to Settings",
-            Language::ZhCn => "返回设置",
-        },
-    );
+    context.insert("back_label", &translations.back_to_settings_label);
     context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
     context.insert(
         "bot_placeholders",

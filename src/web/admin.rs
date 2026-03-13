@@ -141,111 +141,23 @@ pub(crate) async fn render_admin_page(
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
-    context.insert(
-        "title",
-        &match language {
-            Language::En => "Admin",
-            Language::ZhCn => "管理后台",
-        },
-    );
-    context.insert("description", &match language {
-        Language::En => "Manage users, registration strategy, session lifetime, and audit visibility from one place.",
-        Language::ZhCn => "在这里统一管理用户、注册策略、登录会话时长和审计可见性。",
-    });
-    context.insert(
-        "admin_sections_title",
-        &match language {
-            Language::En => "Control Center",
-            Language::ZhCn => "控制中心",
-        },
-    );
-    context.insert(
-        "admin_nav_overview",
-        &match language {
-            Language::En => "Overview",
-            Language::ZhCn => "总览",
-        },
-    );
-    context.insert(
-        "admin_nav_users",
-        &match language {
-            Language::En => "Users",
-            Language::ZhCn => "用户",
-        },
-    );
-    context.insert(
-        "admin_nav_policy",
-        &match language {
-            Language::En => "Policy",
-            Language::ZhCn => "策略",
-        },
-    );
-    context.insert(
-        "admin_nav_audit",
-        &match language {
-            Language::En => "Audit",
-            Language::ZhCn => "审计",
-        },
-    );
+    context.insert("title", &translations.admin_page_title);
+    context.insert("description", &translations.admin_page_description);
+    context.insert("admin_sections_title", &translations.admin_sections_title);
+    context.insert("admin_nav_users", &translations.admin_nav_users);
+    context.insert("admin_nav_policy", &translations.admin_nav_policy);
+    context.insert("admin_nav_audit", &translations.admin_nav_audit);
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("settings_href", &settings_href(language));
-    context.insert(
-        "dashboard_label",
-        &match language {
-            Language::En => "Dashboard",
-            Language::ZhCn => "主面板",
-        },
-    );
-    context.insert(
-        "settings_label",
-        &match language {
-            Language::En => "Settings",
-            Language::ZhCn => "设置",
-        },
-    );
-    context.insert(
-        "api_title",
-        &match language {
-            Language::En => "Telegram API",
-            Language::ZhCn => "Telegram API",
-        },
-    );
-    context.insert(
-        "api_description",
-        &match language {
-            Language::En => "This is the shared Telegram application credential used for phone login, QR login, and live session connectivity across the workspace.",
-            Language::ZhCn => "这是整个工作区共用的 Telegram 应用凭据，用于手机号登录、扫码登录和实时会话连接。",
-        },
-    );
-    context.insert(
-        "api_status_label",
-        &match language {
-            Language::En => "API Status",
-            Language::ZhCn => "API 状态",
-        },
-    );
+    context.insert("dashboard_label", &translations.nav_dashboard_label);
+    context.insert("settings_label", &translations.nav_settings_label);
+    context.insert("api_title", &translations.admin_api_title);
+    context.insert("api_description", &translations.admin_api_description);
+    context.insert("api_status_label", &translations.admin_api_status_label);
     context.insert("api_status_value", &telegram_api_status);
-    context.insert(
-        "api_id_label",
-        &match language {
-            Language::En => "API ID",
-            Language::ZhCn => "API ID",
-        },
-    );
-    context.insert(
-        "api_hash_label",
-        &match language {
-            Language::En => "API Hash",
-            Language::ZhCn => "API Hash",
-        },
-    );
-    context.insert(
-        "api_hint",
-        &match language {
-            Language::En => "Leave both fields blank only if you intentionally want Telegram session connectivity disabled until they are configured.",
-            Language::ZhCn => "只有在你明确想让 Telegram 会话连接暂时停用时，才把这两个字段一起留空。",
-        },
-    );
+    context.insert("api_id_label", &translations.admin_api_id_label);
+    context.insert("api_hash_label", &translations.admin_api_hash_label);
+    context.insert("api_hint", &translations.admin_api_hint);
     context.insert(
         "telegram_api_id",
         &system_settings
@@ -255,67 +167,22 @@ pub(crate) async fn render_admin_page(
             .unwrap_or_default(),
     );
     context.insert("telegram_api_hash", &system_settings.telegram_api.api_hash);
-    context.insert(
-        "create_user_title",
-        &match language {
-            Language::En => "Create User",
-            Language::ZhCn => "创建用户",
-        },
-    );
-    context.insert(
-        "username_label",
-        &match language {
-            Language::En => "Username",
-            Language::ZhCn => "用户名",
-        },
-    );
-    context.insert(
-        "password_label",
-        &match language {
-            Language::En => "Password",
-            Language::ZhCn => "密码",
-        },
-    );
-    context.insert(
-        "create_user_label",
-        &match language {
-            Language::En => "Create User",
-            Language::ZhCn => "创建用户",
-        },
-    );
-    context.insert(
-        "policy_title",
-        &match language {
-            Language::En => "System Policy",
-            Language::ZhCn => "系统策略",
-        },
-    );
-    context.insert(
-        "personal_bot_title",
-        &match language {
-            Language::En => "My Bot Alerts",
-            Language::ZhCn => "我的 Bot 提醒",
-        },
-    );
+    context.insert("create_user_title", &translations.admin_create_user_title);
+    context.insert("username_label", &translations.login_username);
+    context.insert("password_label", &translations.login_password);
+    context.insert("create_user_label", &translations.admin_create_user_label);
+    context.insert("policy_title", &translations.admin_policy_title);
+    context.insert("personal_bot_title", &translations.admin_personal_bot_title);
     context.insert(
         "personal_bot_description",
-        &match language {
-            Language::En => "Bot delivery is personal now. Each user configures their own bot target and template, including the admin account.",
-            Language::ZhCn => "现在 Bot 提醒是按用户独立配置的。每个人都要设置自己的 Bot 目标和模板，管理员账号也不例外。",
-        },
+        &translations.admin_personal_bot_description,
     );
     context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
     context.insert(
         "bot_settings_action",
         &format!("/settings/bot?lang={}", language.code()),
     );
-    context.insert(
-        "registration_label",
-        &match language {
-            Language::En => "Registration Mode",
-            Language::ZhCn => "注册模式",
-        },
-    );
+    context.insert("registration_label", &translations.admin_registration_label);
     context.insert("registration_options", &registration_options);
     context.insert(
         "current_registration_policy",
@@ -343,393 +210,142 @@ pub(crate) async fn render_admin_page(
     );
     context.insert(
         "public_registration_label",
-        &match language {
-            Language::En => "Open registration when using admin toggle mode",
-            Language::ZhCn => "当模式为管理员可开关时，当前允许公开注册",
-        },
+        &translations.admin_public_registration_label,
     );
-    context.insert(
-        "session_ttl_label",
-        &match language {
-            Language::En => "Session TTL (hours)",
-            Language::ZhCn => "登录会话有效期（小时）",
-        },
-    );
-    context.insert(
-        "audit_limit_label",
-        &match language {
-            Language::En => "Detailed Audit Rows",
-            Language::ZhCn => "审计详细记录保留条数",
-        },
-    );
-    context.insert(
-        "totp_policy_label",
-        &match language {
-            Language::En => "TOTP Requirement",
-            Language::ZhCn => "TOTP 强制策略",
-        },
-    );
+    context.insert("session_ttl_label", &translations.admin_session_ttl_label);
+    context.insert("audit_limit_label", &translations.admin_audit_limit_label);
+    context.insert("totp_policy_label", &translations.admin_totp_policy_label);
     context.insert(
         "password_policy_label",
-        &match language {
-            Language::En => "Password Strength Rule",
-            Language::ZhCn => "密码强度策略",
-        },
+        &translations.admin_password_policy_label,
     );
     context.insert(
         "password_min_length_label",
-        &match language {
-            Language::En => "Password Minimum Length",
-            Language::ZhCn => "密码最小长度",
-        },
+        &translations.admin_password_min_length_label,
     );
     context.insert(
         "password_require_uppercase_label",
-        &match language {
-            Language::En => "Require uppercase letters",
-            Language::ZhCn => "必须包含大写字母",
-        },
+        &translations.admin_password_require_uppercase_label,
     );
     context.insert(
         "password_require_lowercase_label",
-        &match language {
-            Language::En => "Require lowercase letters",
-            Language::ZhCn => "必须包含小写字母",
-        },
+        &translations.admin_password_require_lowercase_label,
     );
     context.insert(
         "password_require_number_label",
-        &match language {
-            Language::En => "Require numbers",
-            Language::ZhCn => "必须包含数字",
-        },
+        &translations.admin_password_require_number_label,
     );
     context.insert(
         "password_require_symbol_label",
-        &match language {
-            Language::En => "Require symbols",
-            Language::ZhCn => "必须包含符号",
-        },
+        &translations.admin_password_require_symbol_label,
     );
     context.insert(
         "lockout_threshold_label",
-        &match language {
-            Language::En => "Lock After Failures",
-            Language::ZhCn => "连续失败多少次后开始锁定",
-        },
+        &translations.admin_lockout_threshold_label,
     );
-    context.insert(
-        "lockout_base_label",
-        &match language {
-            Language::En => "Initial Delay (seconds)",
-            Language::ZhCn => "初始延迟（秒）",
-        },
-    );
-    context.insert(
-        "lockout_max_label",
-        &match language {
-            Language::En => "Maximum Delay (seconds)",
-            Language::ZhCn => "最大延迟（秒）",
-        },
-    );
+    context.insert("lockout_base_label", &translations.admin_lockout_base_label);
+    context.insert("lockout_max_label", &translations.admin_lockout_max_label);
     context.insert(
         "system_idle_limit_label",
-        &match language {
-            Language::En => "System Idle Timeout Cap (minutes)",
-            Language::ZhCn => "系统空闲登出上限（分钟）",
-        },
+        &translations.admin_system_idle_limit_label,
     );
     context.insert(
         "system_idle_limit_hint",
-        &match language {
-            Language::En => "Leave blank to allow permanent sessions.",
-            Language::ZhCn => "留空表示允许永久不登出。",
-        },
+        &translations.admin_system_idle_limit_hint,
     );
-    context.insert(
-        "argon_memory_label",
-        &match language {
-            Language::En => "Argon2 Memory (MiB)",
-            Language::ZhCn => "Argon2 内存（MiB）",
-        },
-    );
+    context.insert("argon_memory_label", &translations.admin_argon_memory_label);
     context.insert(
         "argon_iterations_label",
-        &match language {
-            Language::En => "Argon2 Iterations",
-            Language::ZhCn => "Argon2 迭代次数",
-        },
+        &translations.admin_argon_iterations_label,
     );
+    context.insert("argon_lanes_label", &translations.admin_argon_lanes_label);
     context.insert(
-        "argon_lanes_label",
-        &match language {
-            Language::En => "Argon2 Lanes",
-            Language::ZhCn => "Argon2 并行线程数",
-        },
+        "argon_raise_only_hint",
+        &translations.admin_argon_raise_only_hint,
     );
-    context.insert("argon_raise_only_hint", &match language {
-        Language::En => "These minimums can only move upward. Existing users are rehashed after their next successful login.",
-        Language::ZhCn => "这些下限只能调高不能调低。现有用户在下次成功登录后会自动重新派生。",
-    });
-    context.insert(
-        "save_policy_label",
-        &match language {
-            Language::En => "Save Policy",
-            Language::ZhCn => "保存策略",
-        },
-    );
-    context.insert(
-        "users_title",
-        &match language {
-            Language::En => "Users",
-            Language::ZhCn => "用户列表",
-        },
-    );
-    context.insert(
-        "users_description",
-        &match language {
-            Language::En => "Create regular users, unlock them, revoke their web sessions, or fully reset their encrypted account state.",
-            Language::ZhCn => "在这里创建普通用户、解锁账号、踢下线，或彻底重置其加密账户状态。",
-        },
-    );
-    context.insert(
-        "unlock_label",
-        &match language {
-            Language::En => "Unlock",
-            Language::ZhCn => "解锁",
-        },
-    );
+    context.insert("save_policy_label", &translations.admin_save_policy_label);
+    context.insert("users_title", &translations.admin_users_title);
+    context.insert("users_description", &translations.admin_users_description);
+    context.insert("unlock_label", &translations.admin_unlock_label);
     context.insert(
         "revoke_sessions_label",
-        &match language {
-            Language::En => "Force Logout",
-            Language::ZhCn => "强制下线",
-        },
+        &translations.admin_revoke_sessions_label,
     );
-    context.insert(
-        "reset_label",
-        &match language {
-            Language::En => "Reset",
-            Language::ZhCn => "重置",
-        },
-    );
-    context.insert(
-        "role_admin_label",
-        &match language {
-            Language::En => "Admin",
-            Language::ZhCn => "管理员",
-        },
-    );
-    context.insert(
-        "role_user_label",
-        &match language {
-            Language::En => "User",
-            Language::ZhCn => "普通用户",
-        },
-    );
-    context.insert(
-        "locked_badge_label",
-        &match language {
-            Language::En => "Locked",
-            Language::ZhCn => "已锁定",
-        },
-    );
+    context.insert("reset_label", &translations.admin_reset_label);
+    context.insert("role_admin_label", &translations.admin_role_admin_label);
+    context.insert("role_user_label", &translations.admin_role_user_label);
+    context.insert("locked_badge_label", &translations.admin_locked_badge_label);
     context.insert(
         "totp_enabled_badge_label",
-        &match language {
-            Language::En => "TOTP On",
-            Language::ZhCn => "TOTP 已开",
-        },
+        &translations.admin_totp_enabled_badge_label,
     );
     context.insert(
         "totp_missing_badge_label",
-        &match language {
-            Language::En => "TOTP Off",
-            Language::ZhCn => "TOTP 未开",
-        },
+        &translations.admin_totp_missing_badge_label,
     );
     context.insert(
         "password_ready_badge_label",
-        &match language {
-            Language::En => "Password Ready",
-            Language::ZhCn => "密码已配置",
-        },
+        &translations.admin_password_ready_badge_label,
     );
     context.insert(
         "password_reset_badge_label",
-        &match language {
-            Language::En => "Reset Pending",
-            Language::ZhCn => "等待重新设置",
-        },
+        &translations.admin_password_reset_badge_label,
     );
     context.insert(
         "user_active_sessions_label",
-        &match language {
-            Language::En => "Active Web Sessions",
-            Language::ZhCn => "活跃网页登录会话",
-        },
+        &translations.admin_user_active_sessions_label,
     );
     context.insert(
         "user_recovery_codes_label",
-        &match language {
-            Language::En => "Recovery Codes",
-            Language::ZhCn => "恢复码剩余",
-        },
+        &translations.admin_user_recovery_codes_label,
     );
-    context.insert(
-        "user_last_ip_label",
-        &match language {
-            Language::En => "Last Login IP",
-            Language::ZhCn => "最近登录 IP",
-        },
-    );
-    context.insert(
-        "audit_title",
-        &match language {
-            Language::En => "Audit Log",
-            Language::ZhCn => "审计日志",
-        },
-    );
-    context.insert(
-        "audit_description",
-        &match language {
-            Language::En => "Detailed rows stay visible until the configured cap, then older detail collapses into rollups.",
-            Language::ZhCn => "详细审计保留到配置上限，超出后旧数据会折叠成汇总统计。",
-        },
-    );
-    context.insert(
-        "rollup_title",
-        &match language {
-            Language::En => "Audit Rollups",
-            Language::ZhCn => "审计汇总",
-        },
-    );
-    context.insert(
-        "rollup_description",
-        &match language {
-            Language::En => "Older detailed rows are compacted here by action type so the page stays fast and readable.",
-            Language::ZhCn => "较旧的详细记录会按动作类型汇总到这里，让页面保持轻量且易读。",
-        },
-    );
+    context.insert("user_last_ip_label", &translations.admin_user_last_ip_label);
+    context.insert("audit_title", &translations.admin_audit_title);
+    context.insert("audit_description", &translations.admin_audit_description);
+    context.insert("rollup_title", &translations.admin_rollup_title);
+    context.insert("rollup_description", &translations.admin_rollup_description);
     context.insert(
         "audit_success_label",
-        &match language {
-            Language::En => "OK",
-            Language::ZhCn => "成功",
-        },
+        &translations.admin_audit_success_label,
     );
     context.insert(
         "audit_failure_label",
-        &match language {
-            Language::En => "FAIL",
-            Language::ZhCn => "失败",
-        },
+        &translations.admin_audit_failure_label,
     );
-    context.insert(
-        "audit_actor_label",
-        &match language {
-            Language::En => "Actor",
-            Language::ZhCn => "操作者",
-        },
-    );
+    context.insert("audit_actor_label", &translations.admin_audit_actor_label);
     context.insert(
         "audit_subject_label",
-        &match language {
-            Language::En => "Subject",
-            Language::ZhCn => "目标",
-        },
+        &translations.admin_audit_subject_label,
     );
-    context.insert(
-        "audit_time_label",
-        &match language {
-            Language::En => "Time",
-            Language::ZhCn => "时间",
-        },
-    );
+    context.insert("audit_time_label", &translations.admin_audit_time_label);
     context.insert(
         "audit_updated_label",
-        &match language {
-            Language::En => "Updated",
-            Language::ZhCn => "更新时间",
-        },
+        &translations.admin_audit_updated_label,
     );
     context.insert(
         "audit_details_label",
-        &match language {
-            Language::En => "Details",
-            Language::ZhCn => "详情",
-        },
+        &translations.admin_audit_details_label,
     );
-    context.insert(
-        "audit_empty_label",
-        &match language {
-            Language::En => "No detailed audit rows have been recorded yet.",
-            Language::ZhCn => "当前还没有详细审计记录。",
-        },
-    );
-    context.insert(
-        "rollup_empty_label",
-        &match language {
-            Language::En => "No audit rollups have been generated yet.",
-            Language::ZhCn => "当前还没有生成审计汇总。",
-        },
-    );
-    context.insert(
-        "overview_title",
-        &match language {
-            Language::En => "System Snapshot",
-            Language::ZhCn => "系统快照",
-        },
-    );
+    context.insert("audit_empty_label", &translations.admin_audit_empty_label);
+    context.insert("rollup_empty_label", &translations.admin_rollup_empty_label);
     context.insert(
         "overview_users_label",
-        &match language {
-            Language::En => "Users",
-            Language::ZhCn => "用户数",
-        },
+        &translations.admin_overview_users_label,
     );
     context.insert(
         "overview_locked_label",
-        &match language {
-            Language::En => "Locked Users",
-            Language::ZhCn => "锁定用户",
-        },
+        &translations.admin_overview_locked_label,
     );
     context.insert(
         "overview_web_sessions_label",
-        &match language {
-            Language::En => "Active Web Sessions",
-            Language::ZhCn => "活跃网页登录会话",
-        },
+        &translations.admin_overview_web_sessions_label,
     );
-    context.insert(
-        "overview_mfa_label",
-        &match language {
-            Language::En => "Users With TOTP",
-            Language::ZhCn => "已启用 TOTP 的用户",
-        },
-    );
+    context.insert("overview_mfa_label", &translations.admin_overview_mfa_label);
     context.insert(
         "overview_audit_rows_label",
-        &match language {
-            Language::En => "Detailed Audit Rows",
-            Language::ZhCn => "详细审计记录",
-        },
+        &translations.admin_overview_audit_rows_label,
     );
-    context.insert(
-        "policy_stack_title",
-        &match language {
-            Language::En => "Policy Stack",
-            Language::ZhCn => "策略栈",
-        },
-    );
-    context.insert(
-        "policy_description",
-        &match language {
-            Language::En => "Each control is grouped by outcome: who can enter, how strong credentials must be, how long sessions stay alive, and how expensive key derivation should become.",
-            Language::ZhCn => "所有策略按结果分组：谁能进入、凭据强度、会话存活时长，以及密钥派生成本。",
-        },
-    );
+    context.insert("policy_description", &translations.admin_policy_description);
     context.insert("total_users", &total_users);
     context.insert("locked_users_count", &locked_users_count);
     context.insert("total_active_auth_sessions", &total_active_auth_sessions);
@@ -836,10 +452,9 @@ async fn admin_create_user_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::error(match language {
-                Language::En => "That username already exists.",
-                Language::ZhCn => "这个用户名已经存在。",
-            })),
+            Some(PageBanner::error(
+                language.translations().admin_username_exists_message,
+            )),
             &headers,
         )
         .await
@@ -899,10 +514,9 @@ async fn admin_create_user_handler(
         &app_state,
         &authenticated,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "User created.",
-            Language::ZhCn => "用户已创建。",
-        })),
+        Some(PageBanner::success(
+            language.translations().admin_user_created_message,
+        )),
         &headers,
     )
     .await
@@ -971,10 +585,9 @@ async fn admin_unlock_user_handler(
         &app_state,
         &authenticated,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "User unlocked.",
-            Language::ZhCn => "用户已解锁。",
-        })),
+        Some(PageBanner::success(
+            language.translations().admin_user_unlocked_message,
+        )),
         &headers,
     )
     .await
@@ -1089,10 +702,9 @@ async fn admin_reset_user_handler(
         &app_state,
         &authenticated,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "User credentials and encrypted data were cleared. They must register again with the same username.",
-            Language::ZhCn => "该用户的凭据和加密数据已清空。对方需要使用相同用户名重新注册。",
-        })),
+        Some(PageBanner::success(
+            language.translations().admin_reset_completed_message,
+        )),
         &headers,
     )
     .await
@@ -1164,10 +776,9 @@ async fn admin_revoke_user_sessions_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::success(match language {
-                Language::En => "User sessions revoked.",
-                Language::ZhCn => "该用户的登录会话已强制下线。",
-            })),
+            Some(PageBanner::success(
+                language.translations().admin_user_sessions_revoked_message,
+            )),
             &headers,
         )
         .await
@@ -1181,10 +792,11 @@ async fn admin_revoke_user_sessions_handler(
         &app_state,
         &authenticated,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "Selected sessions were revoked.",
-            Language::ZhCn => "选中的登录会话已被强制下线。",
-        })),
+        Some(PageBanner::success(
+            language
+                .translations()
+                .admin_selected_sessions_revoked_message,
+        )),
         &headers,
     )
     .await
@@ -1302,11 +914,7 @@ async fn admin_save_system_settings_handler(
             language,
             Some(PageBanner::error(format!(
                 "{}{}",
-                match language {
-                    Language::En =>
-                        "Settings were saved, but refreshing active session timeouts failed: ",
-                    Language::ZhCn => "系统设置已保存，但刷新活跃登录会话超时失败：",
-                },
+                language.translations().admin_settings_refresh_failed_prefix,
                 error
             ))),
             &headers,
@@ -1346,10 +954,9 @@ async fn admin_save_system_settings_handler(
         &app_state,
         &authenticated,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "System settings saved.",
-            Language::ZhCn => "系统设置已保存。",
-        })),
+        Some(PageBanner::success(
+            language.translations().admin_settings_saved_message,
+        )),
         &headers,
     )
     .await

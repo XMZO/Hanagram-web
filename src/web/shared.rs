@@ -61,7 +61,8 @@ pub(crate) use crate::session_handler::{
     load_telethon_string_session, serialize_session,
 };
 pub(crate) use crate::state::{
-    OtpMessage, SessionInfo, SessionNotificationContext, SessionStatus, SharedState,
+    OtpMessage, SessionErrorKind, SessionInfo, SessionNotificationContext, SessionStatus,
+    SharedState,
 };
 pub(crate) use crate::web_auth::{
     AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
@@ -270,10 +271,38 @@ pub(crate) struct BotNotificationSettingsForm {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub(crate) struct DashboardStatusView {
+    pub(crate) kind: &'static str,
+    pub(crate) connected: bool,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct DashboardMessageView {
+    pub(crate) received_at: String,
+    pub(crate) text: String,
+    pub(crate) code: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct DashboardSessionView {
+    pub(crate) id: String,
+    pub(crate) key: String,
+    pub(crate) note: String,
+    pub(crate) phone: String,
+    pub(crate) session_file: String,
+    pub(crate) status: DashboardStatusView,
+    pub(crate) latest_code: Option<String>,
+    pub(crate) latest_message_at: Option<String>,
+    pub(crate) latest_code_at_unix: Option<i64>,
+    pub(crate) recent_messages: Vec<DashboardMessageView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct DashboardSnapshot {
     pub(crate) connected_count: usize,
     pub(crate) generated_at: String,
-    pub(crate) sessions: Vec<SessionInfo>,
+    pub(crate) sessions: Vec<DashboardSessionView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -557,36 +586,25 @@ pub(crate) fn parse_registration_policy(raw: &str) -> RegistrationPolicy {
 }
 
 pub(crate) fn registration_policy_options(language: Language) -> Vec<SelectOption> {
-    match language {
-        Language::En => vec![
-            SelectOption {
-                value: "admin_only",
-                label: String::from("Admin Only"),
-            },
-            SelectOption {
-                value: "admin_selectable",
-                label: String::from("Admin Toggle"),
-            },
-            SelectOption {
-                value: "always_public",
-                label: String::from("Always Public"),
-            },
-        ],
-        Language::ZhCn => vec![
-            SelectOption {
-                value: "admin_only",
-                label: String::from("仅管理员创建"),
-            },
-            SelectOption {
-                value: "admin_selectable",
-                label: String::from("管理员可切换开放"),
-            },
-            SelectOption {
-                value: "always_public",
-                label: String::from("始终开放注册"),
-            },
-        ],
-    }
+    let translations = language.translations();
+    vec![
+        SelectOption {
+            value: "admin_only",
+            label: translations.registration_policy_admin_only_label.to_owned(),
+        },
+        SelectOption {
+            value: "admin_selectable",
+            label: translations
+                .registration_policy_admin_selectable_label
+                .to_owned(),
+        },
+        SelectOption {
+            value: "always_public",
+            label: translations
+                .registration_policy_always_public_label
+                .to_owned(),
+        },
+    ]
 }
 
 pub(crate) fn enforcement_mode_value(mode: EnforcementMode) -> &'static str {
@@ -606,36 +624,21 @@ pub(crate) fn parse_enforcement_mode(raw: &str) -> EnforcementMode {
 }
 
 pub(crate) fn enforcement_mode_options(language: Language) -> Vec<SelectOption> {
-    match language {
-        Language::En => vec![
-            SelectOption {
-                value: "all_users",
-                label: String::from("All Users"),
-            },
-            SelectOption {
-                value: "admin_exempt",
-                label: String::from("Admins Exempt"),
-            },
-            SelectOption {
-                value: "disabled",
-                label: String::from("Disabled"),
-            },
-        ],
-        Language::ZhCn => vec![
-            SelectOption {
-                value: "all_users",
-                label: String::from("所有用户"),
-            },
-            SelectOption {
-                value: "admin_exempt",
-                label: String::from("管理员豁免"),
-            },
-            SelectOption {
-                value: "disabled",
-                label: String::from("关闭"),
-            },
-        ],
-    }
+    let translations = language.translations();
+    vec![
+        SelectOption {
+            value: "all_users",
+            label: translations.enforcement_mode_all_users_label.to_owned(),
+        },
+        SelectOption {
+            value: "admin_exempt",
+            label: translations.enforcement_mode_admin_exempt_label.to_owned(),
+        },
+        SelectOption {
+            value: "disabled",
+            label: translations.enforcement_mode_disabled_label.to_owned(),
+        },
+    ]
 }
 
 pub(crate) fn selected_option_label(options: &[SelectOption], value: &str) -> String {
@@ -701,40 +704,25 @@ pub(crate) fn parse_telegram_api_settings(
 }
 
 pub(crate) fn telegram_api_status_summary(settings: &SystemSettings, language: Language) -> String {
+    let translations = language.translations();
     if configured_telegram_api(settings).is_some() {
-        match language {
-            Language::En => String::from("Configured"),
-            Language::ZhCn => String::from("已配置"),
-        }
+        translations.status_configured_label.to_owned()
     } else {
-        match language {
-            Language::En => String::from("Not configured"),
-            Language::ZhCn => String::from("未配置"),
-        }
+        translations.status_not_configured_label.to_owned()
     }
 }
 
 pub(crate) fn telegram_api_missing_message(language: Language) -> &'static str {
-    match language {
-        Language::En => {
-            "Telegram API credentials are not configured yet. Ask the admin to save API ID and API hash first."
-        }
-        Language::ZhCn => "Telegram API 凭据还没有配置，请先让管理员保存 API ID 和 API Hash。",
-    }
+    language.translations().telegram_api_missing_message
 }
 
 pub(crate) fn bot_status_summary(settings: &BotNotificationSettings, language: Language) -> String {
     let settings = normalized_bot_settings(settings.clone());
+    let translations = language.translations();
     if settings.enabled {
-        match language {
-            Language::En => String::from("Enabled"),
-            Language::ZhCn => String::from("已启用"),
-        }
+        translations.bot_status_enabled.to_owned()
     } else {
-        match language {
-            Language::En => String::from("Disabled"),
-            Language::ZhCn => String::from("已关闭"),
-        }
+        translations.bot_status_disabled.to_owned()
     }
 }
 
@@ -744,10 +732,10 @@ pub(crate) fn bot_destination_summary(
 ) -> String {
     let settings = normalized_bot_settings(settings.clone());
     if settings.bot_token.is_empty() || settings.chat_id.is_empty() {
-        return match language {
-            Language::En => String::from("Not configured"),
-            Language::ZhCn => String::from("未配置"),
-        };
+        return language
+            .translations()
+            .status_not_configured_label
+            .to_owned();
     }
 
     settings.chat_id.clone()
@@ -783,19 +771,15 @@ pub(crate) fn format_idle_timeout_label(
     idle_timeout_minutes: Option<u32>,
     language: Language,
 ) -> String {
+    let translations = language.translations();
     match idle_timeout_minutes {
-        Some(0) => match language {
-            Language::En => String::from("Never sign out"),
-            Language::ZhCn => String::from("永久不自动登出"),
-        },
-        Some(minutes) => match language {
-            Language::En => format!("{minutes} minutes"),
-            Language::ZhCn => format!("{minutes} 分钟"),
-        },
-        None => match language {
-            Language::En => String::from("Use system default"),
-            Language::ZhCn => String::from("使用系统默认值"),
-        },
+        Some(0) => translations.idle_timeout_never_sign_out_label.to_owned(),
+        Some(minutes) => translations
+            .idle_timeout_minutes_label
+            .replace("{minutes}", &minutes.to_string()),
+        None => translations
+            .idle_timeout_use_system_default_label
+            .to_owned(),
     }
 }
 
@@ -902,19 +886,10 @@ pub(crate) fn build_transport_security_warning(
         return None;
     }
 
+    let translations = language.translations();
     Some(TransportSecurityWarning {
-        title: match language {
-            Language::En => String::from("Plain HTTP is in use"),
-            Language::ZhCn => String::from("当前正在使用明文 HTTP"),
-        },
-        message: match language {
-            Language::En => String::from(
-                "Passwords, TOTP codes, recovery codes, bot tokens, Telegram API credentials, and session management requests can be intercepted or modified in transit. Only use plain HTTP for temporary local testing. For shared or public access, enable HTTPS directly or place Hanagram Web behind an HTTPS reverse proxy that forwards proto=https.",
-            ),
-            Language::ZhCn => String::from(
-                "密码、TOTP 动态码、恢复码、Bot Token、Telegram API 凭据以及会话管理请求都可能在传输过程中被窃听或篡改。明文 HTTP 只建议用于本机临时调试；如果要给局域网或公网使用，请启用 HTTPS，或者放在 HTTPS 反向代理后面并正确转发 proto=https。",
-            ),
-        },
+        title: translations.transport_warning_title.to_owned(),
+        message: translations.transport_warning_message.to_owned(),
     })
 }
 

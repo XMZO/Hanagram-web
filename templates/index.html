@@ -40,7 +40,7 @@
             statusConnected: {{ i18n.status_connected | json_encode | safe }},
             statusError: {{ i18n.status_error | json_encode | safe }},
             noMessages: {{ i18n.no_messages | json_encode | safe }},
-            noNote: {{ session_note_placeholder | json_encode | safe }},
+            noNote: {{ i18n.session_note_placeholder | json_encode | safe }},
             otpPlaceholder: {{ i18n.otp_placeholder | json_encode | safe }},
             copy: {{ i18n.copy | json_encode | safe }},
             copied: {{ i18n.copied | json_encode | safe }},
@@ -53,6 +53,7 @@
         const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
         const DASHBOARD_INCREMENTAL_REFRESH_MS = {{ dashboard_incremental_refresh_seconds }} * 1000;
         const DASHBOARD_FULL_REFRESH_MS = {{ dashboard_full_refresh_seconds }} * 1000;
+        const DASHBOARD_PANES = ["sessions", "shortcuts", "status"];
         let dashboardSyncInFlight = false;
     </script>
     <style>
@@ -82,6 +83,8 @@
         .modal-sheet {
             width: min(100%, 52rem);
         }
+        .tab-strip { scrollbar-width: none; }
+        .tab-strip::-webkit-scrollbar { display: none; }
         @keyframes float-in {
             from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
@@ -202,6 +205,26 @@
             void root.offsetWidth;
             root.classList.add("card-flash");
             window.setTimeout(() => root.classList.remove("card-flash"), 1400);
+        }
+
+        function activateDashboardPane(rawHash) {
+            const requested = String(rawHash || window.location.hash || "#sessions").replace(/^#/, "");
+            const activePane = DASHBOARD_PANES.includes(requested) ? requested : "sessions";
+
+            document.querySelectorAll("[data-dashboard-pane]").forEach((panel) => {
+                panel.classList.toggle("hidden", panel.dataset.dashboardPane !== activePane);
+            });
+
+            document.querySelectorAll("[data-dashboard-tab]").forEach((tab) => {
+                const active = tab.dataset.dashboardTab === activePane;
+                tab.classList.toggle("bg-sage", active);
+                tab.classList.toggle("text-white", active);
+                tab.classList.toggle("border-sage", active);
+                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
+                tab.classList.toggle("bg-white", !active);
+                tab.classList.toggle("text-ink/74", !active);
+                tab.classList.toggle("border-line", !active);
+            });
         }
     </script>
     <script>
@@ -435,6 +458,7 @@
         }
 
         window.addEventListener("DOMContentLoaded", () => {
+            activateDashboardPane();
             refreshNewBadges();
 
             document.querySelectorAll("[data-modal-close]").forEach((element) => {
@@ -450,6 +474,7 @@
             window.setInterval(() => syncDashboard(false), DASHBOARD_INCREMENTAL_REFRESH_MS);
             window.setInterval(() => syncDashboard(true), DASHBOARD_FULL_REFRESH_MS);
         });
+        window.addEventListener("hashchange", () => activateDashboardPane());
     </script>
 </head>
 <body class="min-h-screen font-sans text-ink antialiased">
@@ -562,63 +587,6 @@
         </section>
         {% endif %}
 
-        <section class="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr),minmax(0,1.1fr)]">
-            <article class="paper-shadow float-in rounded-[1.55rem] border border-line/80 bg-paper/95 p-4 [animation-delay:90ms]">
-                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                        <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_workspace_eyebrow }}</p>
-                        <h2 class="mt-2 font-display text-xl font-semibold text-ink sm:text-2xl">{{ dashboard_workspace_title }}</h2>
-                    </div>
-                    <p class="max-w-xl text-sm leading-6 text-ink/68">{{ dashboard_workspace_description }}</p>
-                </div>
-                <div class="mt-4 grid gap-3 sm:grid-cols-2 {% if show_admin %}lg:grid-cols-3{% endif %}">
-                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_sessions_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_sessions_body }}</p>
-                    </div>
-                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_settings_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_settings_body }}</p>
-                    </div>
-                    {% if show_admin %}
-                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_admin_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_admin_body }}</p>
-                    </div>
-                    {% endif %}
-                </div>
-            </article>
-
-            <article class="paper-shadow float-in rounded-[1.55rem] border border-line/80 bg-paper/95 p-4 [animation-delay:150ms]">
-                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                        <h2 class="font-display text-xl font-semibold text-ink sm:text-2xl">{{ dashboard_shortcuts_title }}</h2>
-                    </div>
-                    <p class="max-w-xl text-sm leading-6 text-ink/68">{{ dashboard_shortcuts_description }}</p>
-                </div>
-                <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <a href="{{ settings_security_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_security_card_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_security_card_body }}</p>
-                    </a>
-                    <a href="{{ settings_notifications_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_notifications_card_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_notifications_card_body }}</p>
-                    </a>
-                    <a href="{{ settings_access_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_access_card_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_access_card_body }}</p>
-                    </a>
-                    {% if show_admin %}
-                    <a href="{{ admin_overview_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_admin_card_title }}</p>
-                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_admin_card_body }}</p>
-                    </a>
-                    {% endif %}
-                </div>
-            </article>
-        </section>
-
         {% if transport_warning %}
         <section class="paper-shadow mt-4 rounded-[1.6rem] border border-butter/70 bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
             <p class="font-semibold">{{ transport_warning.title }}</p>
@@ -626,77 +594,181 @@
         </section>
         {% endif %}
 
-        {% if sessions | length == 0 %}
-        <section class="paper-shadow mt-4 rounded-[1.7rem] border border-dashed border-line bg-paper/95 px-6 py-10 text-center">
-            <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
-            <p class="mx-auto mt-4 max-w-2xl text-lg leading-8 text-ink/70">
-                {{ i18n.empty_state_description_prefix }}
-                <span class="rounded-full bg-latte px-3 py-1 font-mono text-sm text-ink">.session</span>
-                {{ i18n.empty_state_description_suffix }}
-            </p>
-            <a
-                href="{{ setup_href }}"
-                class="mt-6 inline-flex rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
-            >
-                {{ i18n.dashboard_add_session }}
-            </a>
-        </section>
-        {% else %}
-        <section class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {% for session in sessions %}
-            <article
-                class="paper-shadow float-in rounded-[1.5rem] border border-line/80 bg-paper/95 p-4 transition hover:-translate-y-1 hover:border-sage/45"
-                style="animation-delay: {{ loop.index0 * 70 }}ms;"
-                data-session-card
-                data-session-key="{{ session.id }}"
-                data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
-            >
-                <div class="flex items-start justify-between gap-4">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-3">
-                            <span data-role="status-dot" class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
-                            <p data-role="session-name" class="truncate text-lg font-semibold text-ink">{{ session.key }}</p>
+        <section class="paper-shadow mt-4 rounded-[1.75rem] border border-line/80 bg-paper/95 p-4 sm:p-5">
+            <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
+                <a href="#sessions" data-dashboard-tab="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
+                <a href="#shortcuts" data-dashboard-tab="shortcuts" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_shortcuts }}</a>
+                <a href="#status" data-dashboard-tab="status" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_status }}</a>
+            </div>
+
+            <div class="mt-4">
+                <section data-dashboard-pane="sessions" class="space-y-4">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_sessions }}</p>
+                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_sessions_title }}</h2>
+                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_sessions_description }}</p>
                         </div>
-                        <p data-role="session-phone" class="mt-2 inline-flex rounded-full border border-line/80 bg-white/92 px-3 py-1 font-mono text-[0.76rem] text-ink/58">{{ session.phone }}</p>
-                        <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
+                        <div class="flex flex-wrap gap-2">
+                            <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ i18n.stat_accounts }} · {{ sessions | length }}</span>
+                            <span class="rounded-full border border-sage/35 bg-mint px-3 py-1 text-sm text-sageDeep">{{ i18n.stat_connected }} · <span data-role="connected-count">{{ connected_count }}</span></span>
+                            <a href="{{ setup_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ i18n.dashboard_add_session }}</a>
+                        </div>
                     </div>
 
-                    <div class="flex flex-col items-end gap-2">
-                        <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-xs {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
-                            {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
-                        </span>
-                        <span data-new-indicator class="hidden rounded-full border border-peach/30 bg-[#fbefec] px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[#a66c60]">
-                            {{ i18n.new_code_badge }}
-                        </span>
+                    {% if sessions | length == 0 %}
+                    <section class="rounded-[1.5rem] border border-dashed border-line bg-white/78 px-6 py-10 text-center">
+                        <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
+                        <p class="mx-auto mt-4 max-w-2xl text-lg leading-8 text-ink/70">
+                            {{ i18n.empty_state_description_prefix }}
+                            <span class="rounded-full bg-latte px-3 py-1 font-mono text-sm text-ink">.session</span>
+                            {{ i18n.empty_state_description_suffix }}
+                        </p>
+                        <a
+                            href="{{ setup_href }}"
+                            class="mt-6 inline-flex rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
+                        >
+                            {{ i18n.dashboard_add_session }}
+                        </a>
+                    </section>
+                    {% else %}
+                    <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                        {% for session in sessions %}
+                        <article
+                            class="paper-shadow float-in rounded-[1.5rem] border border-line/80 bg-white/84 p-4 transition hover:-translate-y-1 hover:border-sage/45"
+                            style="animation-delay: {{ loop.index0 * 70 }}ms;"
+                            data-session-card
+                            data-session-key="{{ session.id }}"
+                            data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
+                        >
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-3">
+                                        <span data-role="status-dot" class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
+                                        <p data-role="session-name" class="truncate text-lg font-semibold text-ink">{{ session.key }}</p>
+                                    </div>
+                                    <p data-role="session-phone" class="mt-2 inline-flex rounded-full border border-line/80 bg-white/92 px-3 py-1 font-mono text-[0.76rem] text-ink/58">{{ session.phone }}</p>
+                                    <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
+                                </div>
+
+                                <div class="flex flex-col items-end gap-2">
+                                    <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-xs {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
+                                        {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
+                                    </span>
+                                    <span data-new-indicator class="hidden rounded-full border border-peach/30 bg-[#fbefec] px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[#a66c60]">
+                                        {{ i18n.new_code_badge }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 rounded-[1.3rem] border border-line/80 bg-white/88 px-4 py-3.5">
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
+                                <p data-role="latest-code" class="mt-2.5 font-mono text-[1.9rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.05rem]">
+                                    {{ session.latest_code | default(value=i18n.otp_placeholder) }}
+                                </p>
+                            </div>
+
+                            <div class="mt-3.5 flex items-end justify-between gap-4">
+                                <div class="min-w-0">
+                                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
+                                    <p data-role="latest-update" class="mt-1.5 truncate font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="shrink-0 rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
+                                    onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')"
+                                >
+                                    {{ i18n.open_details }}
+                                </button>
+                            </div>
+
+                            <p data-role="session-error" class="mt-3 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
+                                {{ session.status.error | default(value="") }}
+                            </p>
+                        </article>
+                        {% endfor %}
+                    </section>
+                    {% endif %}
+                </section>
+
+                <section data-dashboard-pane="shortcuts" class="hidden space-y-4">
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_shortcuts }}</p>
+                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_shortcuts_title }}</h2>
+                        </div>
+                        <p class="max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_shortcuts_description }}</p>
                     </div>
-                </div>
 
-                <div class="mt-4 rounded-[1.3rem] border border-line/80 bg-white/88 px-4 py-3.5">
-                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
-                    <p data-role="latest-code" class="mt-2.5 font-mono text-[1.9rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.05rem]">
-                        {{ session.latest_code | default(value=i18n.otp_placeholder) }}
-                    </p>
-                </div>
-
-                <div class="mt-3.5 flex items-end justify-between gap-4">
-                    <div class="min-w-0">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
-                        <p data-role="latest-update" class="mt-1.5 truncate font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
+                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <a href="{{ settings_security_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_security_card_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink">{{ i18n.dashboard_security_card_body }}</p>
+                        </a>
+                        <a href="{{ settings_notifications_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_notifications_card_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink">{{ i18n.dashboard_notifications_card_body }}</p>
+                        </a>
+                        <a href="{{ settings_access_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_access_card_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink">{{ i18n.dashboard_access_card_body }}</p>
+                        </a>
+                        {% if show_admin %}
+                        <a href="{{ admin_overview_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_admin_card_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink">{{ i18n.dashboard_admin_card_body }}</p>
+                        </a>
+                        {% endif %}
                     </div>
-                    <button
-                        type="button"
-                        class="shrink-0 rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
-                        onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')"
-                    >
-                        {{ i18n.open_details }}
-                    </button>
-                </div>
+                </section>
 
-                <p data-role="session-error" class="mt-3 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
-                    {{ session.status.error | default(value="") }}
-                </p>
-            </article>
-            {% endfor %}
+                <section data-dashboard-pane="status" class="hidden space-y-4">
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_workspace_eyebrow }}</p>
+                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_workspace_title }}</h2>
+                        </div>
+                        <p class="max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_workspace_description }}</p>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ i18n.stat_accounts }}</p>
+                            <p class="mt-2 text-2xl font-semibold">{{ sessions | length }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-sage/30 bg-mint px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.2em] text-sageDeep/75">{{ i18n.stat_connected }}</p>
+                            <p class="mt-2 text-2xl font-semibold text-sageDeep" data-role="connected-count">{{ connected_count }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ i18n.stat_updated }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-butter/60 bg-[#f7f0e4] px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ i18n.dashboard_refresh_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/75">{{ i18n.dashboard_refresh_incremental_label }} {{ dashboard_incremental_refresh_seconds }}s</p>
+                            <p class="mt-1 text-sm leading-6 text-ink/75">{{ i18n.dashboard_refresh_full_label }} {{ dashboard_full_refresh_seconds }}s</p>
+                        </article>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2 {% if show_admin %}xl:grid-cols-3{% endif %}">
+                        <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_lane_sessions_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.dashboard_lane_sessions_body }}</p>
+                        </div>
+                        <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_lane_settings_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.dashboard_lane_settings_body }}</p>
+                        </div>
+                        {% if show_admin %}
+                        <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_lane_admin_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.dashboard_lane_admin_body }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </section>
+            </div>
         </section>
 
         {% for session in sessions %}
@@ -710,7 +782,7 @@
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
                             <h2 data-role="session-name" class="mt-3 font-display text-[2rem] font-semibold leading-tight text-ink sm:text-3xl">{{ session.key }}</h2>
                             <p data-role="session-phone" class="mt-4 inline-flex rounded-full border border-line bg-white px-3 py-1 font-mono text-[0.78rem] text-ink/58">{{ session.phone }}</p>
-                            <p data-role="session-note" class="mt-4 text-sm leading-7 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
+                            <p data-role="session-note" class="mt-4 text-sm leading-7 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -737,7 +809,7 @@
                             <div class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.5rem]">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.export_session_title }}</p>
                                 <div class="mt-4 flex flex-wrap gap-3">
-                                    <a href="/sessions/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>
+                                    <a href="/sessions/{{ session.id }}/export/file?lang={{ lang }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>
                                         {{ i18n.export_file }}
                                     </a>
                                     <button
@@ -776,11 +848,11 @@
                             <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
-                                    <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">{{ session_note_label }}</span>
+                                    <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_note_label }}</span>
                                     <textarea name="note" rows="3" class="w-full rounded-[1rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white">{{ session.note }}</textarea>
                                 </label>
                                 <button type="submit" class="mt-3 w-full rounded-[1rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">
-                                    {{ save_note_label }}
+                                    {{ i18n.save_note_label }}
                                 </button>
                             </form>
 

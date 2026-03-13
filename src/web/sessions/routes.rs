@@ -144,17 +144,11 @@ async fn render_setup_page(
     context.insert("telegram_api_ready", &telegram_api_ready);
     context.insert(
         "telegram_api_notice_title",
-        &match language {
-            Language::En => "Admin Setup Required",
-            Language::ZhCn => "需要管理员先完成配置",
-        },
+        &translations.setup_telegram_api_notice_title,
     );
     context.insert(
         "telegram_api_notice_body",
-        &match language {
-            Language::En => "The admin still needs to save Telegram API ID and API hash in the admin console before phone login, QR login, and live connectivity can work.",
-            Language::ZhCn => "在手机号登录、扫码登录和实时连接可用之前，管理员还需要先在后台保存 Telegram API ID 和 API Hash。",
-        },
+        &translations.setup_telegram_api_notice_body,
     );
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -328,8 +322,11 @@ async fn export_session_file_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
     AxumPath(session_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
 ) -> Response {
-    export_owned_session_file(&app_state, &authenticated, &session_id).await
+    let language = detect_language(&headers, query.lang.as_deref());
+    export_owned_session_file(&app_state, &authenticated, &session_id, language).await
 }
 
 async fn export_string_session_handler(
@@ -369,7 +366,7 @@ async fn export_string_session_handler(
         return (
             StatusCode::LOCKED,
             Json(ApiErrorResponse {
-                error: String::from("Session data is locked. Sign out and sign in again."),
+                error: String::from(language.translations().session_data_locked_message),
             }),
         )
             .into_response();
@@ -722,10 +719,9 @@ async fn update_session_note_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::error(match language {
-                Language::En => "Failed to update session note.",
-                Language::ZhCn => "更新会话备注失败。",
-            })),
+            Some(PageBanner::error(
+                language.translations().session_note_update_failed_message,
+            )),
             &headers,
         )
         .await

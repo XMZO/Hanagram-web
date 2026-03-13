@@ -10,11 +10,34 @@ use serde::Serialize;
 use serde::ser::{SerializeStruct, Serializer};
 use tokio::sync::RwLock;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionErrorKind {
+    UnlockRequired,
+    TelegramApiMissing,
+    UnlockFailed,
+    Unauthorized,
+    LoadFailed,
+    UpdateFailed,
+}
+
+impl SessionErrorKind {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnlockRequired => "unlock_required",
+            Self::TelegramApiMissing => "telegram_api_missing",
+            Self::UnlockFailed => "unlock_failed",
+            Self::Unauthorized => "unauthorized",
+            Self::LoadFailed => "load_failed",
+            Self::UpdateFailed => "update_failed",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SessionStatus {
     Connecting,
     Connected,
-    Error(String),
+    Error(SessionErrorKind),
 }
 
 impl SessionStatus {
@@ -30,11 +53,15 @@ impl SessionStatus {
         matches!(self, Self::Connected)
     }
 
-    pub fn error_message(&self) -> Option<&str> {
+    pub fn error_kind(&self) -> Option<&SessionErrorKind> {
         match self {
-            Self::Error(message) => Some(message.as_str()),
+            Self::Error(kind) => Some(kind),
             Self::Connecting | Self::Connected => None,
         }
+    }
+
+    pub fn error_code(&self) -> Option<&'static str> {
+        self.error_kind().map(SessionErrorKind::code)
     }
 }
 
@@ -46,7 +73,7 @@ impl Serialize for SessionStatus {
         let mut status = serializer.serialize_struct("SessionStatus", 3)?;
         status.serialize_field("kind", self.kind())?;
         status.serialize_field("connected", &self.is_connected())?;
-        status.serialize_field("error", &self.error_message())?;
+        status.serialize_field("error", &self.error_code())?;
         status.end()
     }
 }

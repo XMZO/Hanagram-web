@@ -43,24 +43,6 @@ async fn render_login_page(
     let languages = language_options(language, "/login");
     let settings = app_state.system_settings.read().await.clone();
     let show_register = registration_page_allowed(&app_state.meta_store, &settings).await;
-    let register_label = match language {
-        Language::En => "Create Account",
-        Language::ZhCn => "创建账号",
-    };
-    let mfa_label = match language {
-        Language::En => "TOTP Code",
-        Language::ZhCn => "TOTP 动态码",
-    };
-    let recovery_label = match language {
-        Language::En => "Recovery Code",
-        Language::ZhCn => "恢复码",
-    };
-    let mfa_hint = match language {
-        Language::En => {
-            "If the account already enabled MFA, enter either a TOTP code or one recovery code."
-        }
-        Language::ZhCn => "如果账号已经启用二次验证，请填写 TOTP 动态码或一条恢复码。",
-    };
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -72,10 +54,11 @@ async fn render_login_page(
         "register_href",
         &format!("/register?lang={}", language.code()),
     );
-    context.insert("register_label", &register_label);
-    context.insert("mfa_label", &mfa_label);
-    context.insert("recovery_label", &recovery_label);
-    context.insert("mfa_hint", &mfa_hint);
+    context.insert("register_label", &translations.register_title);
+    context.insert("mfa_label", &translations.login_mfa_label);
+    context.insert("recovery_label", &translations.login_recovery_label);
+    context.insert("mfa_hint", &translations.login_mfa_hint);
+    context.insert("ready_label", &translations.login_ready_label);
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "login.html", &context)
@@ -87,50 +70,20 @@ async fn render_register_page(
     error_message: Option<&str>,
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
     let languages = language_options(language, "/register");
     let mut context = Context::new();
-    let title = match language {
-        Language::En => "Create Account",
-        Language::ZhCn => "创建账号",
-    };
-    let description = match language {
-        Language::En => {
-            "The first account becomes the only admin. New accounts must finish TOTP setup before entering the dashboard. If an administrator reset your account, reclaim it by registering again with the same username."
-        }
-        Language::ZhCn => {
-            "第一个注册的账号会成为唯一管理员。新账号进入面板前必须先完成 TOTP 设置。如果管理员清空了你的账号凭据，请使用相同用户名重新注册以接管原账号。"
-        }
-    };
-    let username_label = match language {
-        Language::En => "Username",
-        Language::ZhCn => "用户名",
-    };
-    let password_label = match language {
-        Language::En => "Password",
-        Language::ZhCn => "密码",
-    };
-    let confirm_label = match language {
-        Language::En => "Confirm Password",
-        Language::ZhCn => "确认密码",
-    };
-    let submit_label = match language {
-        Language::En => "Create Account",
-        Language::ZhCn => "创建账号",
-    };
-    let back_label = match language {
-        Language::En => "Back to Login",
-        Language::ZhCn => "返回登录",
-    };
-
     context.insert("lang", &language.code());
+    context.insert("i18n", translations);
     context.insert("languages", &languages);
-    context.insert("title", &title);
-    context.insert("description", &description);
-    context.insert("username_label", &username_label);
-    context.insert("password_label", &password_label);
-    context.insert("confirm_label", &confirm_label);
-    context.insert("submit_label", &submit_label);
-    context.insert("back_label", &back_label);
+    context.insert("title", &translations.register_title);
+    context.insert("page_title", &translations.register_page_title);
+    context.insert("description", &translations.register_description);
+    context.insert("username_label", &translations.login_username);
+    context.insert("password_label", &translations.login_password);
+    context.insert("confirm_label", &translations.register_confirm_label);
+    context.insert("submit_label", &translations.register_submit_label);
+    context.insert("back_label", &translations.back_to_login_label);
     context.insert("back_href", &format!("/login?lang={}", language.code()));
     context.insert("error_message", &error_message);
     insert_transport_security_warning(&mut context, language, headers);
@@ -175,11 +128,10 @@ pub(crate) async fn render_settings_page(
         .filter(|session| !session.is_current)
         .count();
 
-    let totp_status = match language {
-        Language::En if authenticated.user.security.totp_enabled => "Enabled",
-        Language::En => "Not enabled",
-        Language::ZhCn if authenticated.user.security.totp_enabled => "已启用",
-        Language::ZhCn => "未启用",
+    let totp_status = if authenticated.user.security.totp_enabled {
+        translations.settings_totp_status_enabled
+    } else {
+        translations.settings_totp_status_disabled
     };
     let idle_timeout = format_idle_timeout_label(
         authenticated.user.security.preferred_idle_timeout_minutes,
@@ -195,18 +147,10 @@ pub(crate) async fn render_settings_page(
         .unwrap_or_default();
     let system_settings = app_state.system_settings.read().await.clone();
     let idle_timeout_hint = match system_settings.max_idle_timeout_minutes {
-        Some(maximum) => match language {
-            Language::En => {
-                format!("Leave blank to use the system default. Maximum: {maximum} minutes.")
-            }
-            Language::ZhCn => format!("留空表示使用系统默认值。当前上限：{maximum} 分钟。"),
-        },
-        None => match language {
-            Language::En => String::from(
-                "Leave blank to use the system default. Enter 0 for a permanent session.",
-            ),
-            Language::ZhCn => String::from("留空表示使用系统默认值。输入 0 表示永久不自动登出。"),
-        },
+        Some(maximum) => translations
+            .settings_idle_timeout_hint_capped
+            .replace("{maximum}", &maximum.to_string()),
+        None => String::from(translations.settings_idle_timeout_hint_unlimited),
     };
     let bot_settings = normalized_bot_settings(
         authenticated
@@ -223,17 +167,8 @@ pub(crate) async fn render_settings_page(
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
-    context.insert(
-        "title",
-        &match language {
-            Language::En => "Settings",
-            Language::ZhCn => "设置",
-        },
-    );
-    context.insert("description", &match language {
-        Language::En => "Security, active sessions, and notification preferences live here so the main dashboard stays focused on Telegram sessions.",
-        Language::ZhCn => "安全、活跃会话和提醒设置都放在这里，让主面板专注于 Telegram 会话本身。",
-    });
+    context.insert("title", &translations.settings_page_title);
+    context.insert("description", &translations.settings_page_description);
     context.insert("current_username", &authenticated.user.username);
     context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
     context.insert("admin_href", &admin_href(language));
@@ -241,271 +176,108 @@ pub(crate) async fn render_settings_page(
     context.insert("notifications_href", &notifications_href(language));
     context.insert(
         "settings_sections_title",
-        &match language {
-            Language::En => "Workspace",
-            Language::ZhCn => "工作区",
-        },
+        &translations.settings_sections_title,
     );
-    context.insert(
-        "settings_overview_title",
-        &match language {
-            Language::En => "Overview",
-            Language::ZhCn => "概览",
-        },
-    );
-    context.insert(
-        "settings_nav_security",
-        &match language {
-            Language::En => "Security",
-            Language::ZhCn => "安全",
-        },
-    );
+    context.insert("settings_nav_security", &translations.settings_nav_security);
     context.insert(
         "settings_nav_notifications",
-        &match language {
-            Language::En => "Reminders",
-            Language::ZhCn => "提醒",
-        },
+        &translations.settings_nav_notifications,
     );
-    context.insert(
-        "settings_nav_access",
-        &match language {
-            Language::En => "Access",
-            Language::ZhCn => "访问控制",
-        },
-    );
-    context.insert(
-        "dashboard_label",
-        &match language {
-            Language::En => "Dashboard",
-            Language::ZhCn => "主面板",
-        },
-    );
-    context.insert(
-        "admin_label",
-        &match language {
-            Language::En => "Admin",
-            Language::ZhCn => "管理后台",
-        },
-    );
-    context.insert(
-        "notifications_label",
-        &match language {
-            Language::En => "Notifications",
-            Language::ZhCn => "提醒设置",
-        },
-    );
-    context.insert(
-        "admin_access_description",
-        &match language {
-            Language::En => "User resets, policy tuning, and audit logs live in the admin console.",
-            Language::ZhCn => "用户重置、策略调优和审计日志都在管理后台。",
-        },
-    );
-    context.insert(
-        "security_title",
-        &match language {
-            Language::En => "Security",
-            Language::ZhCn => "安全",
-        },
-    );
+    context.insert("settings_nav_access", &translations.settings_nav_access);
+    context.insert("dashboard_label", &translations.nav_dashboard_label);
+    context.insert("admin_label", &translations.nav_admin_label);
+    context.insert("security_title", &translations.settings_security_title);
     context.insert(
         "security_description",
-        &match language {
-            Language::En => "Password, TOTP, recovery coverage, and your personal sign-in policy are grouped here.",
-            Language::ZhCn => "密码、TOTP、恢复码覆盖情况和你的个人登录策略统一放在这里。",
-        },
+        &translations.settings_security_description,
     );
-    context.insert(
-        "totp_label",
-        &match language {
-            Language::En => "TOTP",
-            Language::ZhCn => "TOTP",
-        },
-    );
+    context.insert("totp_label", &translations.settings_totp_label);
     context.insert("totp_status", &totp_status);
-    context.insert(
-        "totp_hint",
-        &match language {
-            Language::En => "If TOTP is required and not configured, this page is the only path back into the dashboard.",
-            Language::ZhCn => "如果系统要求 TOTP 但还没启用，这里就是重新进入主面板前必须完成的步骤。",
-        },
-    );
-    context.insert(
-        "recovery_label",
-        &match language {
-            Language::En => "Recovery Codes",
-            Language::ZhCn => "恢复码",
-        },
-    );
+    context.insert("totp_hint", &translations.settings_totp_hint);
+    context.insert("recovery_label", &translations.settings_recovery_label);
     context.insert(
         "recovery_remaining",
         &authenticated.recovery_codes_remaining.to_string(),
     );
-    context.insert(
-        "recovery_hint",
-        &match language {
-            Language::En => "Each recovery code works once. Once all 5 are consumed, you must generate a new set.",
-            Language::ZhCn => "每个恢复码只能用一次。5 个都用完后，必须重新生成一组新的恢复码。",
-        },
-    );
-    context.insert(
-        "idle_label",
-        &match language {
-            Language::En => "Idle Timeout Preference",
-            Language::ZhCn => "空闲登出偏好",
-        },
-    );
+    context.insert("recovery_hint", &translations.settings_recovery_hint);
+    context.insert("idle_label", &translations.settings_idle_label);
     context.insert("idle_timeout", &idle_timeout);
     context.insert(
         "idle_effective_label",
-        &match language {
-            Language::En => "Current Session Timeout",
-            Language::ZhCn => "当前登录会话超时",
-        },
+        &translations.settings_idle_effective_label,
     );
     context.insert("idle_effective_timeout", &effective_idle_timeout);
     context.insert(
         "idle_summary_label",
-        &match language {
-            Language::En => "Current Auto Logout",
-            Language::ZhCn => "当前自动登出规则",
-        },
+        &translations.settings_idle_summary_label,
     );
-    context.insert(
-        "idle_form_title",
-        &match language {
-            Language::En => "Auto Logout",
-            Language::ZhCn => "自动登出设置",
-        },
-    );
+    context.insert("idle_form_title", &translations.settings_idle_form_title);
     context.insert(
         "idle_form_action",
         &format!("/settings/security/idle-timeout?lang={}", language.code()),
     );
-    context.insert(
-        "idle_input_label",
-        &match language {
-            Language::En => "Minutes",
-            Language::ZhCn => "分钟数",
-        },
-    );
+    context.insert("idle_input_label", &translations.settings_idle_input_label);
     context.insert("idle_timeout_field_value", &idle_timeout_field_value);
     context.insert("idle_timeout_hint", &idle_timeout_hint);
     context.insert(
         "idle_submit_label",
-        &match language {
-            Language::En => "Save Idle Timeout",
-            Language::ZhCn => "保存空闲登出设置",
-        },
+        &translations.settings_idle_submit_label,
     );
     context.insert(
         "totp_setup_href",
         &format!("/settings/security/totp/setup?lang={}", language.code()),
     );
-    context.insert(
-        "totp_setup_label",
-        &match language {
-            Language::En => "Manage TOTP",
-            Language::ZhCn => "管理 TOTP",
-        },
-    );
-    context.insert(
-        "password_title",
-        &match language {
-            Language::En => "Change Password",
-            Language::ZhCn => "修改密码",
-        },
-    );
+    context.insert("totp_setup_label", &translations.settings_totp_setup_label);
+    context.insert("password_title", &translations.settings_password_title);
     context.insert(
         "password_action",
         &format!("/settings/security/password?lang={}", language.code()),
     );
     context.insert(
         "current_password_label",
-        &match language {
-            Language::En => "Current Password",
-            Language::ZhCn => "当前密码",
-        },
+        &translations.settings_current_password_label,
     );
     context.insert(
         "new_password_label",
-        &match language {
-            Language::En => "New Password",
-            Language::ZhCn => "新密码",
-        },
+        &translations.settings_new_password_label,
     );
     context.insert(
         "confirm_password_label",
-        &match language {
-            Language::En => "Confirm New Password",
-            Language::ZhCn => "确认新密码",
-        },
+        &translations.settings_confirm_password_label,
     );
     context.insert(
         "change_password_label",
-        &match language {
-            Language::En => "Update Password",
-            Language::ZhCn => "更新密码",
-        },
+        &translations.settings_change_password_label,
     );
     context.insert(
         "password_description",
-        &match language {
-            Language::En => "Changing the password re-wraps your user master key and immediately refreshes this sign-in session.",
-            Language::ZhCn => "修改密码会重新包裹你的用户主密钥，并立即刷新当前登录会话的解锁状态。",
-        },
+        &translations.settings_password_description,
     );
     context.insert(
         "notifications_section_title",
-        &match language {
-            Language::En => "Reminder Center",
-            Language::ZhCn => "提醒中心",
-        },
+        &translations.settings_notifications_section_title,
     );
     context.insert(
         "notifications_section_description",
-        &match language {
-            Language::En => "These are your personal reminder settings. Each user keeps their own bot destination and template without sharing a global bot profile.",
-            Language::ZhCn => "这里是你自己的提醒配置。每个用户都单独维护自己的 Bot 目标和模板，不再共享全局 Bot 配置。",
-        },
-    );
-    context.insert(
-        "notifications_expand_label",
-        &match language {
-            Language::En => "Expand Reminder Settings",
-            Language::ZhCn => "展开提醒设置",
-        },
+        &translations.settings_notifications_section_description,
     );
     context.insert(
         "notifications_manage_fullpage_label",
-        &match language {
-            Language::En => "Open Full Page",
-            Language::ZhCn => "打开独立页面",
-        },
+        &translations.settings_notifications_manage_fullpage_label,
     );
     context.insert(
         "notification_status_label",
-        &match language {
-            Language::En => "Status",
-            Language::ZhCn => "状态",
-        },
+        &translations.settings_notification_status_label,
     );
     context.insert("notification_status_value", &bot_status);
     context.insert(
         "notification_destination_label",
-        &match language {
-            Language::En => "Target Chat",
-            Language::ZhCn => "目标聊天",
-        },
+        &translations.settings_notification_destination_label,
     );
     context.insert("notification_destination_value", &bot_destination);
     context.insert(
         "notification_template_preview_label",
-        &match language {
-            Language::En => "Template Preview",
-            Language::ZhCn => "模板预览",
-        },
+        &translations.settings_notification_template_preview_label,
     );
     context.insert("notification_template_preview", &bot_template_preview);
     context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
@@ -514,19 +286,10 @@ pub(crate) async fn render_settings_page(
         "bot_settings_action",
         &format!("/settings/bot?lang={}", language.code()),
     );
-    context.insert(
-        "sessions_title",
-        &match language {
-            Language::En => "Active Sessions",
-            Language::ZhCn => "活跃登录会话",
-        },
-    );
+    context.insert("sessions_title", &translations.settings_sessions_title);
     context.insert(
         "sessions_description",
-        &match language {
-            Language::En => "You can review every live browser session here and cut off stale devices without leaving the settings page.",
-            Language::ZhCn => "你可以在这里查看所有仍然在线的浏览器会话，并直接清理不再需要的设备登录。",
-        },
+        &translations.settings_sessions_description,
     );
     context.insert("sessions", &active_sessions);
     context.insert("active_session_count", &active_session_count);
@@ -534,13 +297,7 @@ pub(crate) async fn render_settings_page(
     context.insert("other_session_count", &other_session_count);
     context.insert("current_session_id", &authenticated.auth_session.id);
     context.insert("current_user_id", &authenticated.user.id);
-    context.insert(
-        "revoke_label",
-        &match language {
-            Language::En => "Force Logout",
-            Language::ZhCn => "强制下线",
-        },
-    );
+    context.insert("revoke_label", &translations.settings_revoke_label);
     context.insert(
         "revoke_all_action",
         &format!(
@@ -549,86 +306,45 @@ pub(crate) async fn render_settings_page(
             language.code()
         ),
     );
-    context.insert(
-        "revoke_all_label",
-        &match language {
-            Language::En => "Force Logout Other Sessions",
-            Language::ZhCn => "强制下线其他会话",
-        },
-    );
+    context.insert("revoke_all_label", &translations.settings_revoke_all_label);
     context.insert(
         "session_device_label",
-        &match language {
-            Language::En => "Device",
-            Language::ZhCn => "设备",
-        },
+        &translations.settings_session_device_label,
     );
     context.insert(
         "unknown_user_agent_label",
-        &match language {
-            Language::En => "Unknown User Agent",
-            Language::ZhCn => "未知设备",
-        },
+        &translations.settings_unknown_user_agent_label,
     );
-    context.insert(
-        "session_ip_label",
-        &match language {
-            Language::En => "IP",
-            Language::ZhCn => "IP",
-        },
-    );
+    context.insert("session_ip_label", &translations.settings_session_ip_label);
     context.insert(
         "session_issued_label",
-        &match language {
-            Language::En => "Issued",
-            Language::ZhCn => "签发时间",
-        },
+        &translations.settings_session_issued_label,
     );
     context.insert(
         "session_expires_label",
-        &match language {
-            Language::En => "Expires",
-            Language::ZhCn => "到期时间",
-        },
+        &translations.settings_session_expires_label,
     );
     context.insert(
         "session_empty_label",
-        &match language {
-            Language::En => "No active browser sessions are currently recorded.",
-            Language::ZhCn => "当前没有记录到活跃的浏览器登录会话。",
-        },
+        &translations.settings_session_empty_label,
     );
     context.insert(
         "current_session_label",
-        &match language {
-            Language::En => "Current Session",
-            Language::ZhCn => "当前会话",
-        },
+        &translations.settings_current_session_label,
     );
     context.insert(
         "access_auto_logout_description",
-        &match language {
-            Language::En => "Set how long idle browser sessions may stay signed in before the system asks for a new login.",
-            Language::ZhCn => "这里决定浏览器登录在空闲多长时间后需要重新登录。",
-        },
+        &translations.settings_access_auto_logout_description,
     );
     context.insert(
         "access_current_only_hint",
-        &match language {
-            Language::En => "Only this browser session is active right now.",
-            Language::ZhCn => "当前只有你正在使用的这个浏览器会话在线。",
-        },
+        &translations.settings_access_current_only_hint,
     );
     context.insert(
         "access_other_sessions_hint",
-        &match language {
-            Language::En => {
-                format!("{other_session_count} other browser session(s) are still active and can be forced offline here.")
-            }
-            Language::ZhCn => format!(
-                "当前还有 {other_session_count} 个其他浏览器会话在线，可以在这里强制下线。"
-            ),
-        },
+        &translations
+            .settings_access_other_sessions_hint
+            .replace("{count}", &other_session_count.to_string()),
     );
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
@@ -643,6 +359,7 @@ async fn render_totp_setup_page(
     banner: Option<PageBanner>,
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
     let pending = {
         let mut setups = app_state.totp_setups.write().await;
         setups
@@ -667,56 +384,19 @@ async fn render_totp_setup_page(
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
-    context.insert(
-        "title",
-        &match language {
-            Language::En => "TOTP Setup",
-            Language::ZhCn => "TOTP 设置",
-        },
-    );
-    context.insert("description", &match language {
-        Language::En => "Scan the QR code, store the recovery codes, then confirm with one TOTP code before entering the dashboard.",
-        Language::ZhCn => "先扫码、保存恢复码，再输入一次 TOTP 动态码完成确认，然后才能进入主面板。",
-    });
+    context.insert("i18n", translations);
+    context.insert("title", &translations.totp_setup_title);
+    context.insert("description", &translations.totp_setup_description);
     context.insert("settings_href", &settings_href(language));
-    context.insert(
-        "back_label",
-        &match language {
-            Language::En => "Back to Settings",
-            Language::ZhCn => "返回设置",
-        },
-    );
-    context.insert(
-        "qr_title",
-        &match language {
-            Language::En => "Authenticator QR",
-            Language::ZhCn => "认证器二维码",
-        },
-    );
+    context.insert("back_label", &translations.back_to_settings_label);
+    context.insert("qr_title", &translations.totp_setup_qr_title);
     context.insert("qr_svg", &qr_svg);
-    context.insert(
-        "secret_label",
-        &match language {
-            Language::En => "Manual Secret",
-            Language::ZhCn => "手动输入密钥",
-        },
-    );
+    context.insert("secret_label", &translations.totp_setup_secret_label);
     context.insert("secret", pending.secret.as_ref().as_str());
-    context.insert(
-        "recovery_title",
-        &match language {
-            Language::En => "Recovery Codes",
-            Language::ZhCn => "恢复码",
-        },
-    );
+    context.insert("recovery_title", &translations.totp_setup_recovery_title);
     context.insert(
         "recovery_description",
-        &match language {
-            Language::En => {
-                "Each code works once. After all 5 are used, you must generate a new set."
-            }
-            Language::ZhCn => "每个恢复码只能使用一次。5 个都用完后，必须重新生成一组。",
-        },
+        &translations.totp_setup_recovery_description,
     );
     let recovery_codes = pending
         .recovery_codes
@@ -728,20 +408,8 @@ async fn render_totp_setup_page(
         "confirm_action",
         &format!("/settings/security/totp/setup?lang={}", language.code()),
     );
-    context.insert(
-        "confirm_label",
-        &match language {
-            Language::En => "Enter One TOTP Code",
-            Language::ZhCn => "输入一个 TOTP 动态码",
-        },
-    );
-    context.insert(
-        "confirm_submit",
-        &match language {
-            Language::En => "Enable TOTP",
-            Language::ZhCn => "启用 TOTP",
-        },
-    );
+    context.insert("confirm_label", &translations.totp_setup_confirm_label);
+    context.insert("confirm_submit", &translations.totp_setup_confirm_submit);
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -847,30 +515,24 @@ async fn login_submit_handler(
             }
         }
         Err(LoginError::LockedUntil(locked_until)) => {
-            let message = match language {
-                Language::En => format!("This account is locked until {locked_until}."),
-                Language::ZhCn => format!("这个账号已被锁定，解锁时间戳：{locked_until}。"),
-            };
+            let message = language
+                .translations()
+                .login_locked_until_message
+                .replace("{locked_until}", &locked_until.to_string());
             match render_login_page(&app_state, language, Some(&message), &headers).await {
                 Ok(html) => (StatusCode::TOO_MANY_REQUESTS, html).into_response(),
                 Err(status) => status.into_response(),
             }
         }
         Err(LoginError::MissingSecondFactor) => {
-            let message = match language {
-                Language::En => "Enter a TOTP code or recovery code to finish signing in.",
-                Language::ZhCn => "请输入 TOTP 动态码或恢复码以完成登录。",
-            };
+            let message = language.translations().login_require_mfa_message;
             match render_login_page(&app_state, language, Some(message), &headers).await {
                 Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
                 Err(status) => status.into_response(),
             }
         }
         Err(LoginError::InvalidSecondFactor) => {
-            let message = match language {
-                Language::En => "The TOTP code or recovery code was invalid.",
-                Language::ZhCn => "TOTP 动态码或恢复码不正确。",
-            };
+            let message = language.translations().login_invalid_mfa_message;
             match render_login_page(&app_state, language, Some(message), &headers).await {
                 Ok(html) => (StatusCode::UNAUTHORIZED, html).into_response(),
                 Err(status) => status.into_response(),
@@ -906,10 +568,7 @@ async fn register_submit_handler(
         return Redirect::to(&format!("/login?lang={}", language.code())).into_response();
     }
     if form.password != form.confirm_password {
-        let message = match language {
-            Language::En => "The two password fields must match.",
-            Language::ZhCn => "两次输入的密码必须一致。",
-        };
+        let message = language.translations().password_fields_must_match_message;
         return match render_register_page(&app_state, language, Some(message), &headers).await {
             Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
             Err(status) => status.into_response(),
@@ -981,10 +640,9 @@ async fn change_password_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     if form.new_password != form.confirm_password {
-        let message = match language {
-            Language::En => "The new password fields must match.",
-            Language::ZhCn => "两次输入的新密码必须一致。",
-        };
+        let message = language
+            .translations()
+            .new_password_fields_must_match_message;
         return match render_settings_page(
             &app_state,
             &authenticated,
@@ -1033,10 +691,9 @@ async fn change_password_handler(
                 &app_state,
                 &refreshed,
                 language,
-                Some(PageBanner::success(match language {
-                    Language::En => "Password updated.",
-                    Language::ZhCn => "密码已更新。",
-                })),
+                Some(PageBanner::success(
+                    language.translations().password_updated_message,
+                )),
                 &headers,
             )
             .await
@@ -1159,10 +816,9 @@ async fn update_idle_timeout_handler(
         &app_state,
         &refreshed,
         language,
-        Some(PageBanner::success(match language {
-            Language::En => "Idle timeout updated.",
-            Language::ZhCn => "空闲登出设置已更新。",
-        })),
+        Some(PageBanner::success(
+            language.translations().idle_timeout_updated_message,
+        )),
         &headers,
     )
     .await
@@ -1198,10 +854,9 @@ async fn confirm_totp_setup_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::error(match language {
-                Language::En => "Enter a TOTP code to confirm setup.",
-                Language::ZhCn => "请输入一个 TOTP 动态码完成确认。",
-            })),
+            Some(PageBanner::error(
+                language.translations().totp_setup_enter_code_message,
+            )),
             &headers,
         )
         .await
@@ -1238,10 +893,9 @@ async fn confirm_totp_setup_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::error(match language {
-                Language::En => "That TOTP code did not match the new secret.",
-                Language::ZhCn => "这个 TOTP 动态码与新的密钥不匹配。",
-            })),
+            Some(PageBanner::error(
+                language.translations().totp_setup_code_mismatch_message,
+            )),
             &headers,
         )
         .await
@@ -1262,10 +916,9 @@ async fn confirm_totp_setup_handler(
             &app_state,
             &authenticated,
             language,
-            Some(PageBanner::error(match language {
-                Language::En => "Your unlock state expired. Sign in again and retry TOTP setup.",
-                Language::ZhCn => "当前解锁状态已失效，请重新登录后再完成 TOTP 设置。",
-            })),
+            Some(PageBanner::error(
+                language.translations().unlock_state_expired_message,
+            )),
             &headers,
         )
         .await
