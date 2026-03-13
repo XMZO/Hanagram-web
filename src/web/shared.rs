@@ -594,7 +594,7 @@ pub(crate) struct IdleTimeoutForm {
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct TotpConfirmForm {
     pub(crate) action: Option<String>,
-    pub(crate) code: String,
+    pub(crate) code: Option<String>,
     pub(crate) confirm_saved_codes: Option<String>,
     pub(crate) confirm_replace_totp: Option<String>,
     pub(crate) confirm_replace_recovery: Option<String>,
@@ -741,6 +741,71 @@ pub(crate) fn format_unix_timestamp(unix: i64) -> String {
     match DateTime::from_timestamp(unix, 0) {
         Some(datetime) => datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         None => String::from("-"),
+    }
+}
+
+pub(crate) fn format_duration_for_display(language: Language, total_seconds: i64) -> String {
+    let translations = language.translations();
+    let total_seconds = total_seconds.max(0);
+    let units = [
+        (
+            31_536_000_i64,
+            translations.duration_year_singular_label,
+            translations.duration_year_plural_label,
+        ),
+        (
+            2_592_000_i64,
+            translations.duration_month_singular_label,
+            translations.duration_month_plural_label,
+        ),
+        (
+            86_400_i64,
+            translations.duration_day_singular_label,
+            translations.duration_day_plural_label,
+        ),
+        (
+            3_600_i64,
+            translations.duration_hour_singular_label,
+            translations.duration_hour_plural_label,
+        ),
+        (
+            60_i64,
+            translations.duration_minute_singular_label,
+            translations.duration_minute_plural_label,
+        ),
+        (
+            1_i64,
+            translations.duration_second_singular_label,
+            translations.duration_second_plural_label,
+        ),
+    ];
+
+    let mut remaining = total_seconds;
+    let mut parts = Vec::new();
+    for (unit_seconds, singular_label, plural_label) in units {
+        if remaining < unit_seconds {
+            continue;
+        }
+        let value = remaining / unit_seconds;
+        remaining %= unit_seconds;
+        let label = if value == 1 {
+            singular_label
+        } else {
+            plural_label
+        };
+        parts.push(match language {
+            Language::En => format!("{value} {label}"),
+            Language::ZhCn => format!("{value}{label}"),
+        });
+        if parts.len() == 2 {
+            break;
+        }
+    }
+
+    if parts.is_empty() {
+        translations.duration_zero_label.to_owned()
+    } else {
+        parts.join(" ")
     }
 }
 

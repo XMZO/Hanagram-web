@@ -432,6 +432,19 @@ pub struct TranslationSet {
     pub idle_timeout_never_sign_out_label: &'static str,
     pub idle_timeout_minutes_label: &'static str,
     pub idle_timeout_use_system_default_label: &'static str,
+    pub duration_zero_label: &'static str,
+    pub duration_second_singular_label: &'static str,
+    pub duration_second_plural_label: &'static str,
+    pub duration_minute_singular_label: &'static str,
+    pub duration_minute_plural_label: &'static str,
+    pub duration_hour_singular_label: &'static str,
+    pub duration_hour_plural_label: &'static str,
+    pub duration_day_singular_label: &'static str,
+    pub duration_day_plural_label: &'static str,
+    pub duration_month_singular_label: &'static str,
+    pub duration_month_plural_label: &'static str,
+    pub duration_year_singular_label: &'static str,
+    pub duration_year_plural_label: &'static str,
     pub transport_warning_title: &'static str,
     pub transport_warning_message: &'static str,
     pub session_phone_unknown_label: &'static str,
@@ -555,59 +568,6 @@ pub fn language_options(current: Language, _path: &str) -> [LanguageOption; 2] {
             active: current == Language::En,
         },
     ]
-}
-
-pub fn format_duration_for_display(language: Language, total_seconds: i64) -> String {
-    let total_seconds = total_seconds.max(0);
-    let units = match language {
-        Language::En => [
-            (31_536_000_i64, "year", "years"),
-            (2_592_000_i64, "month", "months"),
-            (86_400_i64, "day", "days"),
-            (3_600_i64, "hour", "hours"),
-            (60_i64, "minute", "minutes"),
-            (1_i64, "second", "seconds"),
-        ],
-        Language::ZhCn => [
-            (31_536_000_i64, "年", "年"),
-            (2_592_000_i64, "个月", "个月"),
-            (86_400_i64, "天", "天"),
-            (3_600_i64, "小时", "小时"),
-            (60_i64, "分钟", "分钟"),
-            (1_i64, "秒", "秒"),
-        ],
-    };
-
-    let mut remaining = total_seconds;
-    let mut parts = Vec::new();
-    for (unit_seconds, singular, plural) in units {
-        if remaining < unit_seconds {
-            continue;
-        }
-        let value = remaining / unit_seconds;
-        remaining %= unit_seconds;
-        let label = if language == Language::En && value == 1 {
-            singular
-        } else {
-            plural
-        };
-        parts.push(match language {
-            Language::En => format!("{value} {label}"),
-            Language::ZhCn => format!("{value}{label}"),
-        });
-        if parts.len() == 2 {
-            break;
-        }
-    }
-
-    if parts.is_empty() {
-        match language {
-            Language::En => String::from("0 seconds"),
-            Language::ZhCn => String::from("0秒"),
-        }
-    } else {
-        parts.join(" ")
-    }
 }
 
 fn parse_accept_language(header: &str) -> Option<Language> {

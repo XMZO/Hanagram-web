@@ -147,7 +147,7 @@ fn login_banned_message(
             .login_banned_remaining_reason_message
             .replace(
                 "{remaining}",
-                &crate::i18n::format_duration_for_display(
+                &format_duration_for_display(
                     language,
                     until_unix.saturating_sub(Utc::now().timestamp()),
                 ),
@@ -155,7 +155,7 @@ fn login_banned_message(
             .replace("{reason}", reason),
         (Some(until_unix), None) => translations.login_banned_remaining_message.replace(
             "{remaining}",
-            &crate::i18n::format_duration_for_display(
+            &format_duration_for_display(
                 language,
                 until_unix.saturating_sub(Utc::now().timestamp()),
             ),
@@ -2321,7 +2321,7 @@ async fn confirm_totp_setup_handler(
         _ => {}
     }
 
-    let code = form.code.trim();
+    let code = form.code.as_deref().unwrap_or_default().trim();
     if code.is_empty() {
         return match render_totp_setup_page(
             &app_state,

@@ -104,7 +104,7 @@ fn audit_search_matches(log: &AuditLogView, search: &str) -> bool {
 }
 
 fn user_ban_remaining_label(language: Language, until_unix: i64, now: i64) -> String {
-    crate::i18n::format_duration_for_display(language, until_unix.saturating_sub(now))
+    format_duration_for_display(language, until_unix.saturating_sub(now))
 }
 
 pub(crate) async fn render_admin_page(
@@ -917,6 +917,7 @@ async fn admin_ban_user_handler(
         };
     }
 
+    let suspended_session_ids = suspend_user_session_runtime(&app_state, &user.id).await;
     revoke_all_user_auth_access(&app_state, &user.id).await;
 
     let _ = app_state
@@ -931,7 +932,8 @@ async fn admin_ban_user_handler(
                 "username": user.username,
                 "reason": ban_reason,
                 "banned_until_unix": banned_until_unix,
-                "permanent": banned_until_unix.is_none()
+                "permanent": banned_until_unix.is_none(),
+                "session_workers_stopped": suspended_session_ids.len()
             })
             .to_string(),
         })
@@ -1118,14 +1120,18 @@ async fn admin_unlock_user_handler(
     }
 }
 
-async fn stop_user_session_workers(app_state: &AppState, user_id: &str) {
+async fn stop_user_session_workers(app_state: &AppState, user_id: &str) -> Vec<String> {
     let Ok(session_records) = app_state
         .meta_store
         .list_session_records_for_user(user_id)
         .await
     else {
-        return;
+        return Vec::new();
     };
+    let session_record_ids = session_records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<Vec<_>>();
 
     let mut workers_to_stop = Vec::new();
     {
@@ -1141,6 +1147,22 @@ async fn stop_user_session_workers(app_state: &AppState, user_id: &str) {
         worker.cancellation.cancel();
         let _ = worker.task.await;
     }
+
+    session_record_ids
+}
+
+async fn suspend_user_session_runtime(app_state: &AppState, user_id: &str) -> Vec<String> {
+    let session_record_ids = stop_user_session_workers(app_state, user_id).await;
+    if session_record_ids.is_empty() {
+        return session_record_ids;
+    }
+
+    let mut shared_state = app_state.shared_state.write().await;
+    for session_record_id in &session_record_ids {
+        shared_state.remove(session_record_id);
+    }
+
+    session_record_ids
 }
 
 async fn clear_user_runtime_state(
