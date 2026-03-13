@@ -247,6 +247,7 @@ struct BotNotificationSettingsForm {
     chat_id: String,
     template: String,
     lang: Option<String>,
+    return_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -319,6 +320,7 @@ struct ActiveSessionView {
     user_agent: Option<String>,
     issued_at: String,
     expires_at: String,
+    is_current: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -326,6 +328,12 @@ struct AdminUserView {
     id: String,
     username: String,
     role: String,
+    locked: bool,
+    totp_enabled: bool,
+    password_ready: bool,
+    active_sessions: usize,
+    recovery_codes_remaining: i64,
+    last_login_ip: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1574,6 +1582,56 @@ fn enforcement_mode_options(language: Language) -> Vec<SelectOption> {
     }
 }
 
+fn selected_option_label(options: &[SelectOption], value: &str) -> String {
+    options
+        .iter()
+        .find(|option| option.value == value)
+        .map(|option| option.label.clone())
+        .unwrap_or_else(|| value.to_owned())
+}
+
+fn bot_status_summary(settings: &BotNotificationSettings, language: Language) -> String {
+    if !settings.enabled {
+        return match language {
+            Language::En => String::from("Disabled"),
+            Language::ZhCn => String::from("未启用"),
+        };
+    }
+
+    if settings.bot_token.is_empty() || settings.chat_id.is_empty() {
+        return match language {
+            Language::En => String::from("Incomplete"),
+            Language::ZhCn => String::from("配置未完成"),
+        };
+    }
+
+    match language {
+        Language::En => String::from("Enabled"),
+        Language::ZhCn => String::from("已启用"),
+    }
+}
+
+fn bot_destination_summary(settings: &BotNotificationSettings, language: Language) -> String {
+    if settings.chat_id.is_empty() {
+        return match language {
+            Language::En => String::from("Not configured"),
+            Language::ZhCn => String::from("未配置"),
+        };
+    }
+
+    settings.chat_id.clone()
+}
+
+fn template_preview(template: &str, max_chars: usize) -> String {
+    let normalized = template.lines().next().unwrap_or("").trim();
+    if normalized.chars().count() <= max_chars {
+        return normalized.to_owned();
+    }
+
+    let preview = normalized.chars().take(max_chars).collect::<String>();
+    format!("{preview}...")
+}
+
 fn effective_idle_timeout_minutes(
     user: &hanagram_web::store::UserRecord,
     settings: &SystemSettings,
@@ -2205,6 +2263,7 @@ async fn render_dashboard_page(
     let translations = language.translations();
     let languages = language_options(language, "/");
     let snapshot = build_dashboard_snapshot(app_state, authenticated).await;
+    let settings_page_href = settings_href(language);
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -2217,11 +2276,192 @@ async fn render_dashboard_page(
         &format!("/logout?lang={}", language.code()),
     );
     context.insert("setup_href", &setup_href(language));
+    context.insert("settings_href", &settings_page_href);
+    context.insert("admin_href", &admin_href(language));
     context.insert(
-        "settings_href",
-        &format!("/settings?lang={}", language.code()),
+        "settings_label",
+        &match language {
+            Language::En => "Settings",
+            Language::ZhCn => "设置",
+        },
     );
-    context.insert("admin_href", &format!("/admin?lang={}", language.code()));
+    context.insert(
+        "admin_label",
+        &match language {
+            Language::En => "Admin",
+            Language::ZhCn => "管理后台",
+        },
+    );
+    context.insert(
+        "settings_security_href",
+        &format!("{settings_page_href}#security"),
+    );
+    context.insert(
+        "settings_notifications_href",
+        &format!("{settings_page_href}#notifications"),
+    );
+    context.insert(
+        "settings_access_href",
+        &format!("{settings_page_href}#access"),
+    );
+    context.insert(
+        "admin_overview_href",
+        &format!("{}#overview", admin_href(language)),
+    );
+    context.insert(
+        "dashboard_workspace_eyebrow",
+        &match language {
+            Language::En => "Workspace Map",
+            Language::ZhCn => "工作区地图",
+        },
+    );
+    context.insert(
+        "dashboard_workspace_title",
+        &match language {
+            Language::En => "Session-first dashboard",
+            Language::ZhCn => "会话优先主面板",
+        },
+    );
+    context.insert(
+        "dashboard_workspace_description",
+        &match language {
+            Language::En => "This screen is reserved for Telegram sessions and OTP flow. Security, reminder delivery, and browser access management are routed into Settings, while user policy and audit stay in Admin.",
+            Language::ZhCn => "这个页面只保留给 Telegram 会话和验证码流。安全设置、提醒投递、网页登录管理统一收进设置页，用户策略和审计则集中在后台。",
+        },
+    );
+    context.insert(
+        "dashboard_lane_sessions_title",
+        &match language {
+            Language::En => "Dashboard",
+            Language::ZhCn => "主面板",
+        },
+    );
+    context.insert(
+        "dashboard_lane_sessions_body",
+        &match language {
+            Language::En => "Watch live OTP state, open details, copy codes, rename sessions, and export access data.",
+            Language::ZhCn => "查看实时验证码状态、打开详情、复制验证码、重命名会话和导出访问数据。",
+        },
+    );
+    context.insert(
+        "dashboard_lane_settings_title",
+        &match language {
+            Language::En => "Settings",
+            Language::ZhCn => "设置",
+        },
+    );
+    context.insert(
+        "dashboard_lane_settings_body",
+        &match language {
+            Language::En => "Password changes, TOTP, recovery codes, reminder delivery, idle timeout, and active web sessions.",
+            Language::ZhCn => "密码修改、TOTP、恢复码、提醒投递、空闲登出和网页登录会话都在这里。",
+        },
+    );
+    context.insert(
+        "dashboard_lane_admin_title",
+        &match language {
+            Language::En => "Admin",
+            Language::ZhCn => "管理后台",
+        },
+    );
+    context.insert(
+        "dashboard_lane_admin_body",
+        &match language {
+            Language::En => "Create users, unlock accounts, tune policies, and review audit history without crowding the session view.",
+            Language::ZhCn => "创建用户、解锁账号、调整策略和查看审计历史，避免挤占会话视图。",
+        },
+    );
+    context.insert(
+        "dashboard_shortcuts_title",
+        &match language {
+            Language::En => "Jump Directly",
+            Language::ZhCn => "快速直达",
+        },
+    );
+    context.insert(
+        "dashboard_shortcuts_description",
+        &match language {
+            Language::En => "Secondary capabilities stay one click away and land on the exact section that owns them.",
+            Language::ZhCn => "所有次级能力都保持一跳直达，并且直接落到对应的设置区块。",
+        },
+    );
+    context.insert(
+        "dashboard_security_card_title",
+        &match language {
+            Language::En => "Security Hub",
+            Language::ZhCn => "安全中心",
+        },
+    );
+    context.insert(
+        "dashboard_security_card_body",
+        &match language {
+            Language::En => "Password, TOTP, recovery codes, and security posture.",
+            Language::ZhCn => "密码、TOTP、恢复码和整体安全状态。",
+        },
+    );
+    context.insert(
+        "dashboard_notifications_card_title",
+        &match language {
+            Language::En => "Reminder Center",
+            Language::ZhCn => "提醒中心",
+        },
+    );
+    context.insert(
+        "dashboard_notifications_card_body",
+        &match language {
+            Language::En => "Compact bot reminder controls without leaving the session workflow.",
+            Language::ZhCn => "不离开会话工作流即可管理紧凑型 Bot 提醒设置。",
+        },
+    );
+    context.insert(
+        "dashboard_access_card_title",
+        &match language {
+            Language::En => "Web Access",
+            Language::ZhCn => "网页登录",
+        },
+    );
+    context.insert(
+        "dashboard_access_card_body",
+        &match language {
+            Language::En => "Review active browser sessions and tune idle auto logout.",
+            Language::ZhCn => "查看活跃浏览器会话并调整空闲自动登出策略。",
+        },
+    );
+    context.insert(
+        "dashboard_admin_card_title",
+        &match language {
+            Language::En => "Control Center",
+            Language::ZhCn => "后台控制",
+        },
+    );
+    context.insert(
+        "dashboard_admin_card_body",
+        &match language {
+            Language::En => "User operations, policy tuning, lockouts, and audit visibility.",
+            Language::ZhCn => "用户操作、策略调优、锁定状态和审计可见性。",
+        },
+    );
+    context.insert(
+        "session_note_placeholder",
+        &match language {
+            Language::En => "No note",
+            Language::ZhCn => "暂无备注",
+        },
+    );
+    context.insert(
+        "session_note_label",
+        &match language {
+            Language::En => "Note",
+            Language::ZhCn => "备注",
+        },
+    );
+    context.insert(
+        "save_note_label",
+        &match language {
+            Language::En => "Save Note",
+            Language::ZhCn => "保存备注",
+        },
+    );
     context.insert("banner", &banner);
     context.insert("sessions", &snapshot.sessions);
     context.insert("connected_count", &snapshot.connected_count);
@@ -2367,6 +2607,7 @@ async fn render_settings_page(
     language: Language,
     banner: Option<PageBanner>,
 ) -> std::result::Result<Html<String>, StatusCode> {
+    let translations = language.translations();
     let active_sessions = app_state
         .meta_store
         .list_auth_sessions_for_user(&authenticated.user.id)
@@ -2382,6 +2623,7 @@ async fn render_settings_page(
         .into_iter()
         .filter(|session| session.revoked_at_unix.is_none())
         .map(|session| ActiveSessionView {
+            is_current: session.id == authenticated.auth_session.id,
             id: session.id,
             ip_address: session.ip_address,
             user_agent: session.user_agent,
@@ -2423,9 +2665,15 @@ async fn render_settings_page(
             Language::ZhCn => String::from("留空表示使用系统默认值。输入 0 表示永久不自动登出。"),
         },
     };
+    let bot_settings = app_state.notification_settings.read().await.clone();
+    let bot_status = bot_status_summary(&bot_settings, language);
+    let bot_destination = bot_destination_summary(&bot_settings, language);
+    let bot_template_preview = template_preview(&bot_settings.template, 68);
+    let bot_placeholders = build_bot_placeholder_hints(language).to_vec();
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
+    context.insert("i18n", translations);
     context.insert(
         "title",
         &match language {
@@ -2442,6 +2690,41 @@ async fn render_settings_page(
     context.insert("admin_href", &admin_href(language));
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("notifications_href", &notifications_href(language));
+    context.insert(
+        "settings_sections_title",
+        &match language {
+            Language::En => "Workspace",
+            Language::ZhCn => "工作区",
+        },
+    );
+    context.insert(
+        "settings_overview_title",
+        &match language {
+            Language::En => "Overview",
+            Language::ZhCn => "概览",
+        },
+    );
+    context.insert(
+        "settings_nav_security",
+        &match language {
+            Language::En => "Security",
+            Language::ZhCn => "安全",
+        },
+    );
+    context.insert(
+        "settings_nav_notifications",
+        &match language {
+            Language::En => "Reminders",
+            Language::ZhCn => "提醒",
+        },
+    );
+    context.insert(
+        "settings_nav_access",
+        &match language {
+            Language::En => "Access",
+            Language::ZhCn => "访问控制",
+        },
+    );
     context.insert(
         "dashboard_label",
         &match language {
@@ -2464,10 +2747,24 @@ async fn render_settings_page(
         },
     );
     context.insert(
+        "admin_access_description",
+        &match language {
+            Language::En => "User resets, policy tuning, and audit logs live in the admin console.",
+            Language::ZhCn => "用户重置、策略调优和审计日志都在管理后台。",
+        },
+    );
+    context.insert(
         "security_title",
         &match language {
             Language::En => "Security",
             Language::ZhCn => "安全",
+        },
+    );
+    context.insert(
+        "security_description",
+        &match language {
+            Language::En => "Password, TOTP, recovery coverage, and your personal sign-in policy are grouped here.",
+            Language::ZhCn => "密码、TOTP、恢复码覆盖情况和你的个人登录策略统一放在这里。",
         },
     );
     context.insert(
@@ -2479,6 +2776,13 @@ async fn render_settings_page(
     );
     context.insert("totp_status", &totp_status);
     context.insert(
+        "totp_hint",
+        &match language {
+            Language::En => "If TOTP is required and not configured, this page is the only path back into the dashboard.",
+            Language::ZhCn => "如果系统要求 TOTP 但还没启用，这里就是重新进入主面板前必须完成的步骤。",
+        },
+    );
+    context.insert(
         "recovery_label",
         &match language {
             Language::En => "Recovery Codes",
@@ -2488,6 +2792,13 @@ async fn render_settings_page(
     context.insert(
         "recovery_remaining",
         &authenticated.recovery_codes_remaining.to_string(),
+    );
+    context.insert(
+        "recovery_hint",
+        &match language {
+            Language::En => "Each recovery code works once. Once all 5 are consumed, you must generate a new set.",
+            Language::ZhCn => "每个恢复码只能用一次。5 个都用完后，必须重新生成一组新的恢复码。",
+        },
     );
     context.insert(
         "idle_label",
@@ -2505,6 +2816,13 @@ async fn render_settings_page(
         },
     );
     context.insert("idle_effective_timeout", &effective_idle_timeout);
+    context.insert(
+        "idle_summary_label",
+        &match language {
+            Language::En => "Current Auto Logout",
+            Language::ZhCn => "当前自动登出规则",
+        },
+    );
     context.insert(
         "idle_form_title",
         &match language {
@@ -2583,13 +2901,86 @@ async fn render_settings_page(
         },
     );
     context.insert(
+        "password_description",
+        &match language {
+            Language::En => "Changing the password re-wraps your user master key and immediately refreshes this sign-in session.",
+            Language::ZhCn => "修改密码会重新包裹你的用户主密钥，并立即刷新当前登录会话的解锁状态。",
+        },
+    );
+    context.insert(
+        "notifications_section_title",
+        &match language {
+            Language::En => "Reminder Center",
+            Language::ZhCn => "提醒中心",
+        },
+    );
+    context.insert(
+        "notifications_section_description",
+        &match language {
+            Language::En => "Reminder settings stay compact by default, then expand in place when you need to edit the bot destination or template.",
+            Language::ZhCn => "提醒默认保持紧凑，只在你需要修改 Bot 目标或模板时在本页展开。",
+        },
+    );
+    context.insert(
+        "notifications_expand_label",
+        &match language {
+            Language::En => "Expand Reminder Settings",
+            Language::ZhCn => "展开提醒设置",
+        },
+    );
+    context.insert(
+        "notifications_manage_fullpage_label",
+        &match language {
+            Language::En => "Open Full Page",
+            Language::ZhCn => "打开独立页面",
+        },
+    );
+    context.insert(
+        "notification_status_label",
+        &match language {
+            Language::En => "Status",
+            Language::ZhCn => "状态",
+        },
+    );
+    context.insert("notification_status_value", &bot_status);
+    context.insert(
+        "notification_destination_label",
+        &match language {
+            Language::En => "Target Chat",
+            Language::ZhCn => "目标聊天",
+        },
+    );
+    context.insert("notification_destination_value", &bot_destination);
+    context.insert(
+        "notification_template_preview_label",
+        &match language {
+            Language::En => "Template Preview",
+            Language::ZhCn => "模板预览",
+        },
+    );
+    context.insert("notification_template_preview", &bot_template_preview);
+    context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
+    context.insert("bot_placeholders", &bot_placeholders);
+    context.insert(
+        "bot_settings_action",
+        &format!("/settings/bot?lang={}", language.code()),
+    );
+    context.insert(
         "sessions_title",
         &match language {
             Language::En => "Active Sessions",
             Language::ZhCn => "活跃登录会话",
         },
     );
+    context.insert(
+        "sessions_description",
+        &match language {
+            Language::En => "You can review every live browser session here and cut off stale devices without leaving the settings page.",
+            Language::ZhCn => "你可以在这里查看所有仍然在线的浏览器会话，并直接清理不再需要的设备登录。",
+        },
+    );
     context.insert("sessions", &active_sessions);
+    context.insert("active_session_count", &active_sessions.len());
     context.insert("current_session_id", &authenticated.auth_session.id);
     context.insert("current_user_id", &authenticated.user.id);
     context.insert(
@@ -2597,6 +2988,63 @@ async fn render_settings_page(
         &match language {
             Language::En => "Force Logout",
             Language::ZhCn => "强制下线",
+        },
+    );
+    context.insert(
+        "revoke_all_action",
+        &format!(
+            "/admin/users/{}/sessions/revoke?lang={}",
+            authenticated.user.id,
+            language.code()
+        ),
+    );
+    context.insert(
+        "revoke_all_label",
+        &match language {
+            Language::En => "Force Logout Other Sessions",
+            Language::ZhCn => "强制下线其他会话",
+        },
+    );
+    context.insert(
+        "session_device_label",
+        &match language {
+            Language::En => "Device",
+            Language::ZhCn => "设备",
+        },
+    );
+    context.insert(
+        "unknown_user_agent_label",
+        &match language {
+            Language::En => "Unknown User Agent",
+            Language::ZhCn => "未知设备",
+        },
+    );
+    context.insert(
+        "session_ip_label",
+        &match language {
+            Language::En => "IP",
+            Language::ZhCn => "IP",
+        },
+    );
+    context.insert(
+        "session_issued_label",
+        &match language {
+            Language::En => "Issued",
+            Language::ZhCn => "签发时间",
+        },
+    );
+    context.insert(
+        "session_expires_label",
+        &match language {
+            Language::En => "Expires",
+            Language::ZhCn => "到期时间",
+        },
+    );
+    context.insert(
+        "session_empty_label",
+        &match language {
+            Language::En => "No active browser sessions are currently recorded.",
+            Language::ZhCn => "当前没有记录到活跃的浏览器登录会话。",
         },
     );
     context.insert(
@@ -2641,6 +3089,20 @@ async fn render_notification_settings_page(
     context.insert("banner", &banner);
 
     render_template(&app_state.tera, "notifications.html", &context)
+}
+
+async fn render_notification_workspace_page(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    language: Language,
+    banner: Option<PageBanner>,
+    return_to_settings: bool,
+) -> std::result::Result<Html<String>, StatusCode> {
+    if return_to_settings {
+        render_settings_page(app_state, authenticated, language, banner).await
+    } else {
+        render_notification_settings_page(app_state, language, banner).await
+    }
 }
 
 async fn render_totp_setup_page(
@@ -2759,21 +3221,11 @@ async fn render_admin_page(
     language: Language,
     banner: Option<PageBanner>,
 ) -> std::result::Result<Html<String>, StatusCode> {
-    let users = app_state.meta_store.list_users().await.map_err(|error| {
+    let system_settings = app_state.system_settings.read().await.clone();
+    let raw_users = app_state.meta_store.list_users().await.map_err(|error| {
         warn!("failed loading users for admin page: {}", error);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let users: Vec<AdminUserView> = users
-        .into_iter()
-        .map(|user| AdminUserView {
-            id: user.id,
-            username: user.username,
-            role: match user.role {
-                UserRole::Admin => String::from("admin"),
-                UserRole::User => String::from("user"),
-            },
-        })
-        .collect();
     let audit_logs = app_state
         .meta_store
         .list_audit_logs()
@@ -2790,7 +3242,78 @@ async fn render_admin_page(
             warn!("failed loading audit rollups: {}", error);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    let system_settings = app_state.system_settings.read().await.clone();
+    let now = Utc::now().timestamp();
+    let registration_options = registration_policy_options(language);
+    let totp_policy_options = enforcement_mode_options(language);
+    let password_policy_options = enforcement_mode_options(language);
+    let current_registration_label = selected_option_label(
+        &registration_options,
+        registration_policy_value(system_settings.registration_policy),
+    );
+    let current_totp_policy_label = selected_option_label(
+        &totp_policy_options,
+        enforcement_mode_value(system_settings.totp_policy),
+    );
+    let current_password_policy_label = selected_option_label(
+        &password_policy_options,
+        enforcement_mode_value(system_settings.password_strength_rules.mode),
+    );
+
+    let mut locked_users_count = 0_usize;
+    let mut total_active_auth_sessions = 0_usize;
+    let mut mfa_enabled_users = 0_usize;
+    let mut users = Vec::new();
+    for user in raw_users {
+        let locked = user.security.locked_until_unix.unwrap_or_default() > now;
+        let auth_sessions = app_state
+            .meta_store
+            .list_auth_sessions_for_user(&user.id)
+            .await
+            .map_err(|error| {
+                warn!(
+                    "failed loading auth sessions for admin user card: {}",
+                    error
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        let active_sessions = auth_sessions
+            .iter()
+            .filter(|session| auth_session_is_active(session, now))
+            .count();
+        let recovery_codes_remaining = app_state
+            .meta_store
+            .count_active_recovery_codes(&user.id)
+            .await
+            .map_err(|error| {
+                warn!(
+                    "failed counting recovery codes for admin user card: {}",
+                    error
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        if locked {
+            locked_users_count += 1;
+        }
+        if user.security.totp_enabled {
+            mfa_enabled_users += 1;
+        }
+        total_active_auth_sessions += active_sessions;
+        users.push(AdminUserView {
+            id: user.id,
+            username: user.username,
+            role: match user.role {
+                UserRole::Admin => String::from("admin"),
+                UserRole::User => String::from("user"),
+            },
+            locked,
+            totp_enabled: user.security.totp_enabled,
+            password_ready: user.security.password_hash.is_some(),
+            active_sessions,
+            recovery_codes_remaining,
+            last_login_ip: user.security.last_login_ip,
+        });
+    }
+    let total_users = users.len();
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -2805,6 +3328,41 @@ async fn render_admin_page(
         Language::En => "Manage users, registration strategy, session lifetime, and audit visibility from one place.",
         Language::ZhCn => "在这里统一管理用户、注册策略、登录会话时长和审计可见性。",
     });
+    context.insert(
+        "admin_sections_title",
+        &match language {
+            Language::En => "Control Center",
+            Language::ZhCn => "控制中心",
+        },
+    );
+    context.insert(
+        "admin_nav_overview",
+        &match language {
+            Language::En => "Overview",
+            Language::ZhCn => "总览",
+        },
+    );
+    context.insert(
+        "admin_nav_users",
+        &match language {
+            Language::En => "Users",
+            Language::ZhCn => "用户",
+        },
+    );
+    context.insert(
+        "admin_nav_policy",
+        &match language {
+            Language::En => "Policy",
+            Language::ZhCn => "策略",
+        },
+    );
+    context.insert(
+        "admin_nav_audit",
+        &match language {
+            Language::En => "Audit",
+            Language::ZhCn => "审计",
+        },
+    );
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("settings_href", &settings_href(language));
     context.insert(
@@ -2863,26 +3421,26 @@ async fn render_admin_page(
             Language::ZhCn => "注册模式",
         },
     );
-    context.insert(
-        "registration_options",
-        &registration_policy_options(language),
-    );
+    context.insert("registration_options", &registration_options);
     context.insert(
         "current_registration_policy",
         &registration_policy_value(system_settings.registration_policy),
     );
-    context.insert("totp_policy_options", &enforcement_mode_options(language));
+    context.insert("totp_policy_options", &totp_policy_options);
     context.insert(
         "current_totp_policy",
         &enforcement_mode_value(system_settings.totp_policy),
     );
-    context.insert(
-        "password_policy_options",
-        &enforcement_mode_options(language),
-    );
+    context.insert("password_policy_options", &password_policy_options);
     context.insert(
         "current_password_policy",
         &enforcement_mode_value(system_settings.password_strength_rules.mode),
+    );
+    context.insert("current_registration_label", &current_registration_label);
+    context.insert("current_totp_policy_label", &current_totp_policy_label);
+    context.insert(
+        "current_password_policy_label",
+        &current_password_policy_label,
     );
     context.insert(
         "public_registration_open",
@@ -3033,6 +3591,13 @@ async fn render_admin_page(
         },
     );
     context.insert(
+        "users_description",
+        &match language {
+            Language::En => "Create regular users, unlock them, revoke their web sessions, or fully reset their encrypted account state.",
+            Language::ZhCn => "在这里创建普通用户、解锁账号、踢下线，或彻底重置其加密账户状态。",
+        },
+    );
+    context.insert(
         "unlock_label",
         &match language {
             Language::En => "Unlock",
@@ -3054,10 +3619,87 @@ async fn render_admin_page(
         },
     );
     context.insert(
+        "role_admin_label",
+        &match language {
+            Language::En => "Admin",
+            Language::ZhCn => "管理员",
+        },
+    );
+    context.insert(
+        "role_user_label",
+        &match language {
+            Language::En => "User",
+            Language::ZhCn => "普通用户",
+        },
+    );
+    context.insert(
+        "locked_badge_label",
+        &match language {
+            Language::En => "Locked",
+            Language::ZhCn => "已锁定",
+        },
+    );
+    context.insert(
+        "totp_enabled_badge_label",
+        &match language {
+            Language::En => "TOTP On",
+            Language::ZhCn => "TOTP 已开",
+        },
+    );
+    context.insert(
+        "totp_missing_badge_label",
+        &match language {
+            Language::En => "TOTP Off",
+            Language::ZhCn => "TOTP 未开",
+        },
+    );
+    context.insert(
+        "password_ready_badge_label",
+        &match language {
+            Language::En => "Password Ready",
+            Language::ZhCn => "密码已配置",
+        },
+    );
+    context.insert(
+        "password_reset_badge_label",
+        &match language {
+            Language::En => "Reset Pending",
+            Language::ZhCn => "等待重新设置",
+        },
+    );
+    context.insert(
+        "user_active_sessions_label",
+        &match language {
+            Language::En => "Active Web Sessions",
+            Language::ZhCn => "活跃网页登录会话",
+        },
+    );
+    context.insert(
+        "user_recovery_codes_label",
+        &match language {
+            Language::En => "Recovery Codes",
+            Language::ZhCn => "恢复码剩余",
+        },
+    );
+    context.insert(
+        "user_last_ip_label",
+        &match language {
+            Language::En => "Last Login IP",
+            Language::ZhCn => "最近登录 IP",
+        },
+    );
+    context.insert(
         "audit_title",
         &match language {
             Language::En => "Audit Log",
             Language::ZhCn => "审计日志",
+        },
+    );
+    context.insert(
+        "audit_description",
+        &match language {
+            Language::En => "Detailed rows stay visible until the configured cap, then older detail collapses into rollups.",
+            Language::ZhCn => "详细审计保留到配置上限，超出后旧数据会折叠成汇总统计。",
         },
     );
     context.insert(
@@ -3067,6 +3709,95 @@ async fn render_admin_page(
             Language::ZhCn => "审计汇总",
         },
     );
+    context.insert(
+        "audit_success_label",
+        &match language {
+            Language::En => "OK",
+            Language::ZhCn => "成功",
+        },
+    );
+    context.insert(
+        "audit_failure_label",
+        &match language {
+            Language::En => "FAIL",
+            Language::ZhCn => "失败",
+        },
+    );
+    context.insert(
+        "audit_empty_label",
+        &match language {
+            Language::En => "No detailed audit rows have been recorded yet.",
+            Language::ZhCn => "当前还没有详细审计记录。",
+        },
+    );
+    context.insert(
+        "rollup_empty_label",
+        &match language {
+            Language::En => "No audit rollups have been generated yet.",
+            Language::ZhCn => "当前还没有生成审计汇总。",
+        },
+    );
+    context.insert(
+        "overview_title",
+        &match language {
+            Language::En => "System Snapshot",
+            Language::ZhCn => "系统快照",
+        },
+    );
+    context.insert(
+        "overview_users_label",
+        &match language {
+            Language::En => "Users",
+            Language::ZhCn => "用户数",
+        },
+    );
+    context.insert(
+        "overview_locked_label",
+        &match language {
+            Language::En => "Locked Users",
+            Language::ZhCn => "锁定用户",
+        },
+    );
+    context.insert(
+        "overview_web_sessions_label",
+        &match language {
+            Language::En => "Active Web Sessions",
+            Language::ZhCn => "活跃网页登录会话",
+        },
+    );
+    context.insert(
+        "overview_mfa_label",
+        &match language {
+            Language::En => "Users With TOTP",
+            Language::ZhCn => "已启用 TOTP 的用户",
+        },
+    );
+    context.insert(
+        "overview_audit_rows_label",
+        &match language {
+            Language::En => "Detailed Audit Rows",
+            Language::ZhCn => "详细审计记录",
+        },
+    );
+    context.insert(
+        "policy_stack_title",
+        &match language {
+            Language::En => "Policy Stack",
+            Language::ZhCn => "策略栈",
+        },
+    );
+    context.insert(
+        "policy_description",
+        &match language {
+            Language::En => "Each control is grouped by outcome: who can enter, how strong credentials must be, how long sessions stay alive, and how expensive key derivation should become.",
+            Language::ZhCn => "所有策略按结果分组：谁能进入、凭据强度、会话存活时长，以及密钥派生成本。",
+        },
+    );
+    context.insert("total_users", &total_users);
+    context.insert("locked_users_count", &locked_users_count);
+    context.insert("total_active_auth_sessions", &total_active_auth_sessions);
+    context.insert("mfa_enabled_users", &mfa_enabled_users);
+    context.insert("audit_log_count", &audit_logs.len());
     context.insert("users", &users);
     context.insert("audit_logs", &audit_logs);
     context.insert("audit_rollups", &audit_rollups);
@@ -4340,6 +5071,7 @@ async fn save_bot_settings_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+    let return_to_settings = form.return_to.as_deref() == Some("settings");
     let settings = BotNotificationSettings {
         enabled: form.enabled.is_some(),
         bot_token: form.bot_token,
@@ -4349,10 +5081,12 @@ async fn save_bot_settings_handler(
     .normalized();
 
     if settings.enabled && settings.bot_token.is_empty() {
-        return match render_notification_settings_page(
+        return match render_notification_workspace_page(
             &app_state,
+            &authenticated,
             language,
             Some(PageBanner::error(translations.bot_error_missing_token)),
+            return_to_settings,
         )
         .await
         {
@@ -4362,10 +5096,12 @@ async fn save_bot_settings_handler(
     }
 
     if settings.enabled && settings.chat_id.is_empty() {
-        return match render_notification_settings_page(
+        return match render_notification_workspace_page(
             &app_state,
+            &authenticated,
             language,
             Some(PageBanner::error(translations.bot_error_missing_chat_id)),
+            return_to_settings,
         )
         .await
         {
@@ -4379,10 +5115,12 @@ async fn save_bot_settings_handler(
             .await
     {
         warn!("failed saving bot notification settings: {}", error);
-        return match render_notification_settings_page(
+        return match render_notification_workspace_page(
             &app_state,
+            &authenticated,
             language,
             Some(PageBanner::error(translations.bot_error_save)),
+            return_to_settings,
         )
         .await
         {
@@ -4392,12 +5130,12 @@ async fn save_bot_settings_handler(
     }
 
     *app_state.notification_settings.write().await = settings;
-
-    let _ = authenticated;
-    match render_notification_settings_page(
+    match render_notification_workspace_page(
         &app_state,
+        &authenticated,
         language,
         Some(PageBanner::success(translations.bot_saved)),
+        return_to_settings,
     )
     .await
     {

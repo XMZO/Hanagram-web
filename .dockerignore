@@ -1,7 +1,10 @@
 .git
+.github
 .gitignore
 target
 sessions
+docs
+README.md
 .env
 .env.*
 !.env.example

@@ -40,6 +40,7 @@
             statusConnected: {{ i18n.status_connected | json_encode | safe }},
             statusError: {{ i18n.status_error | json_encode | safe }},
             noMessages: {{ i18n.no_messages | json_encode | safe }},
+            noNote: {{ session_note_placeholder | json_encode | safe }},
             otpPlaceholder: {{ i18n.otp_placeholder | json_encode | safe }},
             copy: {{ i18n.copy | json_encode | safe }},
             copied: {{ i18n.copied | json_encode | safe }},
@@ -251,14 +252,14 @@
             const hadCodeChange = nextCodeAt && nextCodeAt > previousCodeAt;
             card.dataset.latestCodeAt = session.latest_code_at_unix || "";
 
+            const sessionName = card.querySelector("[data-role='session-name']");
+            if (sessionName) { sessionName.textContent = session.key; }
+
             const phone = card.querySelector("[data-role='session-phone']");
             if (phone) { phone.textContent = session.phone; }
 
-            const file = card.querySelector("[data-role='session-file']");
-            if (file) { file.textContent = session.session_file; }
-
             const note = card.querySelector("[data-role='session-note']");
-            if (note) { note.textContent = session.note || ""; }
+            if (note) { note.textContent = session.note || I18N.noNote; }
 
             const latestCode = card.querySelector("[data-role='latest-code']");
             if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
@@ -271,14 +272,14 @@
         }
 
         function applySessionModalUpdate(modal, session) {
+            const sessionName = modal.querySelector("[data-role='session-name']");
+            if (sessionName) { sessionName.textContent = session.key; }
+
             const phone = modal.querySelector("[data-role='session-phone']");
             if (phone) { phone.textContent = session.phone; }
 
-            const file = modal.querySelector("[data-role='session-file']");
-            if (file) { file.textContent = session.session_file; }
-
             const note = modal.querySelector("[data-role='session-note']");
-            if (note) { note.textContent = session.note || ""; }
+            if (note) { note.textContent = session.note || I18N.noNote; }
 
             const latestCode = modal.querySelector("[data-role='latest-code']");
             if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
@@ -507,14 +508,14 @@
                                     href="{{ settings_href }}"
                                     class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
                                 >
-                                    Settings
+                                    {{ settings_label }}
                                 </a>
                                 {% if show_admin %}
                                 <a
                                     href="{{ admin_href }}"
                                     class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
                                 >
-                                    Admin
+                                    {{ admin_label }}
                                 </a>
                                 {% endif %}
                                 <form method="post" action="{{ logout_action }}">
@@ -553,23 +554,51 @@
         </section>
         {% endif %}
 
-        <section class="mt-6 grid gap-4 lg:grid-cols-2">
+        <section class="mt-6 grid gap-4 xl:grid-cols-[0.96fr,1.04fr]">
             <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:90ms]">
-                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">Focus</p>
-                <h2 class="mt-3 font-display text-2xl font-semibold text-ink">Session Center</h2>
-                <p class="mt-3 text-sm leading-7 text-ink/68">Dashboard keeps the Telegram session list front and center. Security, active login sessions, and reminder settings live behind the settings button.</p>
+                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_workspace_eyebrow }}</p>
+                <h2 class="mt-3 font-display text-2xl font-semibold text-ink">{{ dashboard_workspace_title }}</h2>
+                <p class="mt-3 text-sm leading-7 text-ink/68">{{ dashboard_workspace_description }}</p>
+                <div class="mt-5 grid gap-3 sm:grid-cols-2 {% if show_admin %}lg:grid-cols-3{% endif %}">
+                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
+                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_sessions_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_sessions_body }}</p>
+                    </div>
+                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
+                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_settings_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_settings_body }}</p>
+                    </div>
+                    {% if show_admin %}
+                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
+                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_admin_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_admin_body }}</p>
+                    </div>
+                    {% endif %}
+                </div>
             </article>
 
             <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:150ms]">
-                <div class="grid gap-3 sm:grid-cols-2">
-                    <a href="{{ settings_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/85 px-4 py-4 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">Security</p>
-                        <p class="mt-2 text-lg font-semibold text-ink">Password, TOTP, Sessions</p>
+                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_shortcuts_title }}</p>
+                <p class="mt-3 text-sm leading-7 text-ink/68">{{ dashboard_shortcuts_description }}</p>
+                <div class="mt-5 grid gap-3 sm:grid-cols-2">
+                    <a href="{{ settings_security_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_security_card_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_security_card_body }}</p>
                     </a>
-                    <a href="{{ settings_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/85 px-4 py-4 transition hover:border-sage">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">Reminder</p>
-                        <p class="mt-2 text-lg font-semibold text-ink">Compact notification settings</p>
+                    <a href="{{ settings_notifications_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_notifications_card_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_notifications_card_body }}</p>
                     </a>
+                    <a href="{{ settings_access_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_access_card_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_access_card_body }}</p>
+                    </a>
+                    {% if show_admin %}
+                    <a href="{{ admin_overview_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_admin_card_title }}</p>
+                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_admin_card_body }}</p>
+                    </a>
+                    {% endif %}
                 </div>
             </article>
         </section>
@@ -603,14 +632,10 @@
                     <div class="min-w-0">
                         <div class="flex items-center gap-3">
                             <span data-role="status-dot" class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
-                            <p data-role="session-phone" class="truncate text-lg font-semibold text-ink">{{ session.phone }}</p>
+                            <p data-role="session-name" class="truncate text-lg font-semibold text-ink">{{ session.key }}</p>
                         </div>
-                        <p data-role="session-file" class="mt-2 truncate font-mono text-[0.76rem] text-ink/42">{{ session.session_file }}</p>
-                        {% if session.note %}
-                        <p data-role="session-note" class="mt-2 text-sm leading-6 text-ink/68">{{ session.note }}</p>
-                        {% else %}
-                        <p data-role="session-note" class="mt-2 text-sm leading-6 text-ink/40">No note</p>
-                        {% endif %}
+                        <p data-role="session-phone" class="mt-2 inline-flex rounded-full border border-line/80 bg-white/92 px-3 py-1 font-mono text-[0.76rem] text-ink/58">{{ session.phone }}</p>
+                        <p data-role="session-note" class="mt-3 text-sm leading-6 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
                     </div>
 
                     <div class="flex flex-col items-end gap-2">
@@ -660,14 +685,9 @@
                     <div class="flex flex-col gap-4 border-b border-line pb-4 sm:gap-5 sm:pb-5 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
-                            <h2 data-role="session-phone" class="mt-3 font-display text-[2rem] font-semibold leading-tight text-ink sm:text-3xl">{{ session.phone }}</h2>
-                            <p class="mt-3 text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_file_label }}</p>
-                            <p data-role="session-file" class="mt-2 break-all font-mono text-[0.76rem] text-ink/46">{{ session.session_file }}</p>
-                            {% if session.note %}
-                            <p data-role="session-note" class="mt-3 text-sm leading-7 text-ink/68">{{ session.note }}</p>
-                            {% else %}
-                            <p data-role="session-note" class="mt-3 text-sm leading-7 text-ink/40">No note</p>
-                            {% endif %}
+                            <h2 data-role="session-name" class="mt-3 font-display text-[2rem] font-semibold leading-tight text-ink sm:text-3xl">{{ session.key }}</h2>
+                            <p data-role="session-phone" class="mt-4 inline-flex rounded-full border border-line bg-white px-3 py-1 font-mono text-[0.78rem] text-ink/58">{{ session.phone }}</p>
+                            <p data-role="session-note" class="mt-4 text-sm leading-7 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -733,11 +753,11 @@
                             <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.35rem] border border-line/80 bg-[rgba(255,255,255,0.96)] p-4 sm:rounded-[1.4rem]">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
-                                    <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">Note</span>
+                                    <span class="mb-2 block text-xs uppercase tracking-[0.24em] text-ink/45">{{ session_note_label }}</span>
                                     <textarea name="note" rows="3" class="w-full rounded-[1rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white">{{ session.note }}</textarea>
                                 </label>
                                 <button type="submit" class="mt-3 w-full rounded-[1rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">
-                                    Save Note
+                                    {{ save_note_label }}
                                 </button>
                             </form>
 

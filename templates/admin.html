@@ -8,200 +8,216 @@
     <title>{{ title }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { theme: { extend: {
+            fontFamily: { display: ["Noto Serif SC", "serif"], sans: ["Noto Sans SC", "sans-serif"], mono: ["JetBrains Mono", "monospace"] },
+            colors: { oat: "#f6f1e8", paper: "#fffaf2", latte: "#f0e5d6", line: "#ded3c6", ink: "#4b4038", sage: "#8ca38c", sageDeep: "#6f866f", peach: "#d9a69a", mist: "#eef4ee" }
+        }}};
+    </script>
+    <style>
+        body { background: radial-gradient(circle at 10% 12%, rgba(140,163,140,.13), transparent 25%), radial-gradient(circle at 84% 18%, rgba(217,166,154,.11), transparent 21%), linear-gradient(180deg, #fbf7f0 0%, #f6f1e8 44%, #f1ebe0 100%); }
+        .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
+        .section-card { border: 1px solid rgba(222, 211, 198, 0.92); background: rgba(255, 250, 242, 0.95); }
+        details summary::-webkit-details-marker { display: none; }
+        details[open] .details-chevron { transform: rotate(180deg); }
+        html { scroll-behavior: smooth; }
+    </style>
 </head>
-<body class="min-h-screen bg-[#f6f1e8] font-sans text-[#4b4038]">
+<body class="min-h-screen font-sans text-ink antialiased">
     <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <section class="rounded-[2rem] border border-[#ded3c6] bg-[#fffaf2] p-6 shadow-[0_24px_60px_rgba(122,106,90,0.08)]">
-            <div class="flex flex-wrap items-center justify-between gap-3">
+        <section class="paper-shadow overflow-hidden rounded-[2rem] border border-line/80 bg-paper/95">
+            <div class="grid gap-8 px-6 py-7 lg:grid-cols-[1.2fr,0.8fr] lg:px-8">
                 <div>
-                    <h1 class="font-serif text-4xl font-semibold">{{ title }}</h1>
-                    <p class="mt-4 text-sm leading-7 text-[#4b4038]/72">{{ description }}</p>
+                    <p class="text-sm uppercase tracking-[0.24em] text-ink/45">{{ admin_sections_title }}</p>
+                    <h1 class="mt-4 font-display text-4xl font-semibold tracking-tight sm:text-5xl">{{ title }}</h1>
+                    <p class="mt-4 max-w-3xl text-[15px] leading-8 text-ink/72">{{ description }}</p>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    <a href="{{ dashboard_href }}" class="rounded-full border border-[#ded3c6] bg-latte px-4 py-2 text-sm">{{ dashboard_label }}</a>
-                    <a href="{{ settings_href }}" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ settings_label }}</a>
+                <div class="flex flex-wrap items-start justify-start gap-2 lg:justify-end">
+                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ dashboard_label }}</a>
+                    <a href="{{ settings_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ settings_label }}</a>
                 </div>
             </div>
         </section>
 
         {% if banner %}
-        <section class="mt-5 rounded-[1.4rem] border px-4 py-3 text-sm {% if banner.kind == 'success' %}border-[#8ca38c]/35 bg-[#eef4ee] text-[#6f866f]{% else %}border-[#d9a69a]/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-            {{ banner.message }}
-        </section>
+        <section class="paper-shadow mt-6 rounded-[1.5rem] border px-5 py-4 text-sm leading-7 {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">{{ banner.message }}</section>
         {% endif %}
 
-        <section class="mt-6 grid gap-5 lg:grid-cols-[0.95fr,1.05fr]">
-            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ create_user_title }}</h2>
-                <form method="post" action="/admin/users/create" class="mt-5 grid gap-4">
-                    <input type="hidden" name="lang" value="{{ lang }}">
-                    <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 outline-none focus:border-[#8ca38c]">
-                    <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 outline-none focus:border-[#8ca38c]">
-                    <button type="submit" class="rounded-[1rem] bg-[#8ca38c] px-4 py-3 text-sm font-semibold text-white hover:bg-[#6f866f]">
-                        {{ create_user_label }}
-                    </button>
-                </form>
-            </article>
+        <section class="mt-6 grid gap-6 xl:grid-cols-[18rem,1fr]">
+            <aside class="space-y-4 xl:sticky xl:top-6 xl:self-start">
+                <article class="paper-shadow section-card rounded-[1.7rem] p-5">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_sections_title }}</p>
+                    <nav class="mt-4 grid gap-2 text-sm">
+                        <a href="#overview" class="rounded-[1rem] border border-line bg-white px-4 py-3 transition hover:border-sage hover:bg-latte">{{ admin_nav_overview }}</a>
+                        <a href="#users" class="rounded-[1rem] border border-line bg-white px-4 py-3 transition hover:border-sage hover:bg-latte">{{ admin_nav_users }}</a>
+                        <a href="#policy" class="rounded-[1rem] border border-line bg-white px-4 py-3 transition hover:border-sage hover:bg-latte">{{ admin_nav_policy }}</a>
+                        <a href="#audit" class="rounded-[1rem] border border-line bg-white px-4 py-3 transition hover:border-sage hover:bg-latte">{{ admin_nav_audit }}</a>
+                    </nav>
+                </article>
+                <article class="paper-shadow section-card rounded-[1.7rem] p-5">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ policy_stack_title }}</p>
+                    <div class="mt-4 grid gap-3 text-sm">
+                        <div class="rounded-[1.1rem] border border-line bg-white px-4 py-3"><span class="block text-xs uppercase tracking-[0.18em] text-ink/42">{{ registration_label }}</span><span class="mt-2 block font-semibold">{{ current_registration_label }}</span></div>
+                        <div class="rounded-[1.1rem] border border-line bg-white px-4 py-3"><span class="block text-xs uppercase tracking-[0.18em] text-ink/42">{{ totp_policy_label }}</span><span class="mt-2 block font-semibold">{{ current_totp_policy_label }}</span></div>
+                        <div class="rounded-[1.1rem] border border-line bg-white px-4 py-3"><span class="block text-xs uppercase tracking-[0.18em] text-ink/42">{{ password_policy_label }}</span><span class="mt-2 block font-semibold">{{ current_password_policy_label }}</span></div>
+                    </div>
+                </article>
+            </aside>
 
-            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ policy_title }}</h2>
-                <form method="post" action="/admin/settings" class="mt-5 grid gap-4">
-                    <input type="hidden" name="lang" value="{{ lang }}">
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ registration_label }}</span>
-                        <select name="registration_policy" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            {% for option in registration_options %}
-                            <option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ session_ttl_label }}</span>
-                        <input type="number" min="1" name="session_absolute_ttl_hours" value="{{ system_settings.session_absolute_ttl_hours }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                    </label>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ totp_policy_label }}</span>
-                        <select name="totp_policy" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            {% for option in totp_policy_options %}
-                            <option value="{{ option.value }}" {% if option.value == current_totp_policy %}selected{% endif %}>{{ option.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ password_policy_label }}</span>
-                        <select name="password_strength_policy" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            {% for option in password_policy_options %}
-                            <option value="{{ option.value }}" {% if option.value == current_password_policy %}selected{% endif %}>{{ option.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ password_min_length_label }}</span>
-                        <input type="number" min="1" name="password_min_length" value="{{ system_settings.password_strength_rules.min_length }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                    </label>
-                    <div class="grid gap-3 sm:grid-cols-2">
-                        <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            <input type="checkbox" name="password_require_uppercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_uppercase %}checked{% endif %}>
-                            <span class="text-sm leading-6">{{ password_require_uppercase_label }}</span>
-                        </label>
-                        <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            <input type="checkbox" name="password_require_lowercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_lowercase %}checked{% endif %}>
-                            <span class="text-sm leading-6">{{ password_require_lowercase_label }}</span>
-                        </label>
-                        <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            <input type="checkbox" name="password_require_number" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_number %}checked{% endif %}>
-                            <span class="text-sm leading-6">{{ password_require_number_label }}</span>
-                        </label>
-                        <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                            <input type="checkbox" name="password_require_symbol" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_symbol %}checked{% endif %}>
-                            <span class="text-sm leading-6">{{ password_require_symbol_label }}</span>
-                        </label>
+            <div class="space-y-6">
+                <section id="overview" class="paper-shadow section-card rounded-[1.9rem] p-5 sm:p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_overview }}</p>
+                    <h2 class="mt-3 font-display text-3xl font-semibold">{{ overview_title }}</h2>
+                    <div class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                        <div class="rounded-[1.35rem] border border-line bg-white/92 px-4 py-4"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_users_label }}</p><p class="mt-3 font-display text-3xl font-semibold">{{ total_users }}</p></div>
+                        <div class="rounded-[1.35rem] border border-peach/30 bg-[#fbefec] px-4 py-4"><p class="text-xs uppercase tracking-[0.2em] text-[#98675f]/70">{{ overview_locked_label }}</p><p class="mt-3 font-display text-3xl font-semibold text-[#98675f]">{{ locked_users_count }}</p></div>
+                        <div class="rounded-[1.35rem] border border-sage/30 bg-mist px-4 py-4"><p class="text-xs uppercase tracking-[0.2em] text-sageDeep/75">{{ overview_web_sessions_label }}</p><p class="mt-3 font-display text-3xl font-semibold text-sageDeep">{{ total_active_auth_sessions }}</p></div>
+                        <div class="rounded-[1.35rem] border border-line bg-white/92 px-4 py-4"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_mfa_label }}</p><p class="mt-3 font-display text-3xl font-semibold">{{ mfa_enabled_users }}</p></div>
+                        <div class="rounded-[1.35rem] border border-line bg-white/92 px-4 py-4"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_audit_rows_label }}</p><p class="mt-3 font-display text-3xl font-semibold">{{ audit_log_count }}</p></div>
                     </div>
-                    <div class="grid gap-4 sm:grid-cols-3">
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ lockout_threshold_label }}</span>
-                            <input type="number" min="1" name="lockout_threshold" value="{{ system_settings.lockout_policy.threshold }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ lockout_base_label }}</span>
-                            <input type="number" min="1" name="lockout_base_delay_seconds" value="{{ system_settings.lockout_policy.base_delay_seconds }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ lockout_max_label }}</span>
-                            <input type="number" min="1" name="lockout_max_delay_seconds" value="{{ system_settings.lockout_policy.max_delay_seconds }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                    </div>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ system_idle_limit_label }}</span>
-                        <input type="number" min="1" name="max_idle_timeout_minutes" value="{{ system_max_idle_timeout_minutes }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        <span class="mt-2 block text-xs text-[#4b4038]/55">{{ system_idle_limit_hint }}</span>
-                    </label>
-                    <div class="grid gap-4 sm:grid-cols-3">
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ argon_memory_label }}</span>
-                            <input type="number" min="64" name="argon_memory_mib" value="{{ argon_memory_mib }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ argon_iterations_label }}</span>
-                            <input type="number" min="3" name="argon_iterations" value="{{ argon_iterations }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                        <label class="block">
-                            <span class="mb-2 block text-sm">{{ argon_lanes_label }}</span>
-                            <input type="number" min="2" name="argon_lanes" value="{{ argon_lanes }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        </label>
-                    </div>
-                    <p class="text-xs leading-6 text-[#4b4038]/55">{{ argon_raise_only_hint }}</p>
-                    <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        <input type="checkbox" name="public_registration_open" value="1" class="mt-1 h-4 w-4" {% if public_registration_open %}checked{% endif %}>
-                        <span class="text-sm leading-6">{{ public_registration_label }}</span>
-                    </label>
-                    <label class="block">
-                        <span class="mb-2 block text-sm">{{ audit_limit_label }}</span>
-                        <input type="number" min="1" name="audit_detail_limit" value="{{ system_settings.audit_detail_limit }}" class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3">
-                    </label>
-                    <button type="submit" class="rounded-[1rem] border border-[#ded3c6] bg-latte px-4 py-3 text-sm font-semibold">
-                        {{ save_policy_label }}
-                    </button>
-                </form>
-            </article>
-        </section>
+                </section>
 
-        <section class="mt-6 rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-            <h2 class="font-serif text-2xl font-semibold">{{ users_title }}</h2>
-            <div class="mt-4 grid gap-3">
-                {% for user in users %}
-                <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white p-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <p class="font-semibold">{{ user.username }}</p>
-                            <p class="text-xs text-[#4b4038]/55">{{ user.role }}</p>
-                        </div>
-                        <div class="flex flex-wrap gap-2">
-                            {% if user.role != 'admin' %}
-                            <form method="post" action="/admin/users/{{ user.id }}/unlock?lang={{ lang }}">
-                                <button type="submit" class="rounded-full border border-[#ded3c6] bg-latte px-4 py-2 text-sm">{{ unlock_label }}</button>
+                <section id="users" class="paper-shadow section-card rounded-[1.9rem] p-5 sm:p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_users }}</p>
+                    <h2 class="mt-3 font-display text-3xl font-semibold">{{ users_title }}</h2>
+                    <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/68">{{ users_description }}</p>
+                    <div class="mt-6 grid gap-5 xl:grid-cols-[0.78fr,1.22fr]">
+                        <article class="rounded-[1.6rem] border border-line bg-white/90 p-5">
+                            <h3 class="text-xl font-semibold">{{ create_user_title }}</h3>
+                            <form method="post" action="/admin/users/create" class="mt-5 grid gap-4">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ create_user_label }}</button>
                             </form>
-                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke?lang={{ lang }}">
-                                <button type="submit" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ revoke_sessions_label }}</button>
-                            </form>
-                            <form method="post" action="/admin/users/{{ user.id }}/reset?lang={{ lang }}">
-                                <button type="submit" class="rounded-full border border-[#d9a69a]/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f]">{{ reset_label }}</button>
-                            </form>
-                            {% endif %}
-                        </div>
+                        </article>
+                        <article class="rounded-[1.6rem] border border-line bg-white/90 p-5">
+                            <div class="grid gap-3">
+                                {% for user in users %}
+                                <div class="rounded-[1.25rem] border border-line bg-paper px-4 py-4">
+                                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="truncate text-lg font-semibold">{{ user.username }}</p>
+                                                <span class="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium">{% if user.role == 'admin' %}{{ role_admin_label }}{% else %}{{ role_user_label }}{% endif %}</span>
+                                                <span class="rounded-full border {% if user.totp_enabled %}border-sage/35 bg-mist text-sageDeep{% else %}border-line bg-white text-ink/72{% endif %} px-3 py-1 text-xs font-medium">{% if user.totp_enabled %}{{ totp_enabled_badge_label }}{% else %}{{ totp_missing_badge_label }}{% endif %}</span>
+                                                <span class="rounded-full border {% if user.password_ready %}border-line bg-white text-ink/72{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %} px-3 py-1 text-xs font-medium">{% if user.password_ready %}{{ password_ready_badge_label }}{% else %}{{ password_reset_badge_label }}{% endif %}</span>
+                                                {% if user.locked %}<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">{{ locked_badge_label }}</span>{% endif %}
+                                            </div>
+                                            <div class="mt-4 grid gap-2 text-sm leading-7 text-ink/68 sm:grid-cols-3">
+                                                <p><span class="font-medium text-ink">{{ user_active_sessions_label }}:</span> {{ user.active_sessions }}</p>
+                                                <p><span class="font-medium text-ink">{{ user_recovery_codes_label }}:</span> {{ user.recovery_codes_remaining }}</p>
+                                                <p><span class="font-medium text-ink">{{ user_last_ip_label }}:</span> {{ user.last_login_ip | default(value='-') }}</p>
+                                            </div>
+                                        </div>
+                                        {% if user.role != 'admin' %}
+                                        <div class="flex flex-wrap gap-2 lg:justify-end">
+                                            <form method="post" action="/admin/users/{{ user.id }}/unlock?lang={{ lang }}"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ unlock_label }}</button></form>
+                                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke?lang={{ lang }}"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ revoke_sessions_label }}</button></form>
+                                            <form method="post" action="/admin/users/{{ user.id }}/reset?lang={{ lang }}"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ reset_label }}</button></form>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </article>
                     </div>
-                </div>
-                {% endfor %}
+                </section>
+
+                <section id="policy" class="paper-shadow section-card rounded-[1.9rem] p-5 sm:p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_policy }}</p>
+                    <h2 class="mt-3 font-display text-3xl font-semibold">{{ policy_title }}</h2>
+                    <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/68">{{ policy_description }}</p>
+                    <form method="post" action="/admin/settings" class="mt-6 space-y-5">
+                        <input type="hidden" name="lang" value="{{ lang }}">
+                        <div class="grid gap-5 xl:grid-cols-2">
+                            <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
+                                <h3 class="text-xl font-semibold">{{ registration_label }}</h3>
+                                <div class="mt-5 grid gap-4">
+                                    <label class="block"><span class="mb-2 block text-sm">{{ registration_label }}</span><select name="registration_policy" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3">{% for option in registration_options %}<option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                                    <label class="flex items-start gap-3 rounded-[1rem] border border-line bg-paper px-4 py-3"><input type="checkbox" name="public_registration_open" value="1" class="mt-1 h-4 w-4" {% if public_registration_open %}checked{% endif %}><span class="text-sm leading-6">{{ public_registration_label }}</span></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ session_ttl_label }}</span><input type="number" min="1" name="session_absolute_ttl_hours" value="{{ system_settings.session_absolute_ttl_hours }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                </div>
+                            </article>
+                            <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
+                                <h3 class="text-xl font-semibold">{{ totp_policy_label }}</h3>
+                                <div class="mt-5 grid gap-4">
+                                    <label class="block"><span class="mb-2 block text-sm">{{ totp_policy_label }}</span><select name="totp_policy" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3">{% for option in totp_policy_options %}<option value="{{ option.value }}" {% if option.value == current_totp_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ password_policy_label }}</span><select name="password_strength_policy" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3">{% for option in password_policy_options %}<option value="{{ option.value }}" {% if option.value == current_password_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ password_min_length_label }}</span><input type="number" min="1" name="password_min_length" value="{{ system_settings.password_strength_rules.min_length }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <div class="grid gap-3 sm:grid-cols-2">
+                                        <label class="flex items-start gap-3 rounded-[1rem] border border-line bg-paper px-4 py-3"><input type="checkbox" name="password_require_uppercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_uppercase %}checked{% endif %}><span class="text-sm leading-6">{{ password_require_uppercase_label }}</span></label>
+                                        <label class="flex items-start gap-3 rounded-[1rem] border border-line bg-paper px-4 py-3"><input type="checkbox" name="password_require_lowercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_lowercase %}checked{% endif %}><span class="text-sm leading-6">{{ password_require_lowercase_label }}</span></label>
+                                        <label class="flex items-start gap-3 rounded-[1rem] border border-line bg-paper px-4 py-3"><input type="checkbox" name="password_require_number" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_number %}checked{% endif %}><span class="text-sm leading-6">{{ password_require_number_label }}</span></label>
+                                        <label class="flex items-start gap-3 rounded-[1rem] border border-line bg-paper px-4 py-3"><input type="checkbox" name="password_require_symbol" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_symbol %}checked{% endif %}><span class="text-sm leading-6">{{ password_require_symbol_label }}</span></label>
+                                    </div>
+                                </div>
+                            </article>
+                            <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
+                                <h3 class="text-xl font-semibold">{{ lockout_threshold_label }}</h3>
+                                <div class="mt-5 grid gap-4 sm:grid-cols-3">
+                                    <label class="block"><span class="mb-2 block text-sm">{{ lockout_threshold_label }}</span><input type="number" min="1" name="lockout_threshold" value="{{ system_settings.lockout_policy.threshold }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ lockout_base_label }}</span><input type="number" min="1" name="lockout_base_delay_seconds" value="{{ system_settings.lockout_policy.base_delay_seconds }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ lockout_max_label }}</span><input type="number" min="1" name="lockout_max_delay_seconds" value="{{ system_settings.lockout_policy.max_delay_seconds }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                </div>
+                                <label class="mt-4 block"><span class="mb-2 block text-sm">{{ system_idle_limit_label }}</span><input type="number" min="1" name="max_idle_timeout_minutes" value="{{ system_max_idle_timeout_minutes }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"><span class="mt-2 block text-xs leading-6 text-ink/55">{{ system_idle_limit_hint }}</span></label>
+                            </article>
+                            <article class="rounded-[1.5rem] border border-line bg-white/92 p-5">
+                                <h3 class="text-xl font-semibold">{{ argon_memory_label }}</h3>
+                                <div class="mt-5 grid gap-4 sm:grid-cols-3">
+                                    <label class="block"><span class="mb-2 block text-sm">{{ argon_memory_label }}</span><input type="number" min="64" name="argon_memory_mib" value="{{ argon_memory_mib }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ argon_iterations_label }}</span><input type="number" min="3" name="argon_iterations" value="{{ argon_iterations }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                    <label class="block"><span class="mb-2 block text-sm">{{ argon_lanes_label }}</span><input type="number" min="2" name="argon_lanes" value="{{ argon_lanes }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                                </div>
+                                <p class="mt-4 text-sm leading-7 text-ink/68">{{ argon_raise_only_hint }}</p>
+                                <label class="mt-4 block"><span class="mb-2 block text-sm">{{ audit_limit_label }}</span><input type="number" min="1" name="audit_detail_limit" value="{{ system_settings.audit_detail_limit }}" class="w-full rounded-[1rem] border border-line bg-paper px-4 py-3"></label>
+                            </article>
+                        </div>
+                        <div class="rounded-[1.4rem] border border-line bg-latte px-5 py-4"><button type="submit" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-paper">{{ save_policy_label }}</button></div>
+                    </form>
+                </section>
+
+                <section id="audit" class="paper-shadow section-card rounded-[1.9rem] p-5 sm:p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_audit }}</p>
+                    <h2 class="mt-3 font-display text-3xl font-semibold">{{ audit_title }}</h2>
+                    <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/68">{{ audit_description }}</p>
+                    <div class="mt-6 grid gap-5 xl:grid-cols-[1.15fr,0.85fr]">
+                        <article class="rounded-[1.6rem] border border-line bg-white/90 p-5">
+                            <div class="flex items-center justify-between gap-3"><h3 class="text-xl font-semibold">{{ audit_title }}</h3><span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_log_count }}</span></div>
+                            <div class="mt-5 max-h-[42rem] space-y-3 overflow-y-auto pr-1">
+                                {% if audit_logs | length == 0 %}
+                                <div class="rounded-[1.15rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">{{ audit_empty_label }}</div>
+                                {% endif %}
+                                {% for entry in audit_logs %}
+                                <details class="rounded-[1.15rem] border border-line bg-paper px-4 py-3">
+                                    <summary class="cursor-pointer list-none">
+                                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div><p class="text-sm font-semibold">{{ entry.action_type }}</p><p class="mt-1 text-xs text-ink/55">{{ entry.created_at_unix }} | {{ entry.ip_address | default(value='-') }}</p></div>
+                                            <div class="flex items-center gap-3"><span class="rounded-full border {% if entry.success %}border-sage/35 bg-mist text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %} px-3 py-1 text-xs font-medium">{% if entry.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}</span><span class="details-chevron text-sm transition">⌄</span></div>
+                                        </div>
+                                    </summary>
+                                    <pre class="mt-4 whitespace-pre-wrap break-words rounded-[1rem] border border-line bg-white px-4 py-3 font-mono text-xs leading-6 text-ink/72">{{ entry.details_json }}</pre>
+                                </details>
+                                {% endfor %}
+                            </div>
+                        </article>
+                        <article class="rounded-[1.6rem] border border-line bg-white/90 p-5">
+                            <div class="flex items-center justify-between gap-3"><h3 class="text-xl font-semibold">{{ rollup_title }}</h3><span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_rollups | length }}</span></div>
+                            <div class="mt-5 max-h-[42rem] space-y-3 overflow-y-auto pr-1">
+                                {% if audit_rollups | length == 0 %}
+                                <div class="rounded-[1.15rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">{{ rollup_empty_label }}</div>
+                                {% endif %}
+                                {% for item in audit_rollups %}
+                                <div class="rounded-[1.15rem] border border-line bg-paper px-4 py-4"><p class="text-sm font-semibold">{{ item.action_type }}</p><p class="mt-2 text-sm leading-7 text-ink/68">{{ item.total_count }}</p></div>
+                                {% endfor %}
+                            </div>
+                        </article>
+                    </div>
+                </section>
             </div>
-        </section>
-
-        <section class="mt-6 grid gap-5 lg:grid-cols-2">
-            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ audit_title }}</h2>
-                <div class="mt-4 grid gap-3">
-                    {% for entry in audit_logs %}
-                    <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        <p class="text-sm font-semibold">{{ entry.action_type }}</p>
-                        <p class="mt-1 text-xs text-[#4b4038]/55">{{ entry.created_at_unix }} | {{ entry.ip_address | default(value='-') }}</p>
-                        <pre class="mt-3 whitespace-pre-wrap break-words text-xs text-[#4b4038]/72">{{ entry.details_json }}</pre>
-                    </div>
-                    {% endfor %}
-                </div>
-            </article>
-
-            <article class="rounded-[1.7rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ rollup_title }}</h2>
-                <div class="mt-4 grid gap-3">
-                    {% for item in audit_rollups %}
-                    <div class="rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
-                        <p class="text-sm font-semibold">{{ item.action_type }}</p>
-                        <p class="mt-1 text-xs text-[#4b4038]/55">{{ item.total_count }}</p>
-                    </div>
-                    {% endfor %}
-                </div>
-            </article>
         </section>
     </main>
 </body>
