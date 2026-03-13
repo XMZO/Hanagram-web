@@ -18,7 +18,7 @@ pub(crate) use axum::response::{Html, IntoResponse, Redirect, Response};
 pub(crate) use axum::routing::{get, post};
 pub(crate) use axum::{Json, Router};
 pub(crate) use base64::Engine;
-pub(crate) use chrono::{DateTime, Utc};
+pub(crate) use chrono::{DateTime, Months, TimeDelta, Utc};
 pub(crate) use grammers_client::client::{LoginToken, PasswordToken, UpdatesConfiguration};
 pub(crate) use grammers_client::tl;
 pub(crate) use grammers_client::{
@@ -378,7 +378,13 @@ pub(crate) struct AdminUserView {
     pub(crate) id: String,
     pub(crate) username: String,
     pub(crate) role: String,
+    pub(crate) is_admin: bool,
     pub(crate) locked: bool,
+    pub(crate) banned: bool,
+    pub(crate) ban_reason: Option<String>,
+    pub(crate) ban_until_unix: Option<i64>,
+    pub(crate) ban_until_label: Option<String>,
+    pub(crate) ban_remaining_label: Option<String>,
     pub(crate) totp_enabled: bool,
     pub(crate) password_ready: bool,
     pub(crate) password_reset_required: bool,
@@ -647,6 +653,14 @@ pub(crate) struct AdminCreateUserForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub(crate) struct AdminBanUserForm {
+    pub(crate) duration_value: String,
+    pub(crate) duration_unit: String,
+    pub(crate) reason: String,
+    pub(crate) lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub(crate) struct AdminSaveSettingsForm {
     pub(crate) telegram_api_id: String,
     pub(crate) telegram_api_hash: String,
@@ -674,6 +688,17 @@ pub(crate) struct AdminSaveSettingsForm {
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct RevokeSessionsForm {
     pub(crate) session_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BanDurationUnit {
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+    Months,
+    Years,
+    Permanent,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -789,6 +814,103 @@ pub(crate) fn enforcement_mode_options(language: Language) -> Vec<SelectOption> 
             label: translations.enforcement_mode_disabled_label.to_owned(),
         },
     ]
+}
+
+pub(crate) fn ban_duration_options(language: Language) -> Vec<SelectOption> {
+    let translations = language.translations();
+    vec![
+        SelectOption {
+            value: "seconds",
+            label: translations.admin_ban_unit_seconds_label.to_owned(),
+        },
+        SelectOption {
+            value: "minutes",
+            label: translations.admin_ban_unit_minutes_label.to_owned(),
+        },
+        SelectOption {
+            value: "hours",
+            label: translations.admin_ban_unit_hours_label.to_owned(),
+        },
+        SelectOption {
+            value: "days",
+            label: translations.admin_ban_unit_days_label.to_owned(),
+        },
+        SelectOption {
+            value: "months",
+            label: translations.admin_ban_unit_months_label.to_owned(),
+        },
+        SelectOption {
+            value: "years",
+            label: translations.admin_ban_unit_years_label.to_owned(),
+        },
+        SelectOption {
+            value: "permanent",
+            label: translations.admin_ban_unit_permanent_label.to_owned(),
+        },
+    ]
+}
+
+pub(crate) fn parse_ban_duration_unit(raw: &str) -> Option<BanDurationUnit> {
+    match raw.trim() {
+        "seconds" => Some(BanDurationUnit::Seconds),
+        "minutes" => Some(BanDurationUnit::Minutes),
+        "hours" => Some(BanDurationUnit::Hours),
+        "days" => Some(BanDurationUnit::Days),
+        "months" => Some(BanDurationUnit::Months),
+        "years" => Some(BanDurationUnit::Years),
+        "permanent" => Some(BanDurationUnit::Permanent),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_ban_expires_at(
+    duration_value_raw: &str,
+    duration_unit_raw: &str,
+) -> Result<Option<i64>> {
+    let Some(unit) = parse_ban_duration_unit(duration_unit_raw) else {
+        anyhow::bail!("invalid ban duration unit");
+    };
+    if unit == BanDurationUnit::Permanent {
+        return Ok(None);
+    }
+
+    let duration_value = duration_value_raw
+        .trim()
+        .parse::<u32>()
+        .context("invalid ban duration value")?;
+    anyhow::ensure!(duration_value > 0, "ban duration must be greater than 0");
+
+    let now = Utc::now();
+    let until = match unit {
+        BanDurationUnit::Seconds => {
+            now.checked_add_signed(TimeDelta::seconds(i64::from(duration_value)))
+        }
+        BanDurationUnit::Minutes => {
+            now.checked_add_signed(TimeDelta::minutes(i64::from(duration_value)))
+        }
+        BanDurationUnit::Hours => {
+            now.checked_add_signed(TimeDelta::hours(i64::from(duration_value)))
+        }
+        BanDurationUnit::Days => now.checked_add_signed(TimeDelta::days(i64::from(duration_value))),
+        BanDurationUnit::Months => now.checked_add_months(Months::new(duration_value)),
+        BanDurationUnit::Years => {
+            now.checked_add_months(Months::new(duration_value.saturating_mul(12)))
+        }
+        BanDurationUnit::Permanent => Some(now),
+    };
+
+    until
+        .map(|value| Some(value.timestamp()))
+        .context("ban duration is out of supported range")
+}
+
+pub(crate) fn normalize_optional_text(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 pub(crate) fn selected_option_label(options: &[SelectOption], value: &str) -> String {
@@ -1156,4 +1278,22 @@ pub(crate) fn render_qr_svg(data: &str) -> Result<String> {
 
     svg.push_str("</svg>");
     Ok(svg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ban_expires_at;
+
+    #[test]
+    fn parse_ban_expires_at_accepts_permanent_without_value() {
+        assert_eq!(
+            parse_ban_expires_at("", "permanent").expect("permanent ban should parse"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_ban_expires_at_rejects_zero_length() {
+        assert!(parse_ban_expires_at("0", "minutes").is_err());
+    }
 }

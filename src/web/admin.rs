@@ -15,6 +15,11 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin", get(admin_page_handler))
         .route("/admin/users/create", post(admin_create_user_handler))
+        .route("/admin/users/{user_id}/ban", post(admin_ban_user_handler))
+        .route(
+            "/admin/users/{user_id}/unban",
+            post(admin_unban_user_handler),
+        )
         .route(
             "/admin/users/{user_id}/unlock",
             post(admin_unlock_user_handler),
@@ -98,6 +103,10 @@ fn audit_search_matches(log: &AuditLogView, search: &str) -> bool {
     .any(|value| value.to_ascii_lowercase().contains(&needle))
 }
 
+fn user_ban_remaining_label(language: Language, until_unix: i64, now: i64) -> String {
+    crate::i18n::format_duration_for_display(language, until_unix.saturating_sub(now))
+}
+
 pub(crate) async fn render_admin_page(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
@@ -132,6 +141,7 @@ pub(crate) async fn render_admin_page(
     let registration_options = registration_policy_options(language);
     let totp_policy_options = enforcement_mode_options(language);
     let password_policy_options = enforcement_mode_options(language);
+    let ban_duration_choices = ban_duration_options(language);
     let current_registration_label = selected_option_label(
         &registration_options,
         registration_policy_value(system_settings.registration_policy),
@@ -255,6 +265,9 @@ pub(crate) async fn render_admin_page(
     let mut users = Vec::new();
     for user in raw_users {
         let locked = user.security.locked_until_unix.unwrap_or_default() > now;
+        let active_ban = web_auth::current_ban_status(&user, now);
+        let ban_until_unix = active_ban.as_ref().and_then(|status| status.until_unix);
+        let ban_reason = active_ban.as_ref().and_then(|status| status.reason.clone());
         let auth_sessions = app_state
             .meta_store
             .list_auth_sessions_for_user(&user.id)
@@ -296,7 +309,14 @@ pub(crate) async fn render_admin_page(
                 UserRole::Admin => String::from("admin"),
                 UserRole::User => String::from("user"),
             },
+            is_admin: user.role == UserRole::Admin,
             locked,
+            banned: active_ban.is_some(),
+            ban_reason,
+            ban_until_unix,
+            ban_until_label: ban_until_unix.map(format_unix_timestamp),
+            ban_remaining_label: ban_until_unix
+                .map(|until_unix| user_ban_remaining_label(language, until_unix, now)),
             totp_enabled: user.security.totp_enabled,
             password_ready: user.security.password_hash.is_some(),
             password_reset_required: user.security.password_needs_reset,
@@ -438,7 +458,22 @@ pub(crate) async fn render_admin_page(
     context.insert("save_policy_label", &translations.admin_save_policy_label);
     context.insert("users_title", &translations.admin_users_title);
     context.insert("users_description", &translations.admin_users_description);
+    context.insert("users_search_label", &translations.admin_users_search_label);
+    context.insert(
+        "users_search_placeholder",
+        &translations.admin_users_search_placeholder,
+    );
+    context.insert(
+        "users_filtered_label",
+        &translations.admin_users_filtered_label,
+    );
+    context.insert(
+        "users_no_matches_label",
+        &translations.admin_users_no_matches_label,
+    );
     context.insert("unlock_label", &translations.admin_unlock_label);
+    context.insert("ban_label", &translations.admin_ban_label);
+    context.insert("unban_label", &translations.admin_unban_label);
     context.insert(
         "revoke_sessions_label",
         &translations.admin_revoke_sessions_label,
@@ -448,6 +483,7 @@ pub(crate) async fn render_admin_page(
     context.insert("role_admin_label", &translations.admin_role_admin_label);
     context.insert("role_user_label", &translations.admin_role_user_label);
     context.insert("locked_badge_label", &translations.admin_locked_badge_label);
+    context.insert("banned_badge_label", &translations.admin_banned_badge_label);
     context.insert(
         "totp_enabled_badge_label",
         &translations.admin_totp_enabled_badge_label,
@@ -485,6 +521,29 @@ pub(crate) async fn render_admin_page(
         "user_last_auth_label",
         &translations.admin_user_last_auth_label,
     );
+    context.insert(
+        "ban_duration_value_label",
+        &translations.admin_ban_duration_value_label,
+    );
+    context.insert(
+        "ban_duration_unit_label",
+        &translations.admin_ban_duration_unit_label,
+    );
+    context.insert("ban_reason_label", &translations.admin_ban_reason_label);
+    context.insert(
+        "ban_reason_placeholder",
+        &translations.admin_ban_reason_placeholder,
+    );
+    context.insert("ban_until_label", &translations.admin_ban_until_label);
+    context.insert(
+        "ban_remaining_label",
+        &translations.admin_ban_remaining_label,
+    );
+    context.insert(
+        "ban_permanent_label",
+        &translations.admin_ban_unit_permanent_label,
+    );
+    context.insert("ban_duration_options", &ban_duration_choices);
     context.insert("audit_title", &translations.admin_audit_title);
     context.insert("audit_description", &translations.admin_audit_description);
     context.insert("rollup_title", &translations.admin_rollup_title);
@@ -566,8 +625,13 @@ pub(crate) async fn render_admin_page(
         "audit_filtered_label",
         &translations.admin_audit_filtered_label,
     );
+    context.insert(
+        "audit_no_matches_label",
+        &translations.admin_audit_no_matches_label,
+    );
     context.insert("policy_description", &translations.admin_policy_description);
     context.insert("total_users", &total_users);
+    context.insert("users_filtered_count", &total_users);
     context.insert("locked_users_count", &locked_users_count);
     context.insert("total_active_auth_sessions", &total_active_auth_sessions);
     context.insert("mfa_enabled_users", &mfa_enabled_users);
@@ -772,6 +836,215 @@ async fn admin_create_user_handler(
     }
 }
 
+async fn admin_ban_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<AdminBanUserForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&user_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to(&admin_href(language)).into_response();
+    };
+    if user.role == UserRole::Admin {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            None,
+            Some(PageBanner::error(
+                language.translations().admin_cannot_ban_admin_message,
+            )),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::FORBIDDEN, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let banned_until_unix = match parse_ban_expires_at(&form.duration_value, &form.duration_unit) {
+        Ok(value) => value,
+        Err(_) => {
+            return match render_admin_page(
+                &app_state,
+                &authenticated,
+                language,
+                None,
+                Some(PageBanner::error(
+                    language.translations().admin_ban_invalid_duration_message,
+                )),
+                &headers,
+            )
+            .await
+            {
+                Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+    };
+    let ban_reason = normalize_optional_text(&form.reason);
+
+    user.security.ban_active = true;
+    user.security.banned_until_unix = banned_until_unix;
+    user.security.ban_reason = ban_reason.clone();
+    user.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_user(&user).await {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            None,
+            Some(PageBanner::error(error.to_string())),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    revoke_all_user_auth_access(&app_state, &user.id).await;
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_banned"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({
+                "username": user.username,
+                "reason": ban_reason,
+                "banned_until_unix": banned_until_unix,
+                "permanent": banned_until_unix.is_none()
+            })
+            .to_string(),
+        })
+        .await;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        None,
+        Some(PageBanner::success(
+            language.translations().admin_user_banned_message,
+        )),
+        &headers,
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_unban_user_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(user_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&user_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to(&admin_href(language)).into_response();
+    };
+    if user.role == UserRole::Admin {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            None,
+            Some(PageBanner::error(
+                language.translations().admin_cannot_ban_admin_message,
+            )),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::FORBIDDEN, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    user.security.ban_active = false;
+    user.security.banned_until_unix = None;
+    user.security.ban_reason = None;
+    user.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_user(&user).await {
+        return match render_admin_page(
+            &app_state,
+            &authenticated,
+            language,
+            None,
+            Some(PageBanner::error(error.to_string())),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::INTERNAL_SERVER_ERROR, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from("admin_user_unbanned"),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: extract_client_ip(&headers),
+            success: true,
+            details_json: serde_json::json!({
+                "username": user.username
+            })
+            .to_string(),
+        })
+        .await;
+
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        None,
+        Some(PageBanner::success(
+            language.translations().admin_user_unbanned_message,
+        )),
+        &headers,
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
 async fn admin_unlock_user_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
@@ -901,6 +1174,24 @@ async fn clear_user_runtime_state(
             );
         }
     }
+}
+
+async fn revoke_all_user_auth_access(app_state: &AppState, user_id: &str) {
+    if let Ok(auth_sessions) = app_state
+        .meta_store
+        .list_auth_sessions_for_user(user_id)
+        .await
+    {
+        for auth_session in auth_sessions {
+            clear_auth_session_sensitive_state(app_state, &auth_session.id).await;
+        }
+    }
+    let _ = app_state
+        .meta_store
+        .revoke_all_auth_sessions_for_user(user_id)
+        .await;
+    app_state.user_keys.write().await.remove(user_id);
+    clear_pending_flows_for_user(app_state, user_id).await;
 }
 
 async fn admin_reset_user_handler(
@@ -1119,21 +1410,7 @@ async fn admin_revoke_user_sessions_handler(
             }
         }
     } else {
-        if let Ok(sessions) = app_state
-            .meta_store
-            .list_auth_sessions_for_user(&user_id)
-            .await
-        {
-            for session in sessions {
-                clear_auth_session_sensitive_state(&app_state, &session.id).await;
-            }
-        }
-        let _ = app_state
-            .meta_store
-            .revoke_all_auth_sessions_for_user(&user_id)
-            .await;
-        app_state.user_keys.write().await.remove(&user_id);
-        clear_pending_flows_for_user(&app_state, &user_id).await;
+        revoke_all_user_auth_access(&app_state, &user_id).await;
     }
 
     let _ = app_state

@@ -351,12 +351,19 @@ pub struct TranslationSet {
     pub admin_save_policy_label: &'static str,
     pub admin_users_title: &'static str,
     pub admin_users_description: &'static str,
+    pub admin_users_search_label: &'static str,
+    pub admin_users_search_placeholder: &'static str,
+    pub admin_users_filtered_label: &'static str,
+    pub admin_users_no_matches_label: &'static str,
     pub admin_unlock_label: &'static str,
+    pub admin_ban_label: &'static str,
+    pub admin_unban_label: &'static str,
     pub admin_revoke_sessions_label: &'static str,
     pub admin_reset_label: &'static str,
     pub admin_role_admin_label: &'static str,
     pub admin_role_user_label: &'static str,
     pub admin_locked_badge_label: &'static str,
+    pub admin_banned_badge_label: &'static str,
     pub admin_totp_enabled_badge_label: &'static str,
     pub admin_totp_missing_badge_label: &'static str,
     pub admin_password_ready_badge_label: &'static str,
@@ -367,6 +374,19 @@ pub struct TranslationSet {
     pub admin_user_passkeys_label: &'static str,
     pub admin_user_last_ip_label: &'static str,
     pub admin_user_last_auth_label: &'static str,
+    pub admin_ban_duration_value_label: &'static str,
+    pub admin_ban_duration_unit_label: &'static str,
+    pub admin_ban_reason_label: &'static str,
+    pub admin_ban_reason_placeholder: &'static str,
+    pub admin_ban_unit_seconds_label: &'static str,
+    pub admin_ban_unit_minutes_label: &'static str,
+    pub admin_ban_unit_hours_label: &'static str,
+    pub admin_ban_unit_days_label: &'static str,
+    pub admin_ban_unit_months_label: &'static str,
+    pub admin_ban_unit_years_label: &'static str,
+    pub admin_ban_unit_permanent_label: &'static str,
+    pub admin_ban_until_label: &'static str,
+    pub admin_ban_remaining_label: &'static str,
     pub admin_audit_title: &'static str,
     pub admin_audit_description: &'static str,
     pub admin_rollup_title: &'static str,
@@ -397,6 +417,7 @@ pub struct TranslationSet {
     pub admin_audit_search_submit_label: &'static str,
     pub admin_audit_search_clear_label: &'static str,
     pub admin_audit_filtered_label: &'static str,
+    pub admin_audit_no_matches_label: &'static str,
     pub registration_policy_admin_only_label: &'static str,
     pub registration_policy_admin_selectable_label: &'static str,
     pub registration_policy_always_public_label: &'static str,
@@ -425,6 +446,10 @@ pub struct TranslationSet {
     pub settings_access_other_sessions_hint: &'static str,
     pub settings_password_reset_required_message: &'static str,
     pub login_locked_until_message: &'static str,
+    pub login_banned_remaining_message: &'static str,
+    pub login_banned_remaining_reason_message: &'static str,
+    pub login_banned_permanent_message: &'static str,
+    pub login_banned_permanent_reason_message: &'static str,
     pub login_require_mfa_message: &'static str,
     pub login_invalid_mfa_message: &'static str,
     pub login_passkey_start_message: &'static str,
@@ -445,6 +470,10 @@ pub struct TranslationSet {
     pub admin_username_exists_message: &'static str,
     pub admin_user_created_message: &'static str,
     pub admin_user_unlocked_message: &'static str,
+    pub admin_user_banned_message: &'static str,
+    pub admin_user_unbanned_message: &'static str,
+    pub admin_ban_invalid_duration_message: &'static str,
+    pub admin_cannot_ban_admin_message: &'static str,
     pub admin_reset_completed_message: &'static str,
     pub admin_reset_temporary_password_message: &'static str,
     pub admin_user_sessions_revoked_message: &'static str,
@@ -526,6 +555,59 @@ pub fn language_options(current: Language, _path: &str) -> [LanguageOption; 2] {
             active: current == Language::En,
         },
     ]
+}
+
+pub fn format_duration_for_display(language: Language, total_seconds: i64) -> String {
+    let total_seconds = total_seconds.max(0);
+    let units = match language {
+        Language::En => [
+            (31_536_000_i64, "year", "years"),
+            (2_592_000_i64, "month", "months"),
+            (86_400_i64, "day", "days"),
+            (3_600_i64, "hour", "hours"),
+            (60_i64, "minute", "minutes"),
+            (1_i64, "second", "seconds"),
+        ],
+        Language::ZhCn => [
+            (31_536_000_i64, "年", "年"),
+            (2_592_000_i64, "个月", "个月"),
+            (86_400_i64, "天", "天"),
+            (3_600_i64, "小时", "小时"),
+            (60_i64, "分钟", "分钟"),
+            (1_i64, "秒", "秒"),
+        ],
+    };
+
+    let mut remaining = total_seconds;
+    let mut parts = Vec::new();
+    for (unit_seconds, singular, plural) in units {
+        if remaining < unit_seconds {
+            continue;
+        }
+        let value = remaining / unit_seconds;
+        remaining %= unit_seconds;
+        let label = if language == Language::En && value == 1 {
+            singular
+        } else {
+            plural
+        };
+        parts.push(match language {
+            Language::En => format!("{value} {label}"),
+            Language::ZhCn => format!("{value}{label}"),
+        });
+        if parts.len() == 2 {
+            break;
+        }
+    }
+
+    if parts.is_empty() {
+        match language {
+            Language::En => String::from("0 seconds"),
+            Language::ZhCn => String::from("0秒"),
+        }
+    } else {
+        parts.join(" ")
+    }
 }
 
 fn parse_accept_language(header: &str) -> Option<Language> {

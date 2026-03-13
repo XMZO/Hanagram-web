@@ -56,9 +56,83 @@
             });
         }
 
+        function setAdminCount(selector, value) {
+            document.querySelectorAll(selector).forEach((element) => {
+                element.textContent = String(value);
+            });
+        }
+
+        function attachAdminCollectionFilter({
+            formSelector,
+            inputSelector,
+            clearSelector,
+            itemSelector,
+            emptySelector,
+            countSelector
+        }) {
+            const form = document.querySelector(formSelector);
+            const input = document.querySelector(inputSelector);
+            const clearButton = document.querySelector(clearSelector);
+            const emptyState = document.querySelector(emptySelector);
+            const items = Array.from(document.querySelectorAll(itemSelector));
+
+            if (!input || items.length === 0) {
+                return;
+            }
+
+            const render = () => {
+                const needle = input.value.trim().toLowerCase();
+                let visible = 0;
+
+                items.forEach((item) => {
+                    const haystack = (item.dataset.adminSearchText || item.textContent || "").toLowerCase();
+                    const matched = needle === "" || haystack.includes(needle);
+                    item.classList.toggle("hidden", !matched);
+                    if (matched) {
+                        visible += 1;
+                    }
+                });
+
+                if (emptyState) {
+                    emptyState.classList.toggle("hidden", visible !== 0);
+                }
+                setAdminCount(countSelector, visible);
+            };
+
+            if (form) {
+                form.addEventListener("submit", (event) => {
+                    event.preventDefault();
+                    render();
+                });
+            }
+            input.addEventListener("input", render);
+            clearButton?.addEventListener("click", () => {
+                input.value = "";
+                render();
+                input.focus();
+            });
+            render();
+        }
+
         window.addEventListener("DOMContentLoaded", () => {
             activateAdminPane();
             decorateAdminMetadata();
+            attachAdminCollectionFilter({
+                formSelector: "[data-admin-users-filter-form]",
+                inputSelector: "[data-admin-user-search]",
+                clearSelector: "[data-admin-user-clear]",
+                itemSelector: "[data-admin-user-card]",
+                emptySelector: "[data-admin-users-empty]",
+                countSelector: "[data-admin-users-filter-count]"
+            });
+            attachAdminCollectionFilter({
+                formSelector: "[data-admin-audit-filter-form]",
+                inputSelector: "[data-admin-audit-search]",
+                clearSelector: "[data-admin-audit-clear]",
+                itemSelector: "[data-admin-audit-row]",
+                emptySelector: "[data-admin-audit-empty]",
+                countSelector: "[data-admin-audit-filter-count]"
+            });
         });
         window.addEventListener("hashchange", () => activateAdminPane());
     </script>
@@ -194,11 +268,22 @@
                             <div class="flex flex-wrap items-center gap-3">
                                 <h3 class="text-lg font-semibold sm:text-xl">{{ users_title }}</h3>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ total_users }}</span>
+                                <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ users_filtered_label }} · <span data-admin-users-filter-count>{{ users_filtered_count }}</span></span>
                             </div>
+
+                            <form data-admin-users-filter-form class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
+                                <label class="block">
+                                    <span class="mb-2 block text-sm font-medium">{{ users_search_label }}</span>
+                                    <input type="text" data-admin-user-search placeholder="{{ users_search_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                </label>
+                                <button type="button" data-admin-user-clear class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</button>
+                            </form>
+
+                            <div data-admin-users-empty class="mt-4 hidden rounded-[1.1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ users_no_matches_label }}</div>
 
                             <div class="mt-4 grid max-h-[66vh] gap-3 overflow-y-auto pr-1">
                                 {% for user in users %}
-                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                <div data-admin-user-card data-admin-search-text="{{ user.username }} {{ user.role }} {{ user.last_login_ip | default(value='') }} {{ user.last_auth_method | default(value='') }} {{ user.ban_reason | default(value='') }} {% if user.locked %}locked{% endif %} {% if user.banned %}banned{% endif %} {% if user.totp_enabled %}totp{% endif %}" class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
                                     <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                                         <div class="min-w-0">
                                             <div class="flex flex-wrap items-center gap-2">
@@ -207,6 +292,7 @@
                                                 <span class="rounded-full border {% if user.totp_enabled %}border-sage/35 bg-mist text-sageDeep{% else %}border-line bg-white text-ink/72{% endif %} px-3 py-1 text-xs font-medium">{% if user.totp_enabled %}{{ totp_enabled_badge_label }}{% else %}{{ totp_missing_badge_label }}{% endif %}</span>
                                                 <span class="rounded-full border {% if not user.password_ready %}border-peach/35 bg-[#fbefec] text-[#98675f]{% elif user.password_reset_required %}border-butter/60 bg-[#f7f0e4] text-ink/78{% else %}border-line bg-white text-ink/72{% endif %} px-3 py-1 text-xs font-medium">{% if not user.password_ready %}{{ password_missing_badge_label }}{% elif user.password_reset_required %}{{ password_reset_badge_label }}{% else %}{{ password_ready_badge_label }}{% endif %}</span>
                                                 {% if user.locked %}<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">{{ locked_badge_label }}</span>{% endif %}
+                                                {% if user.banned %}<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">{{ banned_badge_label }}</span>{% endif %}
                                             </div>
 
                                             <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -231,14 +317,62 @@
                                                 <p class="mt-2 text-sm font-medium text-ink/62">-</p>
                                                 {% endif %}
                                             </div>
+
+                                            {% if user.banned %}
+                                            <div class="mt-3 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm text-[#98675f]">
+                                                <div class="flex flex-wrap gap-2">
+                                                    {% if user.ban_remaining_label %}
+                                                    <span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">{{ ban_remaining_label }} {{ user.ban_remaining_label }}</span>
+                                                    {% else %}
+                                                    <span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">{{ ban_permanent_label }}</span>
+                                                    {% endif %}
+                                                    {% if user.ban_until_label %}
+                                                    <span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">{{ ban_until_label }} {{ user.ban_until_label }}</span>
+                                                    {% endif %}
+                                                </div>
+                                                {% if user.ban_reason %}
+                                                <p class="mt-3 break-words">{{ ban_reason_label }} {{ user.ban_reason }}</p>
+                                                {% endif %}
+                                            </div>
+                                            {% endif %}
                                         </div>
 
-                                        {% if user.role != 'admin' %}
-                                        <div class="flex flex-wrap gap-2 xl:max-w-[20rem] xl:justify-end">
-                                            <form method="post" action="/admin/users/{{ user.id }}/unlock"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ unlock_label }}</button></form>
-                                            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ revoke_sessions_label }}</button></form>
-                                            <form method="post" action="/admin/users/{{ user.id }}/reset"><button type="submit" class="rounded-full border border-butter/60 bg-[#f7f0e4] px-4 py-2 text-sm text-ink/78 transition hover:border-[#ddc48f] hover:bg-[#f3ead6]">{{ reset_label }}</button></form>
-                                            <form method="post" action="/admin/users/{{ user.id }}/delete" data-confirm="{{ delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ delete_label }}</button></form>
+                                        {% if not user.is_admin %}
+                                        <div class="grid gap-3 xl:w-[22rem]">
+                                            <div class="flex flex-wrap gap-2 xl:justify-end">
+                                                <form method="post" action="/admin/users/{{ user.id }}/unlock"><input type="hidden" name="lang" value="{{ lang }}"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ unlock_label }}</button></form>
+                                                <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ revoke_sessions_label }}</button></form>
+                                                <form method="post" action="/admin/users/{{ user.id }}/reset"><input type="hidden" name="lang" value="{{ lang }}"><button type="submit" class="rounded-full border border-butter/60 bg-[#f7f0e4] px-4 py-2 text-sm text-ink/78 transition hover:border-[#ddc48f] hover:bg-[#f3ead6]">{{ reset_label }}</button></form>
+                                                <form method="post" action="/admin/users/{{ user.id }}/delete" data-confirm="{{ delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)"><input type="hidden" name="lang" value="{{ lang }}"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ delete_label }}</button></form>
+                                            </div>
+
+                                            <form method="post" action="/admin/users/{{ user.id }}/ban" class="grid gap-3 rounded-[1rem] border border-line/80 bg-white/85 p-3">
+                                                <input type="hidden" name="lang" value="{{ lang }}">
+                                                <div class="grid gap-3 sm:grid-cols-[minmax(0,0.8fr),minmax(0,1fr)]">
+                                                    <label class="block">
+                                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ ban_duration_value_label }}</span>
+                                                        <input type="number" min="1" name="duration_value" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
+                                                    </label>
+                                                    <label class="block">
+                                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ ban_duration_unit_label }}</span>
+                                                        <select name="duration_unit" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
+                                                            {% for option in ban_duration_options %}
+                                                            <option value="{{ option.value }}">{{ option.label }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                    </label>
+                                                </div>
+                                                <label class="block">
+                                                    <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ ban_reason_label }}</span>
+                                                    <input type="text" name="reason" value="{{ user.ban_reason | default(value='') }}" placeholder="{{ ban_reason_placeholder }}" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
+                                                </label>
+                                                <div class="flex flex-wrap gap-2">
+                                                    <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-semibold text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ ban_label }}</button>
+                                                    {% if user.banned %}
+                                                    <button type="submit" formaction="/admin/users/{{ user.id }}/unban" class="rounded-full border border-sage/35 bg-mist px-4 py-2 text-sm font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e6f0e6]">{{ unban_label }}</button>
+                                                    {% endif %}
+                                                </div>
+                                            </form>
                                         </div>
                                         {% endif %}
                                     </div>
@@ -381,7 +515,7 @@
 
                         <div class="flex flex-wrap gap-2">
                             <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ overview_audit_rows_label }} · {{ audit_log_count }}</span>
-                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_label }} · {{ audit_filtered_count }}</span>
+                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_label }} · <span data-admin-audit-filter-count>{{ audit_filtered_count }}</span></span>
                             <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ rollup_title }} · {{ audit_rollups | length }}</span>
                         </div>
                     </div>
@@ -393,7 +527,7 @@
                         </article>
                         <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ audit_filtered_label }}</p>
-                            <p class="mt-2 text-2xl font-semibold">{{ audit_filtered_count }}</p>
+                            <p class="mt-2 text-2xl font-semibold" data-admin-audit-filter-count>{{ audit_filtered_count }}</p>
                         </article>
                         <article class="rounded-[1.15rem] border border-sage/30 bg-mist px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.2em] text-sageDeep/75">{{ rollup_title }}</p>
@@ -408,25 +542,25 @@
                                     <h3 class="text-lg font-semibold sm:text-xl">{{ audit_title }}</h3>
                                     <p class="mt-2 text-sm leading-7 text-ink/68">{{ audit_description }}</p>
                                 </div>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_count }}</span>
+                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm" data-admin-audit-filter-count>{{ audit_filtered_count }}</span>
                             </div>
 
-                            <form method="get" action="/admin#audit" class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4 sm:grid-cols-[minmax(0,1fr),auto,auto] sm:items-end">
-                                <input type="hidden" name="lang" value="{{ lang }}">
+                            <form data-admin-audit-filter-form class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4 sm:grid-cols-[minmax(0,1fr),auto,auto] sm:items-end">
                                 <label class="block">
                                     <span class="mb-2 block text-sm font-medium">{{ audit_search_label }}</span>
-                                    <input type="text" name="audit_search" value="{{ audit_search_value }}" placeholder="{{ audit_search_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                    <input type="text" data-admin-audit-search value="{{ audit_search_value }}" placeholder="{{ audit_search_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
                                 </label>
                                 <button type="submit" class="rounded-[1rem] border border-line bg-white px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-paper">{{ audit_search_submit_label }}</button>
-                                <a href="/admin#audit" class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-center text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</a>
+                                <button type="button" data-admin-audit-clear class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-center text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</button>
                             </form>
 
                             {% if audit_logs | length == 0 %}
                             <div class="mt-4 rounded-[1.1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ audit_empty_label }}</div>
                             {% else %}
+                            <div data-admin-audit-empty class="mt-4 hidden rounded-[1.1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ audit_no_matches_label }}</div>
                             <div class="mt-4 grid max-h-[68vh] gap-3 overflow-y-auto pr-1">
                                 {% for log in audit_logs %}
-                                <details class="rounded-[1rem] border border-line bg-paper">
+                                <details data-admin-audit-row class="rounded-[1rem] border border-line bg-paper">
                                     <summary class="cursor-pointer px-4 py-4">
                                         <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                             <div class="min-w-0">

@@ -127,6 +127,46 @@ fn json_error_response(status: StatusCode, message: impl Into<String>) -> Respon
         .into_response()
 }
 
+fn login_locked_message(language: Language, locked_until: i64) -> String {
+    language
+        .translations()
+        .login_locked_until_message
+        .replace("{locked_until}", &format_unix_timestamp(locked_until))
+}
+
+fn login_banned_message(
+    language: Language,
+    until_unix: Option<i64>,
+    reason: Option<&str>,
+) -> String {
+    let translations = language.translations();
+    let reason = reason.map(str::trim).filter(|value| !value.is_empty());
+
+    match (until_unix, reason) {
+        (Some(until_unix), Some(reason)) => translations
+            .login_banned_remaining_reason_message
+            .replace(
+                "{remaining}",
+                &crate::i18n::format_duration_for_display(
+                    language,
+                    until_unix.saturating_sub(Utc::now().timestamp()),
+                ),
+            )
+            .replace("{reason}", reason),
+        (Some(until_unix), None) => translations.login_banned_remaining_message.replace(
+            "{remaining}",
+            &crate::i18n::format_duration_for_display(
+                language,
+                until_unix.saturating_sub(Utc::now().timestamp()),
+            ),
+        ),
+        (None, Some(reason)) => translations
+            .login_banned_permanent_reason_message
+            .replace("{reason}", reason),
+        (None, None) => translations.login_banned_permanent_message.to_owned(),
+    }
+}
+
 fn request_host(headers: &HeaderMap) -> Option<String> {
     for header_name in ["x-forwarded-host", "host"] {
         let Some(value) = headers.get(header_name) else {
@@ -1028,12 +1068,16 @@ async fn login_submit_handler(
             }
         }
         Err(LoginError::LockedUntil(locked_until)) => {
-            let message = language
-                .translations()
-                .login_locked_until_message
-                .replace("{locked_until}", &locked_until.to_string());
+            let message = login_locked_message(language, locked_until);
             match render_login_page(&app_state, language, Some(&message), &headers).await {
                 Ok(html) => (StatusCode::TOO_MANY_REQUESTS, html).into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Err(LoginError::Banned { until_unix, reason }) => {
+            let message = login_banned_message(language, until_unix, reason.as_deref());
+            match render_login_page(&app_state, language, Some(&message), &headers).await {
+                Ok(html) => (StatusCode::FORBIDDEN, html).into_response(),
                 Err(status) => status.into_response(),
             }
         }
@@ -1096,9 +1140,13 @@ async fn login_passkey_options_handler(
         Err(LoginError::LockedUntil(locked_until)) => {
             return json_error_response(
                 StatusCode::TOO_MANY_REQUESTS,
-                translations
-                    .login_locked_until_message
-                    .replace("{locked_until}", &locked_until.to_string()),
+                login_locked_message(language, locked_until),
+            );
+        }
+        Err(LoginError::Banned { until_unix, reason }) => {
+            return json_error_response(
+                StatusCode::FORBIDDEN,
+                login_banned_message(language, until_unix, reason.as_deref()),
             );
         }
         Err(LoginError::MissingSecondFactor) => {
@@ -1442,9 +1490,13 @@ async fn login_passkey_finish_handler(
         Err(LoginError::LockedUntil(locked_until)) => {
             return json_error_response(
                 StatusCode::TOO_MANY_REQUESTS,
-                translations
-                    .login_locked_until_message
-                    .replace("{locked_until}", &locked_until.to_string()),
+                login_locked_message(language, locked_until),
+            );
+        }
+        Err(LoginError::Banned { until_unix, reason }) => {
+            return json_error_response(
+                StatusCode::FORBIDDEN,
+                login_banned_message(language, until_unix, reason.as_deref()),
             );
         }
         Err(_) => {

@@ -92,12 +92,22 @@ struct VerifiedPrimaryLogin {
     requires_password_reset: bool,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveBan {
+    pub(crate) until_unix: Option<i64>,
+    pub(crate) reason: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum LoginError {
     InvalidCredentials,
     MissingSecondFactor,
     InvalidSecondFactor,
     LockedUntil(i64),
+    Banned {
+        until_unix: Option<i64>,
+        reason: Option<String>,
+    },
 }
 
 const STORED_PASSKEY_VERSION: u8 = 1;
@@ -232,6 +242,50 @@ pub fn initialize_user_credentials(
     Ok(master_key)
 }
 
+fn clear_user_ban_state(user: &mut UserRecord, now: i64) {
+    user.security.ban_active = false;
+    user.security.banned_until_unix = None;
+    user.security.ban_reason = None;
+    user.updated_at_unix = now;
+}
+
+pub(crate) fn current_ban_status(user: &UserRecord, now: i64) -> Option<ActiveBan> {
+    if !user.security.ban_active {
+        return None;
+    }
+
+    match user.security.banned_until_unix {
+        Some(until_unix) if until_unix <= now => None,
+        Some(until_unix) => Some(ActiveBan {
+            until_unix: Some(until_unix),
+            reason: user.security.ban_reason.clone(),
+        }),
+        None => Some(ActiveBan {
+            until_unix: None,
+            reason: user.security.ban_reason.clone(),
+        }),
+    }
+}
+
+async fn refresh_user_ban_state(
+    store: &MetaStore,
+    user: &mut UserRecord,
+) -> Result<Option<ActiveBan>> {
+    let now = Utc::now().timestamp();
+    let active_ban = current_ban_status(user, now);
+    let should_clear_stale_ban = active_ban.is_none()
+        && (user.security.ban_active
+            || user.security.banned_until_unix.is_some()
+            || user.security.ban_reason.is_some());
+
+    if should_clear_stale_ban {
+        clear_user_ban_state(user, now);
+        store.save_user(user).await?;
+    }
+
+    Ok(active_ban)
+}
+
 async fn verify_primary_credentials(
     store: &MetaStore,
     settings: &SystemSettings,
@@ -263,6 +317,26 @@ async fn verify_primary_credentials(
     };
 
     let now = Utc::now().timestamp();
+    if let Some(active_ban) = refresh_user_ban_state(store, &mut user)
+        .await
+        .map_err(|_| LoginError::InvalidCredentials)?
+    {
+        audit_login_failure(
+            store,
+            Some(&user.id),
+            &user.username,
+            ip_address,
+            user_agent,
+            "account_banned",
+            login_method,
+            None,
+        )
+        .await;
+        return Err(LoginError::Banned {
+            until_unix: active_ban.until_unix,
+            reason: active_ban.reason,
+        });
+    }
     if let Some(locked_until) = user.security.locked_until_unix {
         if locked_until > now {
             audit_login_failure(
@@ -860,7 +934,7 @@ pub async fn begin_passkey_login(
 pub async fn authenticate_user_with_passkey(
     store: &MetaStore,
     settings: &SystemSettings,
-    user: UserRecord,
+    mut user: UserRecord,
     master_key: MasterKey,
     requires_totp_setup: bool,
     requires_password_reset: bool,
@@ -868,6 +942,27 @@ pub async fn authenticate_user_with_passkey(
     user_agent: Option<&str>,
     passkey_label: Option<&str>,
 ) -> Result<LoginResult, LoginError> {
+    if let Some(active_ban) = refresh_user_ban_state(store, &mut user)
+        .await
+        .map_err(|_| LoginError::InvalidCredentials)?
+    {
+        audit_login_failure(
+            store,
+            Some(&user.id),
+            &user.username,
+            ip_address,
+            user_agent,
+            "account_banned",
+            Some(LOGIN_METHOD_PASSWORD_PASSKEY),
+            passkey_label,
+        )
+        .await;
+        return Err(LoginError::Banned {
+            until_unix: active_ban.until_unix,
+            reason: active_ban.reason,
+        });
+    }
+
     complete_login(
         store,
         settings,
@@ -912,9 +1007,15 @@ pub async fn resolve_authenticated_session(
         }
     }
 
-    let Some(user) = store.get_user_by_id(&auth_session.user_id).await? else {
+    let Some(mut user) = store.get_user_by_id(&auth_session.user_id).await? else {
         return Ok(None);
     };
+    if refresh_user_ban_state(store, &mut user).await?.is_some() {
+        if auth_session.revoked_at_unix.is_none() {
+            let _ = store.revoke_auth_session(&auth_session.id).await;
+        }
+        return Ok(None);
+    }
 
     store
         .touch_auth_session(&auth_session.id, now, extract_client_ip(headers).as_deref())
@@ -1499,5 +1600,33 @@ mod tests {
         );
 
         assert!(effective_auth_cookie_secure(&settings, &headers));
+    }
+
+    #[test]
+    fn current_ban_status_detects_active_and_permanent_bans() {
+        let now = 1_700_000_000_i64;
+        let mut user = UserRecord::new("banned-user", UserRole::User);
+        user.security.ban_active = true;
+        user.security.banned_until_unix = Some(now + 3600);
+        user.security.ban_reason = Some(String::from("manual_review"));
+
+        let timed_ban = current_ban_status(&user, now).expect("ban should be active");
+        assert_eq!(timed_ban.until_unix, Some(now + 3600));
+        assert_eq!(timed_ban.reason.as_deref(), Some("manual_review"));
+
+        user.security.banned_until_unix = None;
+        let permanent_ban = current_ban_status(&user, now).expect("ban should stay active");
+        assert_eq!(permanent_ban.until_unix, None);
+        assert_eq!(permanent_ban.reason.as_deref(), Some("manual_review"));
+    }
+
+    #[test]
+    fn current_ban_status_ignores_expired_bans() {
+        let now = 1_700_000_000_i64;
+        let mut user = UserRecord::new("expired-ban", UserRole::User);
+        user.security.ban_active = true;
+        user.security.banned_until_unix = Some(now - 1);
+
+        assert!(current_ban_status(&user, now).is_none());
     }
 }
