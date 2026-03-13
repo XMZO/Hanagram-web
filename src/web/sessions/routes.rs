@@ -1395,13 +1395,7 @@ async fn qr_flow_page_handler(
                 active_flow.session_data = share_sensitive_bytes(session_data);
             }
             match render_qr_flow_page(
-                &app_state,
-                language,
-                &flow_id,
-                &flow,
-                pending,
-                banner,
-                &headers,
+                &app_state, language, &flow_id, &flow, pending, banner, &headers,
             )
             .await
             {
@@ -1496,7 +1490,14 @@ async fn render_setup_error_response(
     message: &str,
     headers: &HeaderMap,
 ) -> Response {
-    match render_setup_page(app_state, language, Some(PageBanner::error(message)), headers).await {
+    match render_setup_page(
+        app_state,
+        language,
+        Some(PageBanner::error(message)),
+        headers,
+    )
+    .await
+    {
         Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
         Err(status) => status.into_response(),
     }

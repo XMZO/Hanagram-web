@@ -99,7 +99,7 @@ pub(crate) async fn render_dashboard_page(
     );
     context.insert(
         "admin_overview_href",
-        &format!("{}#overview", admin_href(language)),
+        &format!("{}#users", admin_href(language)),
     );
     context.insert(
         "dashboard_workspace_eyebrow",

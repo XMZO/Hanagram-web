@@ -539,14 +539,20 @@ pub fn request_uses_https(headers: &HeaderMap) -> bool {
         return true;
     }
 
-    if let Some(value) = headers.get("forwarded").and_then(|value| value.to_str().ok()) {
+    if let Some(value) = headers
+        .get("forwarded")
+        .and_then(|value| value.to_str().ok())
+    {
         for entry in value.split(',') {
             for segment in entry.split(';') {
                 let Some((key, raw_value)) = segment.trim().split_once('=') else {
                     continue;
                 };
                 if key.trim().eq_ignore_ascii_case("proto")
-                    && raw_value.trim().trim_matches('"').eq_ignore_ascii_case("https")
+                    && raw_value
+                        .trim()
+                        .trim_matches('"')
+                        .eq_ignore_ascii_case("https")
                 {
                     return true;
                 }
@@ -554,7 +560,8 @@ pub fn request_uses_https(headers: &HeaderMap) -> bool {
         }
     }
 
-    header_scheme_is_https(headers, header::ORIGIN) || header_scheme_is_https(headers, header::REFERER)
+    header_scheme_is_https(headers, header::ORIGIN)
+        || header_scheme_is_https(headers, header::REFERER)
 }
 
 fn header_has_https_value(headers: &HeaderMap, header_name: &str) -> bool {
@@ -574,7 +581,12 @@ fn header_scheme_is_https(headers: &HeaderMap, header_name: header::HeaderName) 
     headers
         .get(header_name)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.trim_start().to_ascii_lowercase().starts_with("https://"))
+        .map(|value| {
+            value
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("https://")
+        })
         .unwrap_or(false)
 }
 

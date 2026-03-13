@@ -65,9 +65,9 @@ pub(crate) use crate::state::{
 };
 pub(crate) use crate::web_auth::{
     AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
-    build_totp_setup_material, clear_auth_cookie, effective_auth_cookie_secure,
-    extract_client_ip, extract_user_agent, find_cookie, initialize_user_credentials,
-    normalize_username, request_uses_https, resolve_authenticated_session,
+    build_totp_setup_material, clear_auth_cookie, effective_auth_cookie_secure, extract_client_ip,
+    extract_user_agent, find_cookie, initialize_user_credentials, normalize_username,
+    request_uses_https, resolve_authenticated_session,
 };
 
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;

@@ -605,6 +605,13 @@ pub(crate) async fn render_admin_page(
         },
     );
     context.insert(
+        "rollup_description",
+        &match language {
+            Language::En => "Older detailed rows are compacted here by action type so the page stays fast and readable.",
+            Language::ZhCn => "较旧的详细记录会按动作类型汇总到这里，让页面保持轻量且易读。",
+        },
+    );
+    context.insert(
         "audit_success_label",
         &match language {
             Language::En => "OK",
@@ -616,6 +623,41 @@ pub(crate) async fn render_admin_page(
         &match language {
             Language::En => "FAIL",
             Language::ZhCn => "失败",
+        },
+    );
+    context.insert(
+        "audit_actor_label",
+        &match language {
+            Language::En => "Actor",
+            Language::ZhCn => "操作者",
+        },
+    );
+    context.insert(
+        "audit_subject_label",
+        &match language {
+            Language::En => "Subject",
+            Language::ZhCn => "目标",
+        },
+    );
+    context.insert(
+        "audit_time_label",
+        &match language {
+            Language::En => "Time",
+            Language::ZhCn => "时间",
+        },
+    );
+    context.insert(
+        "audit_updated_label",
+        &match language {
+            Language::En => "Updated",
+            Language::ZhCn => "更新时间",
+        },
+    );
+    context.insert(
+        "audit_details_label",
+        &match language {
+            Language::En => "Details",
+            Language::ZhCn => "详情",
         },
     );
     context.insert(

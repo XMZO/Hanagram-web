@@ -455,37 +455,51 @@
 <body class="min-h-screen font-sans text-ink antialiased">
     <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
 
-    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <section class="paper-shadow float-in overflow-hidden rounded-[2rem] border border-line/80 bg-paper/95">
-            <div class="grid gap-8 px-6 py-7 lg:grid-cols-[1.32fr,0.98fr] lg:px-8 lg:py-8">
+    <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+        <section class="paper-shadow float-in overflow-hidden rounded-[1.9rem] border border-line/80 bg-paper/95">
+            <div class="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.08fr),minmax(19rem,0.92fr)] lg:px-6 lg:py-6">
                 <div>
-                    <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-4 py-2 text-[0.72rem] font-medium uppercase tracking-[0.28em] text-ink/60">
-                        {{ i18n.hero_eyebrow }}
-                    </span>
-                    <h1 class="mt-5 font-display text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{{ i18n.hero_title }}</h1>
-                    <p class="mt-4 max-w-2xl text-[15px] leading-8 text-ink/72">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-ink/60">
+                            {{ i18n.hero_eyebrow }}
+                        </span>
+                        <span class="inline-flex items-center rounded-full border border-sage/35 bg-mint px-3 py-1.5 text-sm text-sageDeep">
+                            {{ current_username }}
+                        </span>
+                    </div>
+                    <h1 class="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{{ i18n.hero_title }}</h1>
+                    <p class="mt-3 max-w-2xl text-sm leading-7 text-ink/72">
                         {{ i18n.hero_description_prefix }}
                         <span class="rounded-full bg-latte px-3 py-1 font-mono text-[0.95rem] text-ink">777000</span>
                         {{ i18n.hero_description_suffix }}
                     </p>
 
-                    <div class="mt-6 flex flex-wrap gap-3">
-                        <div class="rounded-full border border-line bg-white/90 px-4 py-2 text-sm text-ink/70">
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <div class="rounded-full border border-line bg-white/90 px-3 py-1.5 text-sm text-ink/70">
                             {{ i18n.stat_updated }} · <span data-role="updated-at">{{ now }}</span>
                         </div>
-                        <div class="rounded-full border border-line bg-latte/85 px-4 py-2 text-sm text-ink/70">
+                        <div class="rounded-full border border-line bg-latte/85 px-3 py-1.5 text-sm text-ink/70">
                             {{ i18n.stat_connected }} · <span data-role="connected-summary">{{ connected_count }}/{{ sessions | length }}</span>
                         </div>
-                        <div class="rounded-full border border-sage/35 bg-mint px-4 py-2 text-sm text-sageDeep">
-                            {{ current_username }}
+                        <div class="rounded-full border border-line bg-white/90 px-3 py-1.5 text-sm text-ink/70">
+                            {{ i18n.stat_accounts }} · {{ sessions | length }}
                         </div>
                     </div>
                 </div>
 
-                <div class="space-y-4">
-                    <div class="rounded-[1.5rem] border border-line/80 bg-white/80 p-4">
-                        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
+                <div class="grid gap-3">
+                    <div class="rounded-[1.45rem] border border-line/80 bg-white/80 p-4">
+                        <div class="flex flex-col gap-3">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
+                                <a
+                                    href="{{ setup_href }}"
+                                    class="rounded-full border border-line bg-latte px-4 py-1.5 text-sm text-ink/80 transition hover:border-sage hover:bg-[#e8dccb]"
+                                >
+                                    {{ i18n.dashboard_add_session }}
+                                </a>
+                            </div>
+
                             <div class="flex flex-wrap items-center gap-2">
                                 <div class="inline-flex rounded-full border border-line bg-paper p-1">
                                     {% for option in languages %}
@@ -498,12 +512,6 @@
                                     </a>
                                     {% endfor %}
                                 </div>
-                                <a
-                                    href="{{ setup_href }}"
-                                    class="rounded-full border border-line bg-latte px-4 py-1.5 text-sm text-ink/80 transition hover:border-sage hover:bg-[#e8dccb]"
-                                >
-                                    {{ i18n.dashboard_add_session }}
-                                </a>
                                 <a
                                     href="{{ settings_href }}"
                                     class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
@@ -530,18 +538,18 @@
                         </div>
                     </div>
 
-                    <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                        <div class="rounded-[1.5rem] border border-line/80 bg-white/85 p-4">
+                    <div class="grid gap-3 sm:grid-cols-3">
+                        <div class="rounded-[1.3rem] border border-line/80 bg-white/85 px-4 py-3.5">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_accounts }}</p>
-                            <p class="mt-3 font-display text-3xl font-semibold text-ink">{{ sessions | length }}</p>
+                            <p class="mt-2 font-display text-2xl font-semibold text-ink">{{ sessions | length }}</p>
                         </div>
-                        <div class="rounded-[1.5rem] border border-sage/35 bg-[#eef4ee] p-4">
+                        <div class="rounded-[1.3rem] border border-sage/35 bg-[#eef4ee] px-4 py-3.5">
                             <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/80">{{ i18n.stat_connected }}</p>
-                            <p class="mt-3 font-display text-3xl font-semibold text-sageDeep" data-role="connected-count">{{ connected_count }}</p>
+                            <p class="mt-2 font-display text-2xl font-semibold text-sageDeep" data-role="connected-count">{{ connected_count }}</p>
                         </div>
-                        <div class="rounded-[1.5rem] border border-butter/60 bg-[#f7f0e4] p-4">
+                        <div class="rounded-[1.3rem] border border-butter/60 bg-[#f7f0e4] px-4 py-3.5">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_updated }}</p>
-                            <p class="mt-3 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
                         </div>
                     </div>
                 </div>
@@ -549,54 +557,62 @@
         </section>
 
         {% if banner %}
-        <section class="paper-shadow mt-6 rounded-[1.6rem] border px-5 py-4 text-sm leading-7 {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+        <section class="paper-shadow mt-4 rounded-[1.6rem] border px-5 py-4 text-sm leading-7 {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
             {{ banner.message }}
         </section>
         {% endif %}
 
-        <section class="mt-6 grid gap-4 xl:grid-cols-[0.96fr,1.04fr]">
-            <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:90ms]">
-                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_workspace_eyebrow }}</p>
-                <h2 class="mt-3 font-display text-2xl font-semibold text-ink">{{ dashboard_workspace_title }}</h2>
-                <p class="mt-3 text-sm leading-7 text-ink/68">{{ dashboard_workspace_description }}</p>
-                <div class="mt-5 grid gap-3 sm:grid-cols-2 {% if show_admin %}lg:grid-cols-3{% endif %}">
-                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
-                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_sessions_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_sessions_body }}</p>
+        <section class="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr),minmax(0,1.1fr)]">
+            <article class="paper-shadow float-in rounded-[1.55rem] border border-line/80 bg-paper/95 p-4 [animation-delay:90ms]">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_workspace_eyebrow }}</p>
+                        <h2 class="mt-2 font-display text-xl font-semibold text-ink sm:text-2xl">{{ dashboard_workspace_title }}</h2>
                     </div>
-                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
+                    <p class="max-w-xl text-sm leading-6 text-ink/68">{{ dashboard_workspace_description }}</p>
+                </div>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2 {% if show_admin %}lg:grid-cols-3{% endif %}">
+                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
+                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_sessions_title }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_sessions_body }}</p>
+                    </div>
+                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
                         <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_settings_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_settings_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_settings_body }}</p>
                     </div>
                     {% if show_admin %}
-                    <div class="rounded-[1.25rem] border border-line/80 bg-white/88 px-4 py-4">
+                    <div class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3">
                         <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ dashboard_lane_admin_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ dashboard_lane_admin_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_lane_admin_body }}</p>
                     </div>
                     {% endif %}
                 </div>
             </article>
 
-            <article class="paper-shadow float-in rounded-[1.8rem] border border-line/80 bg-paper/95 p-5 [animation-delay:150ms]">
-                <p class="text-xs uppercase tracking-[0.28em] text-ink/45">{{ dashboard_shortcuts_title }}</p>
-                <p class="mt-3 text-sm leading-7 text-ink/68">{{ dashboard_shortcuts_description }}</p>
-                <div class="mt-5 grid gap-3 sm:grid-cols-2">
-                    <a href="{{ settings_security_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+            <article class="paper-shadow float-in rounded-[1.55rem] border border-line/80 bg-paper/95 p-4 [animation-delay:150ms]">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h2 class="font-display text-xl font-semibold text-ink sm:text-2xl">{{ dashboard_shortcuts_title }}</h2>
+                    </div>
+                    <p class="max-w-xl text-sm leading-6 text-ink/68">{{ dashboard_shortcuts_description }}</p>
+                </div>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <a href="{{ settings_security_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_security_card_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_security_card_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_security_card_body }}</p>
                     </a>
-                    <a href="{{ settings_notifications_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                    <a href="{{ settings_notifications_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_notifications_card_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_notifications_card_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_notifications_card_body }}</p>
                     </a>
-                    <a href="{{ settings_access_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                    <a href="{{ settings_access_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_access_card_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_access_card_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_access_card_body }}</p>
                     </a>
                     {% if show_admin %}
-                    <a href="{{ admin_overview_href }}" class="rounded-[1.35rem] border border-line/80 bg-white/88 px-4 py-4 transition hover:border-sage">
+                    <a href="{{ admin_overview_href }}" class="rounded-[1.15rem] border border-line/80 bg-white/88 px-4 py-3 transition hover:border-sage">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ dashboard_admin_card_title }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink">{{ dashboard_admin_card_body }}</p>
+                        <p class="mt-2 text-sm leading-6 text-ink">{{ dashboard_admin_card_body }}</p>
                     </a>
                     {% endif %}
                 </div>
@@ -604,14 +620,14 @@
         </section>
 
         {% if transport_warning %}
-        <section class="paper-shadow mt-6 rounded-[1.6rem] border border-butter/70 bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
+        <section class="paper-shadow mt-4 rounded-[1.6rem] border border-butter/70 bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
             <p class="font-semibold">{{ transport_warning.title }}</p>
             <p class="mt-2">{{ transport_warning.message }}</p>
         </section>
         {% endif %}
 
         {% if sessions | length == 0 %}
-        <section class="paper-shadow mt-6 rounded-[2rem] border border-dashed border-line bg-paper/95 px-6 py-16 text-center">
+        <section class="paper-shadow mt-4 rounded-[1.7rem] border border-dashed border-line bg-paper/95 px-6 py-10 text-center">
             <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
             <p class="mx-auto mt-4 max-w-2xl text-lg leading-8 text-ink/70">
                 {{ i18n.empty_state_description_prefix }}
@@ -626,10 +642,10 @@
             </a>
         </section>
         {% else %}
-        <section class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {% for session in sessions %}
             <article
-                class="paper-shadow float-in rounded-[1.7rem] border border-line/80 bg-paper/95 p-5 transition hover:-translate-y-1 hover:border-sage/45"
+                class="paper-shadow float-in rounded-[1.5rem] border border-line/80 bg-paper/95 p-4 transition hover:-translate-y-1 hover:border-sage/45"
                 style="animation-delay: {{ loop.index0 * 70 }}ms;"
                 data-session-card
                 data-session-key="{{ session.id }}"
@@ -642,7 +658,7 @@
                             <p data-role="session-name" class="truncate text-lg font-semibold text-ink">{{ session.key }}</p>
                         </div>
                         <p data-role="session-phone" class="mt-2 inline-flex rounded-full border border-line/80 bg-white/92 px-3 py-1 font-mono text-[0.76rem] text-ink/58">{{ session.phone }}</p>
-                        <p data-role="session-note" class="mt-3 text-sm leading-6 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
+                        <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/62">{{ session.note | default(value=session_note_placeholder) }}</p>
                     </div>
 
                     <div class="flex flex-col items-end gap-2">
@@ -655,17 +671,17 @@
                     </div>
                 </div>
 
-                <div class="mt-5 rounded-[1.45rem] border border-line/80 bg-white/88 px-4 py-4">
+                <div class="mt-4 rounded-[1.3rem] border border-line/80 bg-white/88 px-4 py-3.5">
                     <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
-                    <p data-role="latest-code" class="mt-3 font-mono text-[2.15rem] font-semibold tracking-[0.16em] text-ink">
+                    <p data-role="latest-code" class="mt-2.5 font-mono text-[1.9rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.05rem]">
                         {{ session.latest_code | default(value=i18n.otp_placeholder) }}
                     </p>
                 </div>
 
-                <div class="mt-4 flex items-end justify-between gap-4">
+                <div class="mt-3.5 flex items-end justify-between gap-4">
                     <div class="min-w-0">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
-                        <p data-role="latest-update" class="mt-2 truncate font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
+                        <p data-role="latest-update" class="mt-1.5 truncate font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
                     </div>
                     <button
                         type="button"
@@ -676,7 +692,7 @@
                     </button>
                 </div>
 
-                <p data-role="session-error" class="mt-4 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
+                <p data-role="session-error" class="mt-3 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
                     {{ session.status.error | default(value="") }}
                 </p>
             </article>

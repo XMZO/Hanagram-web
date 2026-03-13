@@ -170,7 +170,10 @@ pub(crate) async fn render_settings_page(
         })
         .collect();
     let active_session_count = active_sessions.len();
-    let other_session_count = active_sessions.iter().filter(|session| !session.is_current).count();
+    let other_session_count = active_sessions
+        .iter()
+        .filter(|session| !session.is_current)
+        .count();
 
     let totp_status = match language {
         Language::En if authenticated.user.security.totp_enabled => "Enabled",
@@ -938,11 +941,7 @@ async fn register_submit_handler(
             ))
             .into_response();
             let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
-            match set_cookie_header(&build_auth_cookie(
-                &session_token,
-                max_age,
-                cookie_secure,
-            )) {
+            match set_cookie_header(&build_auth_cookie(&session_token, max_age, cookie_secure)) {
                 Ok(cookie) => {
                     response.headers_mut().insert(header::SET_COOKIE, cookie);
                     response
