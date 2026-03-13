@@ -14,6 +14,9 @@ use crate::security::{
 };
 
 const SYSTEM_SETTINGS_KEY: &str = "system_settings";
+const SCHEMA_VERSION_KEY: &str = "schema_version";
+const APP_SCHEMA_VERSION: i64 = 2;
+const INCOMPATIBLE_SCHEMA_MESSAGE: &str = "existing metadata database schema is incompatible with this build; delete .hanagram/app.db and restart";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SystemSettings {
@@ -197,10 +200,7 @@ impl MetaStore {
     }
 
     pub async fn open_memory() -> Result<Self> {
-        let path = std::env::temp_dir().join(format!(
-            "hanagram-meta-{}.sqlite",
-            Uuid::new_v4()
-        ));
+        let path = std::env::temp_dir().join(format!("hanagram-meta-{}.sqlite", Uuid::new_v4()));
         let db = Builder::new_local(path).build().await?;
         let store = Self { db };
         store.initialize().await?;
@@ -214,7 +214,9 @@ impl MetaStore {
             .await?;
         match statement.query_row([SYSTEM_SETTINGS_KEY]).await {
             Ok(row) => {
-                let value: String = row.get(0).context("failed to decode system settings json")?;
+                let value: String = row
+                    .get(0)
+                    .context("failed to decode system settings json")?;
                 serde_json::from_str(&value).context("failed to parse system settings json")
             }
             Err(libsql::Error::QueryReturnedNoRows) => {
@@ -228,7 +230,8 @@ impl MetaStore {
 
     pub async fn save_system_settings(&self, settings: &SystemSettings) -> Result<()> {
         let conn = self.connection()?;
-        let value = serde_json::to_string(settings).context("failed to encode system settings json")?;
+        let value =
+            serde_json::to_string(settings).context("failed to encode system settings json")?;
         conn.execute(
             "INSERT INTO metadata (key, value_json) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
@@ -251,7 +254,20 @@ impl MetaStore {
 
     pub async fn save_user(&self, user: &UserRecord) -> Result<()> {
         let conn = self.connection()?;
-        let payload_json = serde_json::to_string(&user.security).context("failed to encode user payload")?;
+        if user.role == UserRole::Admin {
+            let mut statement = conn
+                .prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND id != ?1")
+                .await?;
+            let row = statement
+                .query_row([user.id.clone()])
+                .await
+                .context("failed checking for an existing admin user")?;
+            let existing_admins: i64 =
+                row.get(0).context("failed decoding existing admin count")?;
+            anyhow::ensure!(existing_admins == 0, "only one admin account is allowed");
+        }
+        let payload_json =
+            serde_json::to_string(&user.security).context("failed to encode user payload")?;
         conn.execute(
             "INSERT INTO users (id, username, role, payload_json, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -480,7 +496,11 @@ impl MetaStore {
         Ok(())
     }
 
-    pub async fn revoke_other_auth_sessions(&self, user_id: &str, keep_session_id: &str) -> Result<()> {
+    pub async fn revoke_other_auth_sessions(
+        &self,
+        user_id: &str,
+        keep_session_id: &str,
+    ) -> Result<()> {
         let conn = self.connection()?;
         conn.execute(
             "UPDATE auth_sessions
@@ -506,7 +526,28 @@ impl MetaStore {
         Ok(())
     }
 
-    pub async fn replace_recovery_codes(&self, user_id: &str, code_hashes: &[String]) -> Result<()> {
+    pub async fn set_idle_timeout_for_user_sessions(
+        &self,
+        user_id: &str,
+        idle_timeout_minutes: Option<u32>,
+    ) -> Result<()> {
+        let conn = self.connection()?;
+        conn.execute(
+            "UPDATE auth_sessions
+             SET idle_timeout_minutes = ?2
+             WHERE user_id = ?1 AND revoked_at IS NULL",
+            libsql::params![user_id, idle_timeout_minutes.map(i64::from)],
+        )
+        .await
+        .context("failed updating user auth session idle timeout")?;
+        Ok(())
+    }
+
+    pub async fn replace_recovery_codes(
+        &self,
+        user_id: &str,
+        code_hashes: &[String],
+    ) -> Result<()> {
         let conn = self.connection()?;
         conn.execute(
             "DELETE FROM user_recovery_codes WHERE user_id = ?1",
@@ -534,7 +575,10 @@ impl MetaStore {
         Ok(())
     }
 
-    pub async fn list_active_recovery_code_hashes(&self, user_id: &str) -> Result<Vec<(String, String)>> {
+    pub async fn list_active_recovery_code_hashes(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<(String, String)>> {
         let conn = self.connection()?;
         let statement = conn
             .prepare(
@@ -569,7 +613,8 @@ impl MetaStore {
             .query_row([user_id])
             .await
             .context("failed counting active recovery codes")?;
-        row.get(0).context("failed decoding active recovery code count")
+        row.get(0)
+            .context("failed decoding active recovery code count")
     }
 
     pub async fn mark_recovery_code_used(&self, recovery_code_id: &str) -> Result<()> {
@@ -628,6 +673,14 @@ impl MetaStore {
         )
         .await
         .context("failed pruning old totp steps")?;
+        Ok(())
+    }
+
+    pub async fn clear_used_totp_steps_for_user(&self, user_id: &str) -> Result<()> {
+        let conn = self.connection()?;
+        conn.execute("DELETE FROM used_totp_steps WHERE user_id = ?1", [user_id])
+            .await
+            .context("failed clearing used totp steps for user")?;
         Ok(())
     }
 
@@ -745,7 +798,9 @@ impl MetaStore {
             logs.push(AuditEntry {
                 action_type: row.get(0).context("failed to decode audit action type")?,
                 actor_user_id: row.get(1).context("failed to decode audit actor user id")?,
-                subject_user_id: row.get(2).context("failed to decode audit subject user id")?,
+                subject_user_id: row
+                    .get(2)
+                    .context("failed to decode audit subject user id")?,
                 ip_address: row.get(3).context("failed to decode audit ip")?,
                 success: {
                     let value: i64 = row.get(4).context("failed to decode audit success flag")?;
@@ -786,11 +841,20 @@ impl MetaStore {
         let conn = self.connection()?;
         conn.execute("PRAGMA foreign_keys = ON", ()).await?;
 
-        for statement in SCHEMA_STATEMENTS {
+        conn.execute(SCHEMA_STATEMENTS[0], ())
+            .await
+            .with_context(|| {
+                format!("failed running schema statement: {}", SCHEMA_STATEMENTS[0])
+            })?;
+        self.ensure_schema_version().await?;
+
+        for statement in &SCHEMA_STATEMENTS[1..] {
             conn.execute(statement, ())
                 .await
                 .with_context(|| format!("failed running schema statement: {statement}"))?;
         }
+
+        self.ensure_single_admin().await?;
 
         if self
             .load_system_settings()
@@ -799,9 +863,86 @@ impl MetaStore {
             .audit_detail_limit
             == 0
         {
-            self.save_system_settings(&SystemSettings::default()).await?;
+            self.save_system_settings(&SystemSettings::default())
+                .await?;
         }
 
+        Ok(())
+    }
+
+    async fn ensure_schema_version(&self) -> Result<()> {
+        let conn = self.connection()?;
+        let mut statement = conn
+            .prepare("SELECT value_json FROM metadata WHERE key = ?1 LIMIT 1")
+            .await?;
+        match statement.query_row([SCHEMA_VERSION_KEY]).await {
+            Ok(row) => {
+                let value: String = row.get(0).context("failed to decode schema version json")?;
+                let version: i64 =
+                    serde_json::from_str(&value).context("failed to parse schema version json")?;
+                anyhow::ensure!(version == APP_SCHEMA_VERSION, INCOMPATIBLE_SCHEMA_MESSAGE);
+                Ok(())
+            }
+            Err(libsql::Error::QueryReturnedNoRows) => {
+                if self.has_legacy_schema().await? {
+                    anyhow::bail!(INCOMPATIBLE_SCHEMA_MESSAGE);
+                }
+
+                let encoded = serde_json::to_string(&APP_SCHEMA_VERSION)
+                    .context("failed to encode schema version")?;
+                conn.execute(
+                    "INSERT INTO metadata (key, value_json) VALUES (?1, ?2)",
+                    libsql::params![SCHEMA_VERSION_KEY, encoded],
+                )
+                .await
+                .context("failed writing schema version")?;
+                Ok(())
+            }
+            Err(error) => Err(error).context("failed reading schema version"),
+        }
+    }
+
+    async fn has_legacy_schema(&self) -> Result<bool> {
+        let conn = self.connection()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE name IN (
+                    'users',
+                    'auth_sessions',
+                    'user_recovery_codes',
+                    'used_totp_steps',
+                    'session_records',
+                    'audit_logs',
+                    'audit_rollups'
+                 )",
+            )
+            .await?;
+        let row = statement
+            .query_row(())
+            .await
+            .context("failed checking existing schema objects")?;
+        let count: i64 = row
+            .get(0)
+            .context("failed decoding existing schema object count")?;
+        Ok(count > 0)
+    }
+
+    async fn ensure_single_admin(&self) -> Result<()> {
+        let conn = self.connection()?;
+        let mut statement = conn
+            .prepare("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+            .await?;
+        let row = statement
+            .query_row(())
+            .await
+            .context("failed counting admin users")?;
+        let admin_count: i64 = row.get(0).context("failed decoding admin user count")?;
+        anyhow::ensure!(
+            admin_count <= 1,
+            "metadata database contains multiple admin users; delete .hanagram/app.db and restart"
+        );
         Ok(())
     }
 
@@ -816,7 +957,9 @@ impl MetaStore {
             .query_row(())
             .await
             .context("failed counting audit logs")?;
-        let audit_count: i64 = count_row.get(0).context("failed to decode audit log count")?;
+        let audit_count: i64 = count_row
+            .get(0)
+            .context("failed to decode audit log count")?;
         let overflow = audit_count - i64::from(detail_limit);
         if overflow <= 0 {
             return Ok(());
@@ -929,6 +1072,9 @@ const SCHEMA_STATEMENTS: &[&str] = &[
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_single_admin_role_idx
+     ON users(role)
+     WHERE role = 'admin'",
     "CREATE TABLE IF NOT EXISTS auth_sessions (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -986,7 +1132,8 @@ const SCHEMA_STATEMENTS: &[&str] = &[
 
 fn decode_user_row(row: &libsql::Row) -> Result<UserRecord> {
     let payload_json: String = row.get(3).context("failed to decode user payload json")?;
-    let security = serde_json::from_str(&payload_json).context("failed to parse user payload json")?;
+    let security =
+        serde_json::from_str(&payload_json).context("failed to parse user payload json")?;
     let role_raw: String = row.get(2).context("failed to decode user role")?;
 
     Ok(UserRecord {
@@ -994,8 +1141,12 @@ fn decode_user_row(row: &libsql::Row) -> Result<UserRecord> {
         username: row.get(1).context("failed to decode username")?,
         role: UserRole::parse(&role_raw)?,
         security,
-        created_at_unix: row.get(4).context("failed to decode user created timestamp")?,
-        updated_at_unix: row.get(5).context("failed to decode user updated timestamp")?,
+        created_at_unix: row
+            .get(4)
+            .context("failed to decode user created timestamp")?,
+        updated_at_unix: row
+            .get(5)
+            .context("failed to decode user updated timestamp")?,
     })
 }
 
@@ -1007,27 +1158,51 @@ fn decode_auth_session_row(row: &libsql::Row) -> Result<AuthSessionRecord> {
 
     Ok(AuthSessionRecord {
         id: row.get(0).context("failed to decode auth session id")?,
-        user_id: row.get(1).context("failed to decode auth session user id")?,
-        token_hash: row.get(2).context("failed to decode auth session token hash")?,
+        user_id: row
+            .get(1)
+            .context("failed to decode auth session user id")?,
+        token_hash: row
+            .get(2)
+            .context("failed to decode auth session token hash")?,
         ip_address: row.get(3).context("failed to decode auth session ip")?,
-        user_agent: row.get(4).context("failed to decode auth session user agent")?,
-        issued_at_unix: row.get(5).context("failed to decode auth session issued at")?,
-        expires_at_unix: row.get(6).context("failed to decode auth session expires at")?,
-        last_seen_at_unix: row.get(7).context("failed to decode auth session last seen")?,
+        user_agent: row
+            .get(4)
+            .context("failed to decode auth session user agent")?,
+        issued_at_unix: row
+            .get(5)
+            .context("failed to decode auth session issued at")?,
+        expires_at_unix: row
+            .get(6)
+            .context("failed to decode auth session expires at")?,
+        last_seen_at_unix: row
+            .get(7)
+            .context("failed to decode auth session last seen")?,
         idle_timeout_minutes,
-        revoked_at_unix: row.get(9).context("failed to decode auth session revoked at")?,
+        revoked_at_unix: row
+            .get(9)
+            .context("failed to decode auth session revoked at")?,
     })
 }
 
 fn decode_session_record_row(row: &libsql::Row) -> Result<SessionRecord> {
     Ok(SessionRecord {
         id: row.get(0).context("failed to decode session record id")?,
-        user_id: row.get(1).context("failed to decode session record user id")?,
-        session_key: row.get(2).context("failed to decode session record session key")?,
-        storage_path: row.get(3).context("failed to decode session record storage path")?,
+        user_id: row
+            .get(1)
+            .context("failed to decode session record user id")?,
+        session_key: row
+            .get(2)
+            .context("failed to decode session record session key")?,
+        storage_path: row
+            .get(3)
+            .context("failed to decode session record storage path")?,
         note: row.get(4).context("failed to decode session record note")?,
-        created_at_unix: row.get(5).context("failed to decode session record created at")?,
-        updated_at_unix: row.get(6).context("failed to decode session record updated at")?,
+        created_at_unix: row
+            .get(5)
+            .context("failed to decode session record created at")?,
+        updated_at_unix: row
+            .get(6)
+            .context("failed to decode session record updated at")?,
     })
 }
 
@@ -1073,7 +1248,10 @@ mod tests {
         admin.updated_at_unix = now_unix();
         store.save_user(&admin).await.expect("user should save");
 
-        assert_eq!(store.count_users().await.expect("user count should load"), 1);
+        assert_eq!(
+            store.count_users().await.expect("user count should load"),
+            1
+        );
 
         let loaded_admin = store
             .get_user_by_username("alice")

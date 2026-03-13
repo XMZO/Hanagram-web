@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Hanagram-web contributors
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -16,6 +17,7 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 pub const TOTP_PERIOD_SECONDS: i64 = 30;
 pub const TOTP_DIGITS: u32 = 6;
@@ -28,6 +30,12 @@ const RECOVERY_CODE_SEGMENT_LENGTH: usize = 4;
 const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 type HmacSha1 = Hmac<Sha1>;
+pub type MasterKey = Zeroizing<[u8; MASTER_KEY_BYTES]>;
+pub type SharedMasterKey = Arc<MasterKey>;
+pub type SensitiveBytes = Zeroizing<Vec<u8>>;
+pub type SharedSensitiveBytes = Arc<SensitiveBytes>;
+pub type SensitiveString = Zeroizing<String>;
+pub type SharedSensitiveString = Arc<SensitiveString>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -243,7 +251,10 @@ pub fn evaluate_password_strength(
     let mut reasons = Vec::new();
 
     if password.chars().count() < rules.min_length {
-        reasons.push(format!("password must be at least {} characters", rules.min_length));
+        reasons.push(format!(
+            "password must be at least {} characters",
+            rules.min_length
+        ));
     }
     if rules.require_uppercase && !password.chars().any(|ch| ch.is_ascii_uppercase()) {
         reasons.push(String::from("password must contain an uppercase letter"));
@@ -283,23 +294,23 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     bytes
 }
 
-pub fn generate_master_key() -> [u8; MASTER_KEY_BYTES] {
+pub fn generate_master_key() -> MasterKey {
     let mut key = [0_u8; MASTER_KEY_BYTES];
     OsRng.fill_bytes(&mut key);
-    key
+    Zeroizing::new(key)
 }
 
-pub fn derive_kek(password: &str, salt: &[u8], policy: &ArgonPolicy) -> Result<[u8; 32]> {
+pub fn derive_kek(password: &str, salt: &[u8], policy: &ArgonPolicy) -> Result<MasterKey> {
     ensure!(!salt.is_empty(), "kek salt cannot be empty");
     let argon2 = policy.argon2()?;
     let mut output = [0_u8; 32];
     argon2
         .hash_password_into(password.as_bytes(), salt, &mut output)
         .map_err(|error| anyhow!("argon2 key derivation failed: {error}"))?;
-    Ok(output)
+    Ok(Zeroizing::new(output))
 }
 
-pub fn encrypt_bytes(key: &[u8; 32], plaintext: &[u8]) -> Result<EncryptedBlob> {
+pub fn encrypt_bytes(key: &[u8], plaintext: &[u8]) -> Result<EncryptedBlob> {
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|error| anyhow!("invalid aes key: {error}"))?;
     let nonce = random_bytes(AES_GCM_NONCE_BYTES);
@@ -313,7 +324,7 @@ pub fn encrypt_bytes(key: &[u8; 32], plaintext: &[u8]) -> Result<EncryptedBlob> 
     })
 }
 
-pub fn decrypt_bytes(key: &[u8; 32], blob: &EncryptedBlob) -> Result<Vec<u8>> {
+pub fn decrypt_bytes(key: &[u8], blob: &EncryptedBlob) -> Result<SensitiveBytes> {
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|error| anyhow!("invalid aes key: {error}"))?;
     let nonce = decode_base64_urlsafe(&blob.nonce_b64)?;
@@ -326,6 +337,7 @@ pub fn decrypt_bytes(key: &[u8; 32], blob: &EncryptedBlob) -> Result<Vec<u8>> {
 
     cipher
         .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+        .map(Zeroizing::new)
         .map_err(|error| anyhow!("aes-gcm decryption failed: {error}"))
 }
 
@@ -333,10 +345,10 @@ pub fn wrap_master_key(
     password: &str,
     salt: &[u8],
     policy: &ArgonPolicy,
-    master_key: &[u8; 32],
+    master_key: &[u8],
 ) -> Result<EncryptedBlob> {
     let kek = derive_kek(password, salt, policy)?;
-    encrypt_bytes(&kek, master_key)
+    encrypt_bytes(kek.as_slice(), master_key)
 }
 
 pub fn unwrap_master_key(
@@ -344,13 +356,34 @@ pub fn unwrap_master_key(
     salt: &[u8],
     policy: &ArgonPolicy,
     wrapped_key: &EncryptedBlob,
-) -> Result<[u8; 32]> {
+) -> Result<MasterKey> {
     let kek = derive_kek(password, salt, policy)?;
-    let plaintext = decrypt_bytes(&kek, wrapped_key)?;
+    let plaintext = decrypt_bytes(kek.as_slice(), wrapped_key)?;
     let master_key: [u8; 32] = plaintext
+        .as_slice()
         .try_into()
         .map_err(|_| anyhow!("wrapped master key had an unexpected length"))?;
-    Ok(master_key)
+    Ok(Zeroizing::new(master_key))
+}
+
+pub fn into_sensitive_bytes(bytes: Vec<u8>) -> SensitiveBytes {
+    Zeroizing::new(bytes)
+}
+
+pub fn share_sensitive_bytes(bytes: SensitiveBytes) -> SharedSensitiveBytes {
+    Arc::new(bytes)
+}
+
+pub fn share_master_key(master_key: MasterKey) -> SharedMasterKey {
+    Arc::new(master_key)
+}
+
+pub fn into_sensitive_string(value: String) -> SensitiveString {
+    Zeroizing::new(value)
+}
+
+pub fn share_sensitive_string(value: SensitiveString) -> SharedSensitiveString {
+    Arc::new(value)
 }
 
 pub fn generate_totp_secret() -> String {
@@ -555,13 +588,23 @@ mod tests {
             .expect("password hashing should succeed");
 
         assert_eq!(
-            verify_password("CorrectHorseBatteryStaple!1", &hash, old_policy.version, &old_policy)
-                .expect("password verification should succeed"),
+            verify_password(
+                "CorrectHorseBatteryStaple!1",
+                &hash,
+                old_policy.version,
+                &old_policy
+            )
+            .expect("password verification should succeed"),
             PasswordVerification::Valid
         );
         assert_eq!(
-            verify_password("CorrectHorseBatteryStaple!1", &hash, old_policy.version, &next_policy)
-                .expect("password verification should succeed"),
+            verify_password(
+                "CorrectHorseBatteryStaple!1",
+                &hash,
+                old_policy.version,
+                &next_policy
+            )
+            .expect("password verification should succeed"),
             PasswordVerification::ValidNeedsRehash
         );
         assert_eq!(
@@ -575,11 +618,11 @@ mod tests {
     fn aes_gcm_round_trip_keeps_plaintext_intact() {
         let key = generate_master_key();
         let encrypted =
-            encrypt_bytes(&key, b"hanagram").expect("aes-gcm encryption should succeed");
+            encrypt_bytes(key.as_slice(), b"hanagram").expect("aes-gcm encryption should succeed");
         let decrypted =
-            decrypt_bytes(&key, &encrypted).expect("aes-gcm decryption should succeed");
+            decrypt_bytes(key.as_slice(), &encrypted).expect("aes-gcm decryption should succeed");
 
-        assert_eq!(decrypted, b"hanagram");
+        assert_eq!(decrypted.as_slice(), b"hanagram");
     }
 
     #[test]
@@ -587,7 +630,7 @@ mod tests {
         let policy = ArgonPolicy::minimum();
         let salt = random_bytes(16);
         let master_key = generate_master_key();
-        let wrapped = wrap_master_key("MyStrongPassword!9", &salt, &policy, &master_key)
+        let wrapped = wrap_master_key("MyStrongPassword!9", &salt, &policy, master_key.as_slice())
             .expect("master key wrapping should succeed");
         let unwrapped = unwrap_master_key("MyStrongPassword!9", &salt, &policy, &wrapped)
             .expect("master key unwrapping should succeed");

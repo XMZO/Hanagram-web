@@ -3,17 +3,18 @@
 
 use std::collections::HashSet;
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use axum::http::{HeaderMap, header};
 use base64::Engine;
 use chrono::Utc;
 use hanagram_web::security::{
-    ArgonPolicy, EncryptedBlob, PasswordVerification, RECOVERY_CODE_COUNT, TOTP_PERIOD_SECONDS,
-    TotpVerification, build_totp_uri, decrypt_bytes, encrypt_bytes,
-    evaluate_password_strength, generate_master_key, generate_recovery_codes,
-    generate_session_token, generate_totp_secret, hash_password, hash_recovery_code,
-    hash_session_token, random_bytes, unwrap_master_key, verify_password, verify_recovery_code,
-    verify_totp, wrap_master_key,
+    ArgonPolicy, EncryptedBlob, MasterKey, PasswordVerification, RECOVERY_CODE_COUNT,
+    SensitiveString, SharedSensitiveString, TOTP_PERIOD_SECONDS, TotpVerification, build_totp_uri,
+    decrypt_bytes, encrypt_bytes, evaluate_password_strength, generate_master_key,
+    generate_recovery_codes, generate_session_token, generate_totp_secret, hash_password,
+    hash_recovery_code, hash_session_token, into_sensitive_string, random_bytes,
+    share_sensitive_string, unwrap_master_key, verify_password, verify_recovery_code, verify_totp,
+    wrap_master_key,
 };
 use hanagram_web::store::{
     AuthSessionRecord, MetaStore, NewAuditEntry, SystemSettings, UserRecord, UserRole,
@@ -35,26 +36,24 @@ pub struct AuthenticatedSession {
     pub requires_totp_setup: bool,
 }
 
-#[derive(Clone, Debug)]
 pub struct RegistrationResult {
     pub user: UserRecord,
     pub auth_session: AuthSessionRecord,
     pub session_token: String,
+    pub master_key: MasterKey,
 }
 
-#[derive(Clone, Debug)]
 pub struct LoginResult {
     pub auth_session: AuthSessionRecord,
     pub session_token: String,
-    pub master_key: [u8; 32],
+    pub master_key: MasterKey,
     pub requires_totp_setup: bool,
 }
 
-#[derive(Clone, Debug)]
 pub struct TotpSetupMaterial {
-    pub secret: String,
-    pub otp_auth_uri: String,
-    pub recovery_codes: Vec<String>,
+    pub secret: SharedSensitiveString,
+    pub otp_auth_uri: SharedSensitiveString,
+    pub recovery_codes: Vec<SharedSensitiveString>,
 }
 
 #[derive(Debug)]
@@ -74,46 +73,36 @@ pub async fn register_user(
     user_agent: Option<&str>,
 ) -> Result<RegistrationResult> {
     let username = normalize_username(username)?;
-    if store
+    let existing_user = store
         .get_user_by_username(&username)
         .await
-        .context("failed checking for existing username")?
-        .is_some()
-    {
-        bail!("username already exists");
-    }
+        .context("failed checking for existing username")?;
+    let reactivated_existing_user = existing_user.is_some();
 
-    let is_first_user = store.count_users().await? == 0;
-    let role = if is_first_user {
-        UserRole::Admin
+    let mut user = if let Some(existing_user) = existing_user {
+        ensure!(
+            existing_user.security.password_hash.is_none(),
+            "username already exists"
+        );
+        existing_user
     } else {
-        UserRole::User
+        let is_first_user = store.count_users().await? == 0;
+        let role = if is_first_user {
+            UserRole::Admin
+        } else {
+            UserRole::User
+        };
+        UserRecord::new(username.clone(), role)
     };
     let strength = evaluate_password_strength(
         password,
         &settings.password_strength_rules,
-        role == UserRole::Admin,
+        user.role == UserRole::Admin,
     );
     ensure!(strength.valid, strength.reasons.join("; "));
 
     let argon_policy = settings.argon_policy.clone();
-    let password_hash = hash_password(password, &argon_policy)?;
-    let kek_salt = random_bytes(16);
-    let master_key = generate_master_key();
-    let wrapped_master_key = wrap_master_key(password, &kek_salt, &argon_policy, &master_key)?;
-
-    let mut user = UserRecord::new(username.clone(), role);
-    user.security.password_hash = Some(password_hash);
-    user.security.password_argon_version = argon_policy.version;
-    user.security.kek_salt_b64 = Some(
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&kek_salt),
-    );
-    user.security.encrypted_master_key_json = Some(
-        serde_json::to_string(&wrapped_master_key)
-            .context("failed to encode wrapped master key payload")?,
-    );
-    user.security.password_needs_reset = false;
-    user.updated_at_unix = Utc::now().timestamp();
+    let master_key = initialize_user_credentials(&mut user, password, &argon_policy)?;
     store.save_user(&user).await?;
 
     let session_token = generate_session_token();
@@ -136,7 +125,8 @@ pub async fn register_user(
             success: true,
             details_json: json!({
                 "username": user.username,
-                "role": match user.role { UserRole::Admin => "admin", UserRole::User => "user" }
+                "role": match user.role { UserRole::Admin => "admin", UserRole::User => "user" },
+                "reactivated_existing_user": reactivated_existing_user
             })
             .to_string(),
         })
@@ -146,7 +136,35 @@ pub async fn register_user(
         user,
         auth_session,
         session_token,
+        master_key,
     })
+}
+
+pub fn initialize_user_credentials(
+    user: &mut UserRecord,
+    password: &str,
+    argon_policy: &ArgonPolicy,
+) -> Result<MasterKey> {
+    let password_hash = hash_password(password, argon_policy)?;
+    let kek_salt = random_bytes(16);
+    let master_key = generate_master_key();
+    let wrapped_master_key =
+        wrap_master_key(password, &kek_salt, argon_policy, master_key.as_slice())?;
+
+    user.security.password_hash = Some(password_hash);
+    user.security.password_argon_version = argon_policy.version;
+    user.security.kek_salt_b64 =
+        Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&kek_salt));
+    user.security.encrypted_master_key_json = Some(
+        serde_json::to_string(&wrapped_master_key)
+            .context("failed to encode wrapped master key payload")?,
+    );
+    user.security.password_needs_reset = false;
+    user.security.login_failures = 0;
+    user.security.lockout_level = 0;
+    user.security.locked_until_unix = None;
+    user.updated_at_unix = Utc::now().timestamp();
+    Ok(master_key)
 }
 
 pub async fn authenticate_user(
@@ -160,7 +178,9 @@ pub async fn authenticate_user(
     user_agent: Option<&str>,
 ) -> Result<LoginResult, LoginError> {
     let Some(mut user) = store
-        .get_user_by_username(&normalize_username(username).map_err(|_| LoginError::InvalidCredentials)?)
+        .get_user_by_username(
+            &normalize_username(username).map_err(|_| LoginError::InvalidCredentials)?,
+        )
         .await
         .map_err(|_| LoginError::InvalidCredentials)?
     else {
@@ -217,12 +237,15 @@ pub async fn authenticate_user(
         PasswordVerification::Valid => {}
     }
 
-    let master_key =
-        load_user_master_key(&user, password, &settings.argon_policy).map_err(|_| LoginError::InvalidCredentials)?;
-    let requires_totp = settings.totp_policy.applies_to(user.role == UserRole::Admin);
+    let master_key = load_user_master_key(&user, password, &settings.argon_policy)
+        .map_err(|_| LoginError::InvalidCredentials)?;
+    let requires_totp = settings
+        .totp_policy
+        .applies_to(user.role == UserRole::Admin);
 
     if user.security.totp_enabled {
-        let secret = decrypt_user_totp_secret(&user, &master_key).map_err(|_| LoginError::InvalidSecondFactor)?;
+        let secret = decrypt_user_totp_secret(&user, master_key.as_slice())
+            .map_err(|_| LoginError::InvalidSecondFactor)?;
         let recent_steps = store
             .list_recent_totp_steps(&user.id, now.div_euclid(TOTP_PERIOD_SECONDS) - 2)
             .await
@@ -231,7 +254,7 @@ pub async fn authenticate_user(
         let mut satisfied = false;
 
         if let Some(code) = mfa_code.filter(|value| !value.trim().is_empty()) {
-            match verify_totp(&secret, code, now, 1, &used_steps)
+            match verify_totp(secret.as_str(), code, now, 1, &used_steps)
                 .map_err(|_| LoginError::InvalidSecondFactor)?
             {
                 TotpVerification::Valid { matched_step } => {
@@ -348,9 +371,11 @@ pub async fn resolve_authenticated_session(
         return Ok(None);
     }
     if let Some(idle_timeout) = auth_session.idle_timeout_minutes {
-        let idle_cutoff = auth_session.last_seen_at_unix + i64::from(idle_timeout) * 60;
-        if idle_cutoff <= now {
-            return Ok(None);
+        if idle_timeout != 0 {
+            let idle_cutoff = auth_session.last_seen_at_unix + i64::from(idle_timeout) * 60;
+            if idle_cutoff <= now {
+                return Ok(None);
+            }
         }
     }
 
@@ -362,9 +387,14 @@ pub async fn resolve_authenticated_session(
         .touch_auth_session(&auth_session.id, now, extract_client_ip(headers).as_deref())
         .await
         .ok();
-    let recovery_codes_remaining = store.count_active_recovery_codes(&user.id).await.unwrap_or(0);
-    let requires_totp_setup =
-        settings.totp_policy.applies_to(user.role == UserRole::Admin) && !user.security.totp_enabled;
+    let recovery_codes_remaining = store
+        .count_active_recovery_codes(&user.id)
+        .await
+        .unwrap_or(0);
+    let requires_totp_setup = settings
+        .totp_policy
+        .applies_to(user.role == UserRole::Admin)
+        && !user.security.totp_enabled;
 
     Ok(Some(AuthenticatedSession {
         user,
@@ -380,7 +410,7 @@ pub async fn change_password(
     user: &mut UserRecord,
     current_password: &str,
     new_password: &str,
-) -> Result<[u8; 32]> {
+) -> Result<MasterKey> {
     let strength = evaluate_password_strength(
         new_password,
         &settings.password_strength_rules,
@@ -391,13 +421,17 @@ pub async fn change_password(
     let master_key = load_user_master_key(user, current_password, &settings.argon_policy)?;
     let new_hash = hash_password(new_password, &settings.argon_policy)?;
     let new_salt = random_bytes(16);
-    let wrapped_master_key = wrap_master_key(new_password, &new_salt, &settings.argon_policy, &master_key)?;
+    let wrapped_master_key = wrap_master_key(
+        new_password,
+        &new_salt,
+        &settings.argon_policy,
+        master_key.as_slice(),
+    )?;
 
     user.security.password_hash = Some(new_hash);
     user.security.password_argon_version = settings.argon_policy.version;
-    user.security.kek_salt_b64 = Some(
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&new_salt),
-    );
+    user.security.kek_salt_b64 =
+        Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&new_salt));
     user.security.encrypted_master_key_json =
         Some(serde_json::to_string(&wrapped_master_key).context("failed to encode wrapped key")?);
     user.security.password_needs_reset = false;
@@ -420,14 +454,17 @@ pub async fn change_password(
 pub async fn save_totp_setup(
     store: &MetaStore,
     user: &mut UserRecord,
-    master_key: &[u8; 32],
+    master_key: &[u8],
     secret: &str,
-    recovery_codes: &[String],
+    recovery_codes: &[SharedSensitiveString],
 ) -> Result<()> {
     let encrypted_secret = encrypt_bytes(master_key, secret.as_bytes())?;
     let mut recovery_code_hashes = Vec::new();
     for code in recovery_codes {
-        recovery_code_hashes.push(hash_recovery_code(code, &ArgonPolicy::minimum())?);
+        recovery_code_hashes.push(hash_recovery_code(
+            code.as_ref().as_str(),
+            &ArgonPolicy::minimum(),
+        )?);
     }
 
     user.security.totp_secret_json =
@@ -456,9 +493,17 @@ pub async fn save_totp_setup(
 }
 
 pub fn build_totp_setup_material(username: &str) -> TotpSetupMaterial {
-    let secret = generate_totp_secret();
-    let recovery_codes = generate_recovery_codes(RECOVERY_CODE_COUNT);
-    let otp_auth_uri = build_totp_uri("Hanagram Web", username, &secret);
+    let secret = share_sensitive_string(into_sensitive_string(generate_totp_secret()));
+    let recovery_codes = generate_recovery_codes(RECOVERY_CODE_COUNT)
+        .into_iter()
+        .map(into_sensitive_string)
+        .map(share_sensitive_string)
+        .collect();
+    let otp_auth_uri = share_sensitive_string(into_sensitive_string(build_totp_uri(
+        "Hanagram Web",
+        username,
+        secret.as_ref().as_str(),
+    )));
 
     TotpSetupMaterial {
         secret,
@@ -476,9 +521,7 @@ pub fn build_auth_cookie(token: &str, max_age_seconds: i64, secure: bool) -> Str
 
 pub fn clear_auth_cookie(secure: bool) -> String {
     let secure_fragment = if secure { "; Secure" } else { "" };
-    format!(
-        "{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_fragment}"
-    )
+    format!("{AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_fragment}")
 }
 
 pub fn normalize_username(raw: &str) -> Result<String> {
@@ -497,7 +540,10 @@ pub fn normalize_username(raw: &str) -> Result<String> {
         .collect::<String>();
 
     ensure!(!normalized.is_empty(), "username cannot be empty");
-    ensure!(normalized.len() >= 3, "username must be at least 3 characters");
+    ensure!(
+        normalized.len() >= 3,
+        "username must be at least 3 characters"
+    );
     Ok(normalized)
 }
 
@@ -546,7 +592,7 @@ pub fn load_user_master_key(
     user: &UserRecord,
     password: &str,
     argon_policy: &ArgonPolicy,
-) -> Result<[u8; 32]> {
+) -> Result<MasterKey> {
     let wrapped_master_key = user
         .security
         .encrypted_master_key_json
@@ -560,21 +606,24 @@ pub fn load_user_master_key(
     let salt = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(salt)
         .context("failed to decode kek salt")?;
-    let wrapped_master_key =
-        serde_json::from_str::<EncryptedBlob>(wrapped_master_key).context("failed to parse wrapped master key")?;
+    let wrapped_master_key = serde_json::from_str::<EncryptedBlob>(wrapped_master_key)
+        .context("failed to parse wrapped master key")?;
 
     unwrap_master_key(password, &salt, argon_policy, &wrapped_master_key)
 }
 
-pub fn decrypt_user_totp_secret(user: &UserRecord, master_key: &[u8; 32]) -> Result<String> {
+pub fn decrypt_user_totp_secret(user: &UserRecord, master_key: &[u8]) -> Result<SensitiveString> {
     let payload = user
         .security
         .totp_secret_json
         .as_deref()
         .context("user does not have an encrypted totp secret")?;
-    let payload = serde_json::from_str::<EncryptedBlob>(payload).context("failed to parse totp secret payload")?;
+    let payload = serde_json::from_str::<EncryptedBlob>(payload)
+        .context("failed to parse totp secret payload")?;
     let plaintext = decrypt_bytes(master_key, &payload)?;
-    String::from_utf8(plaintext).map_err(|error| anyhow!("invalid utf-8 totp secret: {error}"))
+    let secret = String::from_utf8(plaintext.as_slice().to_vec())
+        .map_err(|error| anyhow!("invalid utf-8 totp secret: {error}"))?;
+    Ok(into_sensitive_string(secret))
 }
 
 async fn issue_session_token(
@@ -586,10 +635,7 @@ async fn issue_session_token(
     user_agent: Option<&str>,
 ) -> Result<AuthSessionRecord> {
     let expires_at = Utc::now().timestamp() + i64::from(settings.session_absolute_ttl_hours) * 3600;
-    let idle_timeout_minutes = user
-        .security
-        .preferred_idle_timeout_minutes
-        .or(settings.max_idle_timeout_minutes);
+    let idle_timeout_minutes = effective_idle_timeout_minutes(user, settings);
     store
         .create_auth_session(
             &user.id,
@@ -600,6 +646,19 @@ async fn issue_session_token(
             idle_timeout_minutes,
         )
         .await
+}
+
+fn effective_idle_timeout_minutes(user: &UserRecord, settings: &SystemSettings) -> Option<u32> {
+    match (
+        user.security.preferred_idle_timeout_minutes,
+        settings.max_idle_timeout_minutes,
+    ) {
+        (Some(0), None) => Some(0),
+        (Some(0), Some(maximum)) => Some(maximum),
+        (Some(minutes), Some(maximum)) => Some(minutes.min(maximum)),
+        (Some(minutes), None) => Some(minutes),
+        (None, system_default) => system_default,
+    }
 }
 
 async fn register_failed_login(
@@ -690,4 +749,60 @@ async fn audit_login_success(
             details_json: details.to_string(),
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hanagram_web::store::{SystemSettings, UserRole};
+
+    #[tokio::test]
+    async fn register_user_reactivates_existing_passwordless_account() {
+        let store = MetaStore::open_memory()
+            .await
+            .expect("metadata store should open");
+        let settings = SystemSettings::default();
+
+        let original_user = UserRecord::new("alice", UserRole::Admin);
+        let original_user_id = original_user.id.clone();
+        store
+            .save_user(&original_user)
+            .await
+            .expect("placeholder user should save");
+
+        let result = register_user(
+            &store,
+            &settings,
+            "alice",
+            "ResetPassword!42",
+            Some("127.0.0.1"),
+            Some("test-agent"),
+        )
+        .await
+        .expect("registration should succeed");
+
+        assert_eq!(result.user.id, original_user_id);
+        assert_eq!(result.user.role, UserRole::Admin);
+        assert!(result.user.security.password_hash.is_some());
+        assert!(result.user.security.encrypted_master_key_json.is_some());
+    }
+
+    #[test]
+    fn effective_idle_timeout_keeps_never_without_cap() {
+        let settings = SystemSettings::default();
+        let mut user = UserRecord::new("idle-user", UserRole::User);
+        user.security.preferred_idle_timeout_minutes = Some(0);
+
+        assert_eq!(effective_idle_timeout_minutes(&user, &settings), Some(0));
+    }
+
+    #[test]
+    fn effective_idle_timeout_clamps_to_system_cap() {
+        let mut settings = SystemSettings::default();
+        settings.max_idle_timeout_minutes = Some(60);
+        let mut user = UserRecord::new("idle-user", UserRole::User);
+        user.security.preferred_idle_timeout_minutes = Some(480);
+
+        assert_eq!(effective_idle_timeout_minutes(&user, &settings), Some(60));
+    }
 }

@@ -6,21 +6,19 @@ FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl AS builder
 WORKDIR /app
 
 COPY Cargo.toml ./
+COPY Cargo.lock ./
 COPY src ./src
 COPY templates ./templates
 
-RUN cargo build --release
+RUN cargo build --release --locked --bin hanagram-web --bin reset_admin
 
-FROM alpine:3.21
+FROM scratch
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates wget
-
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/hanagram-web /usr/local/bin/hanagram-web
-COPY templates ./templates
-
-RUN mkdir -p /app/sessions
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/hanagram-web ./hanagram-web
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/reset_admin ./reset_admin
 
 ENV BIND_ADDR=0.0.0.0:8080
 ENV SESSIONS_DIR=./sessions
@@ -28,6 +26,6 @@ ENV RUST_LOG=info
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/app/hanagram-web", "healthcheck", "http://127.0.0.1:8080/health"]
 
-CMD ["hanagram-web"]
+CMD ["/app/hanagram-web"]

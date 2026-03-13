@@ -71,10 +71,27 @@
                     <div class="rounded-[1.2rem] border border-line bg-white px-4 py-3">
                         <strong>{{ idle_label }}:</strong> {{ idle_timeout }}
                     </div>
+                    <div class="rounded-[1.2rem] border border-line bg-white px-4 py-3">
+                        <strong>{{ idle_effective_label }}:</strong> {{ idle_effective_timeout }}
+                    </div>
                 </div>
                 <a href="{{ totp_setup_href }}" class="mt-4 inline-flex rounded-[1rem] border border-line bg-latte px-4 py-2 text-sm">
                     {{ totp_setup_label }}
                 </a>
+                <div class="mt-5 rounded-[1.2rem] border border-line bg-white p-4">
+                    <h3 class="font-semibold text-ink">{{ idle_form_title }}</h3>
+                    <form method="post" action="{{ idle_form_action }}" class="mt-3 grid gap-3">
+                        <input type="hidden" name="lang" value="{{ lang }}">
+                        <label class="block">
+                            <span class="mb-2 block text-sm font-medium text-ink/70">{{ idle_input_label }}</span>
+                            <input type="number" min="0" name="idle_timeout_minutes" value="{{ idle_timeout_field_value }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none focus:border-sage">
+                        </label>
+                        <p class="text-xs leading-6 text-ink/55">{{ idle_timeout_hint }}</p>
+                        <button type="submit" class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold">
+                            {{ idle_submit_label }}
+                        </button>
+                    </form>
+                </div>
             </article>
 
             <article class="rounded-[1.7rem] border border-line bg-paper p-5">
