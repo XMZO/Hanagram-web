@@ -169,6 +169,8 @@ pub(crate) async fn render_settings_page(
             expires_at: format_unix_timestamp(session.expires_at_unix),
         })
         .collect();
+    let active_session_count = active_sessions.len();
+    let other_session_count = active_sessions.iter().filter(|session| !session.is_current).count();
 
     let totp_status = match language {
         Language::En if authenticated.user.security.totp_enabled => "Enabled",
@@ -524,7 +526,9 @@ pub(crate) async fn render_settings_page(
         },
     );
     context.insert("sessions", &active_sessions);
-    context.insert("active_session_count", &active_sessions.len());
+    context.insert("active_session_count", &active_session_count);
+    context.insert("has_other_sessions", &(other_session_count > 0));
+    context.insert("other_session_count", &other_session_count);
     context.insert("current_session_id", &authenticated.auth_session.id);
     context.insert("current_user_id", &authenticated.user.id);
     context.insert(
@@ -596,6 +600,31 @@ pub(crate) async fn render_settings_page(
         &match language {
             Language::En => "Current Session",
             Language::ZhCn => "当前会话",
+        },
+    );
+    context.insert(
+        "access_auto_logout_description",
+        &match language {
+            Language::En => "Set how long idle browser sessions may stay signed in before the system asks for a new login.",
+            Language::ZhCn => "这里决定浏览器登录在空闲多长时间后需要重新登录。",
+        },
+    );
+    context.insert(
+        "access_current_only_hint",
+        &match language {
+            Language::En => "Only this browser session is active right now.",
+            Language::ZhCn => "当前只有你正在使用的这个浏览器会话在线。",
+        },
+    );
+    context.insert(
+        "access_other_sessions_hint",
+        &match language {
+            Language::En => {
+                format!("{other_session_count} other browser session(s) are still active and can be forced offline here.")
+            }
+            Language::ZhCn => format!(
+                "当前还有 {other_session_count} 个其他浏览器会话在线，可以在这里强制下线。"
+            ),
         },
     );
     context.insert("banner", &banner);
