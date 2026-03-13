@@ -114,17 +114,111 @@
             render();
         }
 
+        function activateAdminUserPanel(rawUserId) {
+            const navItems = Array.from(document.querySelectorAll("[data-admin-user-nav]"));
+            const panels = Array.from(document.querySelectorAll("[data-admin-user-panel]"));
+            const detailEmpty = document.querySelector("[data-admin-user-detail-empty]");
+            const visibleNavItems = navItems.filter((item) => !item.classList.contains("hidden"));
+            const activeUserId = visibleNavItems.some((item) => item.dataset.adminUserNav === rawUserId)
+                ? rawUserId
+                : (visibleNavItems[0]?.dataset.adminUserNav || "");
+
+            navItems.forEach((item) => {
+                const active = activeUserId !== "" && item.dataset.adminUserNav === activeUserId;
+                item.classList.toggle("border-sage", active);
+                item.classList.toggle("bg-mist", active);
+                item.classList.toggle("shadow-[0_12px_26px_rgba(140,163,140,0.16)]", active);
+                item.classList.toggle("text-ink", active);
+                item.classList.toggle("border-line", !active);
+                item.classList.toggle("bg-white/90", !active);
+                item.classList.toggle("text-ink/72", !active);
+                item.setAttribute("aria-selected", active ? "true" : "false");
+            });
+
+            panels.forEach((panel) => {
+                panel.classList.toggle("hidden", panel.dataset.adminUserPanel !== activeUserId);
+            });
+
+            if (detailEmpty) {
+                detailEmpty.classList.toggle("hidden", activeUserId !== "");
+            }
+
+            return activeUserId;
+        }
+
+        function attachAdminUserWorkspace() {
+            const form = document.querySelector("[data-admin-users-filter-form]");
+            const input = document.querySelector("[data-admin-user-search]");
+            const clearButton = document.querySelector("[data-admin-user-clear]");
+            const emptyState = document.querySelector("[data-admin-users-empty]");
+            const navItems = Array.from(document.querySelectorAll("[data-admin-user-nav]"));
+
+            if (!input || navItems.length === 0) {
+                return;
+            }
+
+            let currentUserId = navItems[0]?.dataset.adminUserNav || "";
+            navItems.forEach((item) => {
+                item.addEventListener("click", () => {
+                    currentUserId = item.dataset.adminUserNav || "";
+                    currentUserId = activateAdminUserPanel(currentUserId);
+                });
+            });
+
+            const render = () => {
+                const needle = input.value.trim().toLowerCase();
+                let visible = 0;
+                let firstVisibleUserId = "";
+                let currentStillVisible = false;
+
+                navItems.forEach((item) => {
+                    const haystack = (item.dataset.adminSearchText || item.textContent || "").toLowerCase();
+                    const matched = needle === "" || haystack.includes(needle);
+                    item.classList.toggle("hidden", !matched);
+                    if (!matched) {
+                        return;
+                    }
+                    visible += 1;
+                    if (!firstVisibleUserId) {
+                        firstVisibleUserId = item.dataset.adminUserNav || "";
+                    }
+                    if ((item.dataset.adminUserNav || "") === currentUserId) {
+                        currentStillVisible = true;
+                    }
+                });
+
+                if (!currentStillVisible) {
+                    currentUserId = firstVisibleUserId;
+                }
+
+                if (emptyState) {
+                    emptyState.classList.toggle("hidden", visible !== 0);
+                }
+                setAdminCount("[data-admin-users-filter-count]", visible);
+                currentUserId = activateAdminUserPanel(currentUserId);
+            };
+
+            if (form) {
+                form.addEventListener("submit", (event) => {
+                    event.preventDefault();
+                    render();
+                });
+            }
+            input.addEventListener("input", render);
+            clearButton?.addEventListener("click", () => {
+                input.value = "";
+                render();
+                input.focus();
+            });
+
+            currentUserId = activateAdminUserPanel(currentUserId);
+            render();
+        }
+
         window.addEventListener("DOMContentLoaded", () => {
             activateAdminPane();
             decorateAdminMetadata();
-            attachAdminCollectionFilter({
-                formSelector: "[data-admin-users-filter-form]",
-                inputSelector: "[data-admin-user-search]",
-                clearSelector: "[data-admin-user-clear]",
-                itemSelector: "[data-admin-user-card]",
-                emptySelector: "[data-admin-users-empty]",
-                countSelector: "[data-admin-users-filter-count]"
-            });
+            attachAdminUserWorkspace();
             attachAdminCollectionFilter({
                 formSelector: "[data-admin-audit-filter-form]",
                 inputSelector: "[data-admin-audit-search]",
@@ -213,56 +307,60 @@
                         <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ users_description }}</p>
                     </div>
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
-                        <div class="grid gap-4">
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <h3 class="text-lg font-semibold sm:text-xl">{{ create_user_title }}</h3>
-                            <form method="post" action="/admin/users/create" class="mt-4 grid gap-3">
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ create_user_label }}</button>
-                            </form>
-                        </article>
-
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <div class="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                    <h3 class="text-lg font-semibold sm:text-xl">{{ recent_auth_title }}</h3>
-                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ recent_auth_description }}</p>
+                    <div class="grid gap-4 xl:grid-cols-[19rem,minmax(0,1fr)]">
+                        <aside class="grid gap-4 xl:sticky xl:top-4 xl:self-start">
+                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <h3 class="text-lg font-semibold">{{ create_user_title }}</h3>
+                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-ink/55">{{ total_users }}</span>
                                 </div>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recent_auth_activity | length }}</span>
-                            </div>
+                                <form method="post" action="/admin/users/create" class="mt-4 grid gap-3">
+                                    <input type="hidden" name="lang" value="{{ lang }}">
+                                    <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[0.95rem] border border-line bg-paper px-4 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
+                                    <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-4 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
+                                    <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ create_user_label }}</button>
+                                </form>
+                            </article>
 
-                            {% if recent_auth_activity | length == 0 %}
-                            <div class="mt-4 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ recent_auth_empty_label }}</div>
-                            {% else %}
-                            <div class="mt-4 grid max-h-[24rem] gap-3 overflow-y-auto pr-1">
-                                {% for item in recent_auth_activity %}
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <p class="text-sm font-semibold text-ink">{{ item.username }}</p>
-                                        <span class="rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] {% if item.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                            {% if item.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
-                                        </span>
-                                        {% if item.passkey_label %}
-                                        <span class="rounded-full border border-line bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/72">{{ user_passkeys_label }} {{ item.passkey_label }}</span>
-                                        {% endif %}
+                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <h3 class="text-lg font-semibold">{{ recent_auth_title }}</h3>
+                                        <p class="mt-1 text-sm leading-6 text-ink/62">{{ recent_auth_description }}</p>
                                     </div>
-                                    <p class="mt-2 text-sm leading-7 text-ink/70">{{ item.method_label }}</p>
-                                    {% if item.reason %}
-                                    <p class="mt-2 text-xs leading-6 text-ink/58">{{ audit_reason_label }} {{ item.reason }}</p>
-                                    {% endif %}
-                                    <div class="mt-3 flex flex-wrap gap-2 text-xs text-ink/55">
-                                        <span class="rounded-full border border-line bg-white px-3 py-1">{{ user_last_ip_label }} {{ item.ip_address | default(value='-') }}</span>
-                                        <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_time_label }} <span data-admin-unix-time="{{ item.created_at_unix }}">{{ item.created_at_unix }}</span></span>
-                                    </div>
+                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recent_auth_activity | length }}</span>
                                 </div>
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-                        </article>
-                        </div>
+
+                                {% if recent_auth_activity | length == 0 %}
+                                <div class="mt-4 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-6 text-sm text-ink/55">{{ recent_auth_empty_label }}</div>
+                                {% else %}
+                                <div class="mt-4 max-h-[19rem] divide-y divide-line/70 overflow-y-auto rounded-[1rem] border border-line bg-paper">
+                                    {% for item in recent_auth_activity %}
+                                    <div class="px-4 py-3">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <p class="truncate text-sm font-semibold text-ink">{{ item.username }}</p>
+                                                    <span class="rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.16em] {% if item.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+                                                        {% if item.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
+                                                    </span>
+                                                </div>
+                                                <p class="mt-1 text-sm leading-6 text-ink/68">{{ item.method_label }}</p>
+                                                <div class="mt-2 flex flex-wrap gap-2 text-xs text-ink/52">
+                                                    <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ user_last_ip_label }} {{ item.ip_address | default(value='-') }}</span>
+                                                    {% if item.reason %}
+                                                    <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ audit_reason_label }} {{ item.reason }}</span>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <p class="shrink-0 text-xs text-ink/48"><span data-admin-unix-time="{{ item.created_at_unix }}">{{ item.created_at_unix }}</span></p>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </article>
+                        </aside>
 
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
                             <div class="flex flex-wrap items-center gap-3">
