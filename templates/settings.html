@@ -90,17 +90,51 @@
         }
 
         function serializeRegistrationCredential(credential) {
+            const response = credential.response;
+            const attestationObject = response.attestationObject;
+            const clientDataJSON = response.clientDataJSON;
+            const authenticatorData = typeof response.getAuthenticatorData === "function"
+                ? response.getAuthenticatorData()
+                : null;
+            const publicKey = typeof response.getPublicKey === "function"
+                ? response.getPublicKey()
+                : null;
+            const publicKeyAlgorithm = typeof response.getPublicKeyAlgorithm === "function"
+                ? response.getPublicKeyAlgorithm()
+                : null;
+
+            if (!attestationObject || !clientDataJSON || !authenticatorData || !publicKey || typeof publicKeyAlgorithm !== "number") {
+                throw new Error("incomplete-passkey-registration-response");
+            }
+
             return {
                 id: credential.id,
                 rawId: bufferToBase64Url(credential.rawId),
                 type: credential.type,
+                authenticatorAttachment: credential.authenticatorAttachment || null,
                 response: {
-                    attestationObject: bufferToBase64Url(credential.response.attestationObject),
-                    clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
-                    transports: typeof credential.response.getTransports === "function" ? credential.response.getTransports() : null
+                    attestationObject: bufferToBase64Url(attestationObject),
+                    clientDataJSON: bufferToBase64Url(clientDataJSON),
+                    authenticatorData: bufferToBase64Url(authenticatorData),
+                    publicKey: bufferToBase64Url(publicKey),
+                    publicKeyAlgorithm,
+                    transports: typeof response.getTransports === "function" ? response.getTransports() : []
                 },
                 clientExtensionResults: credential.getClientExtensionResults()
             };
+        }
+
+        function describePasskeyCreateError(error, button) {
+            if (!(error instanceof Error)) {
+                return button?.dataset.failed || "";
+            }
+            if (error.message === "incomplete-passkey-registration-response") {
+                return button?.dataset.incompleteResponse || error.message;
+            }
+            if (error.name === "NotAllowedError") {
+                return button?.dataset.notAllowed || error.message || "";
+            }
+            return error.message || button?.dataset.failed || "";
         }
 
         window.addEventListener("DOMContentLoaded", () => {
@@ -188,7 +222,7 @@
 
                     window.location.href = finishPayload.redirect_to || "/settings#security";
                 } catch (error) {
-                    setPasskeyFeedback(error instanceof Error ? error.message : passkeyButton?.dataset.failed || "", true);
+                    setPasskeyFeedback(describePasskeyCreateError(error, passkeyButton), true);
                 } finally {
                     if (passkeyButton) { passkeyButton.disabled = false; }
                 }
@@ -396,12 +430,19 @@
                                 <p class="text-sm leading-7 text-ink/62">
                                     {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
                                 </p>
+                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3 text-xs leading-6 text-ink/58">
+                                    <p class="font-semibold text-ink/72">{{ passkey_provider_notes_title }}</p>
+                                    <p class="mt-2">{{ passkey_google_hint }}</p>
+                                    <p class="mt-2">{{ passkey_bitwarden_hint }}</p>
+                                </div>
                                 <button
                                     type="submit"
                                     data-passkey-register-button
                                     data-starting="{{ i18n.login_passkey_start_message }}"
                                     data-awaiting="{{ i18n.login_passkey_finish_message }}"
                                     data-failed="{{ i18n.passkey_registration_failed_message }}"
+                                    data-not-allowed="{{ i18n.passkey_registration_not_allowed_message }}"
+                                    data-incomplete-response="{{ i18n.passkey_registration_incomplete_response_message }}"
                                     data-unsupported="{{ passkey_unavailable_message }}"
                                     data-missing-label="{{ i18n.passkey_label_required_message }}"
                                     {% if not passkey_supported %}disabled{% endif %}

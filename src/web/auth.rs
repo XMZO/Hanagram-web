@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
+use crate::i18n::TranslationSet;
 use crate::web_auth;
 use webauthn_rp::AuthenticatedCredential;
 use webauthn_rp::request::auth::{
@@ -15,6 +16,7 @@ use webauthn_rp::request::{
 };
 use webauthn_rp::response::auth::Authentication;
 use webauthn_rp::response::register::Registration;
+use webauthn_rp::response::register::error::RegCeremonyErr;
 
 use super::middleware::{
     cache_user_master_key, clear_auth_session_sensitive_state, clear_invalid_cookie_state,
@@ -191,6 +193,21 @@ fn passkey_public_key_options<T: serde::Serialize>(client_state: &T) -> Result<s
         "publicKey": serde_json::to_value(client_state)
             .context("failed to serialize passkey client state")?
     }))
+}
+
+fn passkey_registration_error_message(
+    translations: &TranslationSet,
+    error: &RegCeremonyErr,
+) -> &'static str {
+    match error {
+        RegCeremonyErr::Timeout => translations.passkey_challenge_expired_message,
+        RegCeremonyErr::OriginMismatch
+        | RegCeremonyErr::TopOriginMismatch
+        | RegCeremonyErr::RpIdHashMismatch => {
+            translations.passkey_registration_site_mismatch_message
+        }
+        _ => translations.passkey_registration_failed_message,
+    }
 }
 
 async fn render_login_page(
@@ -461,6 +478,18 @@ pub(crate) async fn render_settings_page(
     context.insert(
         "passkey_name_placeholder",
         &translations.settings_passkey_name_placeholder,
+    );
+    context.insert(
+        "passkey_provider_notes_title",
+        &translations.settings_passkey_provider_notes_title,
+    );
+    context.insert(
+        "passkey_google_hint",
+        &translations.settings_passkey_google_hint,
+    );
+    context.insert(
+        "passkey_bitwarden_hint",
+        &translations.settings_passkey_bitwarden_hint,
     );
     context.insert(
         "passkey_add_label",
@@ -1547,22 +1576,25 @@ async fn start_passkey_registration_handler(
             );
         }
     };
-    let (state, client_state) =
-        match PublicKeyCredentialCreationOptions::passkey(&rp_id, user_entity, exclude_credentials)
-            .start_ceremony()
-        {
-            Ok(values) => values,
-            Err(error) => {
-                warn!(
-                    "failed starting passkey registration for {}: {}",
-                    user.username, error
-                );
-                return json_error_response(
-                    StatusCode::BAD_REQUEST,
-                    translations.passkey_registration_failed_message,
-                );
-            }
-        };
+    let (state, client_state) = match PublicKeyCredentialCreationOptions::second_factor(
+        &rp_id,
+        user_entity,
+        exclude_credentials,
+    )
+    .start_ceremony()
+    {
+        Ok(values) => values,
+        Err(error) => {
+            warn!(
+                "failed starting passkey registration for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
 
     let registration_id = Uuid::new_v4().to_string();
     app_state.passkey_registrations.write().await.insert(
@@ -1683,7 +1715,7 @@ async fn finish_passkey_registration_handler(
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
-                translations.passkey_registration_failed_message,
+                translations.passkey_registration_incomplete_response_message,
             );
         }
     };
@@ -1710,7 +1742,7 @@ async fn finish_passkey_registration_handler(
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
-                translations.passkey_registration_failed_message,
+                passkey_registration_error_message(translations, &error),
             );
         }
     };
