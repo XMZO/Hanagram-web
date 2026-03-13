@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use super::{admin, auth};
 use super::shared::*;
+use super::{admin, auth};
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -16,7 +16,7 @@ pub(crate) fn routes() -> Router<AppState> {
 pub(crate) async fn maybe_dispatch_bot_notification(
     meta_store: &MetaStoreHandle,
     http_client: &HttpClient,
-    session: &SessionInfo,
+    session: &SessionNotificationContext,
     otp: &OtpMessage,
 ) {
     let Some(code) = otp.code.clone() else {
@@ -146,7 +146,9 @@ async fn render_notification_workspace_page(
     return_to: Option<&str>,
 ) -> std::result::Result<Html<String>, StatusCode> {
     match return_to {
-        Some("settings") => auth::render_settings_page(app_state, authenticated, language, banner).await,
+        Some("settings") => {
+            auth::render_settings_page(app_state, authenticated, language, banner).await
+        }
         Some("admin") if authenticated.user.role == UserRole::Admin => {
             admin::render_admin_page(app_state, authenticated, language, banner).await
         }

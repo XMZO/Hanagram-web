@@ -13,8 +13,14 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin", get(admin_page_handler))
         .route("/admin/users/create", post(admin_create_user_handler))
-        .route("/admin/users/{user_id}/unlock", post(admin_unlock_user_handler))
-        .route("/admin/users/{user_id}/reset", post(admin_reset_user_handler))
+        .route(
+            "/admin/users/{user_id}/unlock",
+            post(admin_unlock_user_handler),
+        )
+        .route(
+            "/admin/users/{user_id}/reset",
+            post(admin_reset_user_handler),
+        )
         .route(
             "/admin/users/{user_id}/sessions/revoke",
             post(admin_revoke_user_sessions_handler),
@@ -67,7 +73,11 @@ pub(crate) async fn render_admin_page(
         enforcement_mode_value(system_settings.password_strength_rules.mode),
     );
     let bot_settings = normalized_bot_settings(
-        authenticated.user.security.bot_notification_settings.clone(),
+        authenticated
+            .user
+            .security
+            .bot_notification_settings
+            .clone(),
     );
     let telegram_api_status = telegram_api_status_summary(&system_settings, language);
 
@@ -992,6 +1002,18 @@ async fn admin_reset_user_handler(
             shared_state.remove(session_record_id);
         }
     }
+    for session_record_id in &reset_result.session_record_ids {
+        if let Err(error) = app_state
+            .runtime_cache
+            .remove_session(session_record_id)
+            .await
+        {
+            warn!(
+                "failed deleting runtime cache for reset session {}: {}",
+                session_record_id, error
+            );
+        }
+    }
     let _ = app_state
         .meta_store
         .record_audit(&NewAuditEntry {
@@ -1041,7 +1063,11 @@ async fn admin_revoke_user_sessions_handler(
     }
 
     if let Some(session_id) = form.session_id.as_deref() {
-        if let Ok(Some(session)) = app_state.meta_store.get_auth_session_by_id(session_id).await {
+        if let Ok(Some(session)) = app_state
+            .meta_store
+            .get_auth_session_by_id(session_id)
+            .await
+        {
             if session.user_id == user_id {
                 let _ = app_state.meta_store.revoke_auth_session(session_id).await;
                 clear_auth_session_sensitive_state(&app_state, session_id).await;
@@ -1049,7 +1075,11 @@ async fn admin_revoke_user_sessions_handler(
             }
         }
     } else {
-        if let Ok(sessions) = app_state.meta_store.list_auth_sessions_for_user(&user_id).await {
+        if let Ok(sessions) = app_state
+            .meta_store
+            .list_auth_sessions_for_user(&user_id)
+            .await
+        {
             for session in sessions {
                 clear_auth_session_sensitive_state(&app_state, &session.id).await;
             }
@@ -1121,25 +1151,23 @@ async fn admin_save_system_settings_handler(
 
     let mut settings = app_state.system_settings.read().await.clone();
     let previous_telegram_api = settings.telegram_api.clone();
-    settings.telegram_api = match parse_telegram_api_settings(
-        &form.telegram_api_id,
-        &form.telegram_api_hash,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            return match render_admin_page(
-                &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(error.to_string())),
-            )
-            .await
-            {
-                Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
-                Err(status) => status.into_response(),
-            };
-        }
-    };
+    settings.telegram_api =
+        match parse_telegram_api_settings(&form.telegram_api_id, &form.telegram_api_hash) {
+            Ok(value) => value,
+            Err(error) => {
+                return match render_admin_page(
+                    &app_state,
+                    &authenticated,
+                    language,
+                    Some(PageBanner::error(error.to_string())),
+                )
+                .await
+                {
+                    Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+                    Err(status) => status.into_response(),
+                };
+            }
+        };
     settings.registration_policy = parse_registration_policy(&form.registration_policy);
     settings.public_registration_open = form.public_registration_open.is_some();
     settings.session_absolute_ttl_hours = form.session_absolute_ttl_hours.max(1);

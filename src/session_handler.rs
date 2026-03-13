@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::CStr;
 use std::future::Future;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
@@ -35,6 +35,9 @@ const PEER_SUBTYPE_MEGAGROUP: u8 = 4;
 const PEER_SUBTYPE_BROADCAST: u8 = 8;
 const PEER_SUBTYPE_GIGAGROUP: u8 = 12;
 const SQLITE_MAIN_DB: &[u8] = b"main\0";
+const SERVICE_NOTIFICATION_USER_ID: i64 = 777000;
+const SESSION_PEER_HARD_LIMIT: usize = 256;
+const SESSION_CHANNEL_HARD_LIMIT: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PersistedSessionData {
@@ -72,7 +75,28 @@ impl From<PersistedSessionData> for SessionData {
     }
 }
 
-pub(crate) struct LoadedSession(Mutex<PersistedSessionData>);
+#[derive(Clone, Debug)]
+struct SessionRuntimeData {
+    snapshot: PersistedSessionData,
+    peer_lru: VecDeque<PeerId>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct SessionRuntimeStats {
+    pub peer_count: usize,
+    pub channel_count: usize,
+    pub dc_option_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct SessionPruneStats {
+    pub before_peer_count: usize,
+    pub after_peer_count: usize,
+    pub before_channel_count: usize,
+    pub after_channel_count: usize,
+}
+
+pub(crate) struct LoadedSession(Mutex<SessionRuntimeData>);
 
 pub(crate) struct SessionLoadResult {
     pub session: LoadedSession,
@@ -87,22 +111,55 @@ impl Default for LoadedSession {
 
 impl From<SessionData> for LoadedSession {
     fn from(session_data: SessionData) -> Self {
-        Self(Mutex::new(session_data.into()))
+        Self(Mutex::new(SessionRuntimeData::from(
+            PersistedSessionData::from(session_data),
+        )))
     }
 }
 
 impl From<PersistedSessionData> for LoadedSession {
     fn from(session_data: PersistedSessionData) -> Self {
-        Self(Mutex::new(session_data))
+        Self(Mutex::new(SessionRuntimeData::from(session_data)))
     }
 }
 
 impl LoadedSession {
     pub(crate) fn snapshot(&self) -> PersistedSessionData {
-        self.lock_data().clone()
+        self.lock_data().snapshot.clone()
     }
 
-    fn lock_data(&self) -> MutexGuard<'_, PersistedSessionData> {
+    pub(crate) fn runtime_stats(&self) -> SessionRuntimeStats {
+        let data = self.lock_data();
+        SessionRuntimeStats {
+            peer_count: data.snapshot.peer_infos.len(),
+            channel_count: data.snapshot.updates_state.channels.len(),
+            dc_option_count: data.snapshot.dc_options.len(),
+        }
+    }
+
+    pub(crate) fn prune_runtime_state(
+        &self,
+        max_peer_infos: usize,
+        max_channel_states: usize,
+    ) -> SessionPruneStats {
+        let mut data = self.lock_data();
+        let before_peer_count = data.snapshot.peer_infos.len();
+        let before_channel_count = data.snapshot.updates_state.channels.len();
+        prune_peer_infos_locked(&mut data, max_peer_infos);
+        cap_channel_states(
+            &mut data.snapshot.updates_state.channels,
+            max_channel_states,
+        );
+
+        SessionPruneStats {
+            before_peer_count,
+            after_peer_count: data.snapshot.peer_infos.len(),
+            before_channel_count,
+            after_channel_count: data.snapshot.updates_state.channels.len(),
+        }
+    }
+
+    fn lock_data(&self) -> MutexGuard<'_, SessionRuntimeData> {
         match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -112,31 +169,35 @@ impl LoadedSession {
 
 impl Session for LoadedSession {
     fn home_dc_id(&self) -> i32 {
-        self.lock_data().home_dc
+        self.lock_data().snapshot.home_dc
     }
 
     fn set_home_dc_id(&self, dc_id: i32) -> SessionFuture<'_, ()> {
         Box::pin(async move {
-            self.lock_data().home_dc = dc_id;
+            self.lock_data().snapshot.home_dc = dc_id;
         })
     }
 
     fn dc_option(&self, dc_id: i32) -> Option<DcOption> {
-        self.lock_data().dc_options.get(&dc_id).cloned()
+        self.lock_data().snapshot.dc_options.get(&dc_id).cloned()
     }
 
     fn set_dc_option(&self, dc_option: &DcOption) -> SessionFuture<'_, ()> {
         let dc_option = dc_option.clone();
         Box::pin(async move {
-            self.lock_data().dc_options.insert(dc_option.id, dc_option);
+            self.lock_data()
+                .snapshot
+                .dc_options
+                .insert(dc_option.id, dc_option);
         })
     }
 
     fn peer(&self, peer: PeerId) -> SessionFuture<'_, Option<PeerInfo>> {
         Box::pin(async move {
-            let data = self.lock_data();
+            let mut data = self.lock_data();
             if peer.kind() == PeerKind::UserSelf {
-                return data
+                if let Some(info) = data
+                    .snapshot
                     .peer_infos
                     .values()
                     .find(|info| {
@@ -148,22 +209,36 @@ impl Session for LoadedSession {
                             }
                         )
                     })
-                    .cloned();
+                    .cloned()
+                {
+                    touch_peer_lru(&mut data.peer_lru, info.id());
+                    return Some(info);
+                }
+                return None;
             }
 
-            data.peer_infos.get(&peer).cloned()
+            let value = data.snapshot.peer_infos.get(&peer).cloned();
+            if value.is_some() {
+                touch_peer_lru(&mut data.peer_lru, peer);
+            }
+            value
         })
     }
 
     fn cache_peer(&self, peer: &PeerInfo) -> SessionFuture<'_, ()> {
         let peer = peer.clone();
         Box::pin(async move {
-            self.lock_data().peer_infos.insert(peer.id(), peer);
+            let mut data = self.lock_data();
+            data.snapshot.peer_infos.insert(peer.id(), peer.clone());
+            touch_peer_lru(&mut data.peer_lru, peer.id());
+            if data.snapshot.peer_infos.len() > SESSION_PEER_HARD_LIMIT {
+                prune_peer_infos_locked(&mut data, SESSION_PEER_HARD_LIMIT);
+            }
         })
     }
 
     fn updates_state(&self) -> SessionFuture<'_, UpdatesState> {
-        Box::pin(async move { self.lock_data().updates_state.clone() })
+        Box::pin(async move { self.lock_data().snapshot.updates_state.clone() })
     }
 
     fn set_update_state(&self, update: UpdateState) -> SessionFuture<'_, ()> {
@@ -171,24 +246,99 @@ impl Session for LoadedSession {
             let mut data = self.lock_data();
             match update {
                 UpdateState::All(updates_state) => {
-                    data.updates_state = updates_state;
+                    data.snapshot.updates_state = updates_state;
+                    cap_channel_states(
+                        &mut data.snapshot.updates_state.channels,
+                        SESSION_CHANNEL_HARD_LIMIT,
+                    );
                 }
                 UpdateState::Primary { pts, date, seq } => {
-                    data.updates_state.pts = pts;
-                    data.updates_state.date = date;
-                    data.updates_state.seq = seq;
+                    data.snapshot.updates_state.pts = pts;
+                    data.snapshot.updates_state.date = date;
+                    data.snapshot.updates_state.seq = seq;
                 }
                 UpdateState::Secondary { qts } => {
-                    data.updates_state.qts = qts;
+                    data.snapshot.updates_state.qts = qts;
                 }
                 UpdateState::Channel { id, pts } => {
-                    data.updates_state
+                    data.snapshot
+                        .updates_state
                         .channels
                         .retain(|channel| channel.id != id);
-                    data.updates_state.channels.push(ChannelState { id, pts });
+                    data.snapshot
+                        .updates_state
+                        .channels
+                        .push(ChannelState { id, pts });
+                    cap_channel_states(
+                        &mut data.snapshot.updates_state.channels,
+                        SESSION_CHANNEL_HARD_LIMIT,
+                    );
                 }
             }
         })
+    }
+}
+
+impl From<PersistedSessionData> for SessionRuntimeData {
+    fn from(snapshot: PersistedSessionData) -> Self {
+        Self {
+            peer_lru: snapshot.peer_infos.keys().copied().collect(),
+            snapshot,
+        }
+    }
+}
+
+fn touch_peer_lru(peer_lru: &mut VecDeque<PeerId>, peer_id: PeerId) {
+    if let Some(position) = peer_lru.iter().position(|existing| *existing == peer_id) {
+        peer_lru.remove(position);
+    }
+    peer_lru.push_back(peer_id);
+}
+
+fn prune_peer_infos_locked(data: &mut SessionRuntimeData, max_peer_infos: usize) {
+    let essential_peer_ids = data
+        .snapshot
+        .peer_infos
+        .iter()
+        .filter_map(|(peer_id, peer_info)| peer_is_essential(peer_info).then_some(*peer_id))
+        .collect::<HashSet<_>>();
+    let target_len = max_peer_infos.max(essential_peer_ids.len());
+    if data.snapshot.peer_infos.len() <= target_len {
+        data.peer_lru
+            .retain(|peer_id| data.snapshot.peer_infos.contains_key(peer_id));
+        return;
+    }
+
+    let mut keep = essential_peer_ids;
+    for peer_id in data.peer_lru.iter().rev() {
+        if keep.len() >= target_len {
+            break;
+        }
+        keep.insert(*peer_id);
+    }
+
+    data.snapshot
+        .peer_infos
+        .retain(|peer_id, _| keep.contains(peer_id));
+    data.peer_lru
+        .retain(|peer_id| data.snapshot.peer_infos.contains_key(peer_id));
+}
+
+fn cap_channel_states(channels: &mut Vec<ChannelState>, max_channel_states: usize) {
+    let overflow = channels.len().saturating_sub(max_channel_states);
+    if overflow > 0 {
+        channels.drain(..overflow);
+    }
+}
+
+fn peer_is_essential(peer: &PeerInfo) -> bool {
+    match peer {
+        PeerInfo::User {
+            is_self: Some(true),
+            ..
+        } => true,
+        PeerInfo::User { id, .. } => *id == SERVICE_NOTIFICATION_USER_ID,
+        PeerInfo::Chat { .. } | PeerInfo::Channel { .. } => false,
     }
 }
 
@@ -1003,5 +1153,60 @@ mod tests {
         let decoded = load_session(sqlite_bytes.as_slice()).expect("load sqlite bytes");
         assert!(decoded.needs_persist);
         assert_eq!(decoded.session.snapshot(), session.snapshot());
+    }
+
+    #[test]
+    fn prune_runtime_state_keeps_self_and_service_peers() {
+        let mut data = SessionData::default();
+        data.home_dc = 2;
+        data.peer_infos.insert(
+            PeerId::user(1000),
+            PeerInfo::User {
+                id: 1000,
+                auth: Some(PeerAuth::from_hash(1)),
+                bot: Some(false),
+                is_self: Some(true),
+            },
+        );
+        data.peer_infos.insert(
+            PeerId::user(SERVICE_NOTIFICATION_USER_ID),
+            PeerInfo::User {
+                id: SERVICE_NOTIFICATION_USER_ID,
+                auth: Some(PeerAuth::from_hash(2)),
+                bot: Some(false),
+                is_self: Some(false),
+            },
+        );
+        for index in 0..32_i64 {
+            let user_id = 20_000 + index;
+            data.peer_infos.insert(
+                PeerId::user(user_id),
+                PeerInfo::User {
+                    id: user_id,
+                    auth: Some(PeerAuth::from_hash(user_id)),
+                    bot: Some(false),
+                    is_self: Some(false),
+                },
+            );
+        }
+        data.updates_state.channels = (0..32)
+            .map(|index| ChannelState {
+                id: 1_000 + index,
+                pts: index as i32,
+            })
+            .collect();
+
+        let session = LoadedSession::from(data);
+        let prune = session.prune_runtime_state(4, 3);
+        let snapshot = session.snapshot();
+
+        assert_eq!(prune.after_peer_count, 4);
+        assert_eq!(prune.after_channel_count, 3);
+        assert!(snapshot.peer_infos.contains_key(&PeerId::user(1000)));
+        assert!(
+            snapshot
+                .peer_infos
+                .contains_key(&PeerId::user(SERVICE_NOTIFICATION_USER_ID))
+        );
     }
 }

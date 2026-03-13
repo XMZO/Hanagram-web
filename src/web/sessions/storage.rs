@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
+use std::io::Cursor;
+
 use crate::web::middleware;
 use crate::web::shared::*;
 
 use super::runtime::register_session_record;
+
+const PACKED_SESSION_PREFIX: &[u8] = b"hanagram-session-pack:v1\0";
+const SESSION_ZSTD_LEVEL: i32 = 9;
 
 fn user_sessions_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
     runtime.users_dir.join(user_id)
@@ -145,9 +150,34 @@ pub(crate) async fn hydrate_session_record(
 
 fn decrypt_session_storage_bytes(master_key: &[u8], raw: &[u8]) -> Result<(SensitiveBytes, bool)> {
     match serde_json::from_slice::<EncryptedBlob>(raw) {
-        Ok(payload) => Ok((decrypt_bytes(master_key, &payload)?, false)),
+        Ok(payload) => Ok((
+            unpack_session_storage_bytes(decrypt_bytes(master_key, &payload)?.as_slice())?,
+            false,
+        )),
         Err(_) => Ok((into_sensitive_bytes(raw.to_vec()), true)),
     }
+}
+
+fn pack_session_storage_bytes(plaintext: &[u8]) -> Result<SensitiveBytes> {
+    let compressed = zstd::stream::encode_all(Cursor::new(plaintext), SESSION_ZSTD_LEVEL)
+        .context("failed compressing session payload")?;
+    if compressed.len() + PACKED_SESSION_PREFIX.len() + 16 >= plaintext.len() {
+        return Ok(into_sensitive_bytes(plaintext.to_vec()));
+    }
+
+    let mut packed = Vec::with_capacity(PACKED_SESSION_PREFIX.len() + compressed.len());
+    packed.extend_from_slice(PACKED_SESSION_PREFIX);
+    packed.extend_from_slice(&compressed);
+    Ok(into_sensitive_bytes(packed))
+}
+
+fn unpack_session_storage_bytes(raw: &[u8]) -> Result<SensitiveBytes> {
+    let Some(compressed) = raw.strip_prefix(PACKED_SESSION_PREFIX) else {
+        return Ok(into_sensitive_bytes(raw.to_vec()));
+    };
+    let decompressed = zstd::stream::decode_all(Cursor::new(compressed))
+        .context("failed decompressing session payload")?;
+    Ok(into_sensitive_bytes(decompressed))
 }
 
 async fn write_encrypted_session_bytes(
@@ -155,7 +185,8 @@ async fn write_encrypted_session_bytes(
     encrypted_path: &Path,
     plaintext: &[u8],
 ) -> Result<()> {
-    let payload = encrypt_bytes(master_key, plaintext)?;
+    let packed = pack_session_storage_bytes(plaintext)?;
+    let payload = encrypt_bytes(master_key, packed.as_slice())?;
     let encoded =
         serde_json::to_vec(&payload).context("failed to encode encrypted session payload")?;
     tokio::fs::write(encrypted_path, encoded)
@@ -259,19 +290,20 @@ pub(crate) async fn export_owned_session_file(
     authenticated: &AuthenticatedSession,
     session_id: &str,
 ) -> Response {
-    let session = match load_owned_session_record(app_state, &authenticated.user.id, session_id).await
-    {
-        Ok(record) => record,
-        Err(error) => {
-            warn!("failed loading session record for export: {}", error);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let session =
+        match load_owned_session_record(app_state, &authenticated.user.id, session_id).await {
+            Ok(record) => record,
+            Err(error) => {
+                warn!("failed loading session record for export: {}", error);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
 
     let Some(session) = session else {
         return (StatusCode::NOT_FOUND, String::from("session not found")).into_response();
     };
-    let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await else {
+    let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await
+    else {
         return (
             StatusCode::LOCKED,
             String::from("session data is locked; sign out and sign in again"),
@@ -417,5 +449,16 @@ mod tests {
             decrypt_session_note("legacy note", &master_key).expect("accept legacy note");
         assert_eq!(legacy_decrypted, "legacy note");
         assert!(legacy_plaintext);
+    }
+
+    #[test]
+    fn packed_session_storage_round_trips_compressed_payloads() {
+        let plaintext = vec![b'A'; 8 * 1024];
+        let packed = pack_session_storage_bytes(&plaintext).expect("pack session payload");
+        assert!(packed.len() < plaintext.len());
+
+        let unpacked =
+            unpack_session_storage_bytes(packed.as_slice()).expect("unpack session payload");
+        assert_eq!(unpacked.as_slice(), plaintext.as_slice());
     }
 }

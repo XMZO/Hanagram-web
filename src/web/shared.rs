@@ -12,7 +12,7 @@ pub(crate) use anyhow::{Context as AnyhowContext, Result};
 pub(crate) use axum::extract::{
     Extension, Form, Multipart, Path as AxumPath, Query, Request, State,
 };
-pub(crate) use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+pub(crate) use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 pub(crate) use axum::middleware::Next;
 pub(crate) use axum::response::{Html, IntoResponse, Redirect, Response};
 pub(crate) use axum::routing::{get, post};
@@ -22,10 +22,10 @@ pub(crate) use chrono::{DateTime, Utc};
 pub(crate) use grammers_client::client::{LoginToken, PasswordToken, UpdatesConfiguration};
 pub(crate) use grammers_client::tl;
 pub(crate) use grammers_client::{
-    sender::SenderPoolFatHandle, Client, InvocationError, SenderPool, SignInError,
+    Client, InvocationError, SenderPool, SignInError, sender::SenderPoolFatHandle,
 };
-pub(crate) use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
 pub(crate) use grammers_session::Session;
+pub(crate) use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
 pub(crate) use phonenumber::Mode as PhoneNumberMode;
 pub(crate) use qrcodegen::{QrCode, QrCodeEcc};
 pub(crate) use regex::Regex;
@@ -44,27 +44,29 @@ pub(crate) use uuid::Uuid;
 
 pub(crate) use hanagram_web::account_reset::reset_user_account;
 pub(crate) use hanagram_web::security::{
-    decrypt_bytes, encrypt_bytes, evaluate_password_strength, hash_session_token,
-    into_sensitive_bytes, share_master_key, share_sensitive_bytes, verify_totp, EncryptedBlob,
-    EnforcementMode, MasterKey, RegistrationPolicy, SensitiveBytes, SharedMasterKey,
-    SharedSensitiveBytes, SharedSensitiveString, TotpVerification,
+    EncryptedBlob, EnforcementMode, MasterKey, RegistrationPolicy, SensitiveBytes, SharedMasterKey,
+    SharedSensitiveBytes, SharedSensitiveString, TotpVerification, decrypt_bytes, encrypt_bytes,
+    evaluate_password_strength, hash_session_token, into_sensitive_bytes, share_master_key,
+    share_sensitive_bytes, verify_totp,
 };
 pub(crate) use hanagram_web::store::{
     AuthSessionRecord, BotNotificationSettings, MetaStore, NewAuditEntry, SessionRecord,
     SystemSettings, TelegramApiSettings, UserRole,
 };
 
-pub(crate) use crate::i18n::{language_options, Language};
+pub(crate) use super::runtime_cache::{RuntimeCache, RuntimeCacheHandle};
+pub(crate) use crate::i18n::{Language, language_options};
 pub(crate) use crate::session_handler::{
-    export_sqlite_session_bytes, export_telethon_string_session, load_session,
-    load_telethon_string_session, serialize_session, LoadedSession,
+    LoadedSession, export_sqlite_session_bytes, export_telethon_string_session, load_session,
+    load_telethon_string_session, serialize_session,
 };
-pub(crate) use crate::state::{OtpMessage, SessionInfo, SessionStatus, SharedState};
+pub(crate) use crate::state::{
+    OtpMessage, SessionInfo, SessionNotificationContext, SessionStatus, SharedState,
+};
 pub(crate) use crate::web_auth::{
-    build_auth_cookie, build_totp_setup_material, clear_auth_cookie, extract_client_ip,
-    extract_user_agent, find_cookie, initialize_user_credentials, normalize_username,
-    resolve_authenticated_session, AuthenticatedSession, LoginError, RegistrationResult,
-    AUTH_COOKIE_NAME,
+    AUTH_COOKIE_NAME, AuthenticatedSession, LoginError, RegistrationResult, build_auth_cookie,
+    build_totp_setup_material, clear_auth_cookie, extract_client_ip, extract_user_agent,
+    find_cookie, initialize_user_credentials, normalize_username, resolve_authenticated_session,
 };
 
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
@@ -86,13 +88,22 @@ pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 10] = [
         "phone_login.html",
         include_str!("../../templates/phone_login.html"),
     ),
-    ("qr_login.html", include_str!("../../templates/qr_login.html")),
-    ("register.html", include_str!("../../templates/register.html")),
+    (
+        "qr_login.html",
+        include_str!("../../templates/qr_login.html"),
+    ),
+    (
+        "register.html",
+        include_str!("../../templates/register.html"),
+    ),
     (
         "session_setup.html",
         include_str!("../../templates/session_setup.html"),
     ),
-    ("settings.html", include_str!("../../templates/settings.html")),
+    (
+        "settings.html",
+        include_str!("../../templates/settings.html"),
+    ),
     (
         "totp_setup.html",
         include_str!("../../templates/totp_setup.html"),
@@ -111,6 +122,7 @@ pub(crate) type UserKeyCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
 pub(crate) struct AppState {
     pub(crate) shared_state: SharedState,
     pub(crate) session_workers: SessionWorkers,
+    pub(crate) runtime_cache: RuntimeCacheHandle,
     pub(crate) tera: Arc<Tera>,
     pub(crate) meta_store: MetaStoreHandle,
     pub(crate) system_settings: Arc<RwLock<SystemSettings>>,
@@ -133,6 +145,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) sessions_dir: PathBuf,
     pub(crate) users_dir: PathBuf,
     pub(crate) app_data_dir: PathBuf,
+    pub(crate) runtime_cache_dir: PathBuf,
     pub(crate) meta_db_path: PathBuf,
 }
 
@@ -626,7 +639,9 @@ pub(crate) fn selected_option_label(options: &[SelectOption], value: &str) -> St
         .unwrap_or_else(|| value.to_owned())
 }
 
-pub(crate) fn normalized_bot_settings(mut settings: BotNotificationSettings) -> BotNotificationSettings {
+pub(crate) fn normalized_bot_settings(
+    mut settings: BotNotificationSettings,
+) -> BotNotificationSettings {
     settings.bot_token = settings.bot_token.trim().to_owned();
     settings.chat_id = settings.chat_id.trim().to_owned();
     settings.template = if settings.template.trim().is_empty() {
@@ -641,9 +656,7 @@ pub(crate) fn bot_settings_ready(settings: &BotNotificationSettings) -> bool {
     settings.enabled && !settings.bot_token.is_empty() && !settings.chat_id.is_empty()
 }
 
-pub(crate) fn configured_telegram_api(
-    settings: &SystemSettings,
-) -> Option<TelegramApiSettings> {
+pub(crate) fn configured_telegram_api(settings: &SystemSettings) -> Option<TelegramApiSettings> {
     let api_id = settings.telegram_api.api_id?;
     let api_hash = settings.telegram_api.api_hash.trim();
     if api_id <= 0 || api_hash.is_empty() {
@@ -680,10 +693,7 @@ pub(crate) fn parse_telegram_api_settings(
     Ok(TelegramApiSettings { api_id, api_hash })
 }
 
-pub(crate) fn telegram_api_status_summary(
-    settings: &SystemSettings,
-    language: Language,
-) -> String {
+pub(crate) fn telegram_api_status_summary(settings: &SystemSettings, language: Language) -> String {
     if configured_telegram_api(settings).is_some() {
         match language {
             Language::En => String::from("Configured"),
@@ -699,7 +709,9 @@ pub(crate) fn telegram_api_status_summary(
 
 pub(crate) fn telegram_api_missing_message(language: Language) -> &'static str {
     match language {
-        Language::En => "Telegram API credentials are not configured yet. Ask the admin to save API ID and API hash first.",
+        Language::En => {
+            "Telegram API credentials are not configured yet. Ask the admin to save API ID and API hash first."
+        }
         Language::ZhCn => "Telegram API 凭据还没有配置，请先让管理员保存 API ID 和 API Hash。",
     }
 }
@@ -869,7 +881,9 @@ pub(crate) fn set_cookie_header(value: &str) -> Result<HeaderValue, StatusCode> 
 }
 
 pub(crate) fn detect_language(headers: &HeaderMap, query_lang: Option<&str>) -> Language {
-    let accept_language = headers.get(header::ACCEPT_LANGUAGE).and_then(|value| value.to_str().ok());
+    let accept_language = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok());
     Language::detect(query_lang, accept_language)
 }
 

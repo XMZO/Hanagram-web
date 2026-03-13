@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use crate::web::{dashboard, middleware};
 use crate::web::shared::*;
+use crate::web::{dashboard, middleware};
 
 use super::runtime::set_session_note;
 use super::storage::{
@@ -14,11 +14,23 @@ use super::storage::{
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/sessions/new", get(session_setup_page_handler))
-        .route("/sessions/import/string", post(import_string_session_handler))
+        .route(
+            "/sessions/import/string",
+            post(import_string_session_handler),
+        )
         .route("/sessions/import/upload", post(import_session_file_handler))
-        .route("/sessions/{session_id}/note", post(update_session_note_handler))
-        .route("/sessions/{session_id}/delete", post(delete_session_handler))
-        .route("/sessions/{session_id}/rename", post(rename_session_handler))
+        .route(
+            "/sessions/{session_id}/note",
+            post(update_session_note_handler),
+        )
+        .route(
+            "/sessions/{session_id}/delete",
+            post(delete_session_handler),
+        )
+        .route(
+            "/sessions/{session_id}/rename",
+            post(rename_session_handler),
+        )
         .route(
             "/sessions/{session_id}/export/file",
             get(export_session_file_handler),
@@ -30,7 +42,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/sessions/login/phone", post(start_phone_login_handler))
         .route("/sessions/login/qr", post(start_qr_login_handler))
         .route("/sessions/phone/{flow_id}", get(phone_flow_page_handler))
-        .route("/sessions/phone/{flow_id}/code", post(verify_phone_code_handler))
+        .route(
+            "/sessions/phone/{flow_id}/code",
+            post(verify_phone_code_handler),
+        )
         .route(
             "/sessions/phone/{flow_id}/password",
             post(verify_phone_password_handler),
@@ -40,7 +55,10 @@ pub(crate) fn routes() -> Router<AppState> {
             post(cancel_phone_flow_handler),
         )
         .route("/sessions/qr/{flow_id}", get(qr_flow_page_handler))
-        .route("/sessions/qr/{flow_id}/cancel", post(cancel_qr_flow_handler))
+        .route(
+            "/sessions/qr/{flow_id}/cancel",
+            post(cancel_qr_flow_handler),
+        )
 }
 
 pub(crate) fn sanitize_phone_input(raw: &str) -> String {
@@ -336,7 +354,8 @@ async fn export_string_session_handler(
         )
             .into_response();
     };
-    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await else {
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
         return (
             StatusCode::LOCKED,
             Json(ApiErrorResponse {
@@ -558,8 +577,18 @@ async fn delete_session_handler(
             Err(status) => status.into_response(),
         };
     }
-    if let Err(error) = app_state.meta_store.delete_session_record(&session.id).await {
+    if let Err(error) = app_state
+        .meta_store
+        .delete_session_record(&session.id)
+        .await
+    {
         warn!("failed deleting session record {}: {}", session.id, error);
+    }
+    if let Err(error) = app_state.runtime_cache.remove_session(&session.id).await {
+        warn!(
+            "failed deleting runtime cache for session {}: {}",
+            session.id, error
+        );
     }
 
     app_state.shared_state.write().await.remove(&session.id);

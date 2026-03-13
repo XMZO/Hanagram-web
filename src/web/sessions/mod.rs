@@ -6,4 +6,6 @@ mod runtime;
 mod storage;
 
 pub(crate) use routes::routes;
-pub(crate) use runtime::{register_session_record, reload_all_session_workers, unlock_user_sessions};
+pub(crate) use runtime::{
+    register_session_record, reload_all_session_workers, unlock_user_sessions,
+};

@@ -32,8 +32,9 @@ pub(crate) async fn require_login(
     };
 
     let path = request.uri().path();
-    let allow_totp_setup =
-        path.starts_with("/settings/security/totp") || path == "/logout" || path == "/api/dashboard/snapshot";
+    let allow_totp_setup = path.starts_with("/settings/security/totp")
+        || path == "/logout"
+        || path == "/api/dashboard/snapshot";
     if (authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0)
         && !allow_totp_setup
     {
@@ -162,7 +163,11 @@ pub(crate) async fn drop_user_master_key_if_no_active_sessions(
     app_state: &AppState,
     user_id: &str,
 ) {
-    let Ok(sessions) = app_state.meta_store.list_auth_sessions_for_user(user_id).await else {
+    let Ok(sessions) = app_state
+        .meta_store
+        .list_auth_sessions_for_user(user_id)
+        .await
+    else {
         return;
     };
     let now = Utc::now().timestamp();

@@ -199,7 +199,11 @@ pub(crate) async fn render_settings_page(
         },
     };
     let bot_settings = normalized_bot_settings(
-        authenticated.user.security.bot_notification_settings.clone(),
+        authenticated
+            .user
+            .security
+            .bot_notification_settings
+            .clone(),
     );
     let bot_status = bot_status_summary(&bot_settings, language);
     let bot_destination = bot_destination_summary(&bot_settings, language);

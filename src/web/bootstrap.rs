@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use super::{
-    admin, auth, dashboard, middleware as web_middleware, notifications, sessions,
-};
 use super::shared::*;
+use super::{
+    admin, auth, dashboard, maintenance, middleware as web_middleware, notifications, sessions,
+};
 
 fn load_embedded_templates() -> Result<Tera> {
     let mut tera = Tera::default();
@@ -27,6 +27,7 @@ pub(crate) async fn run() -> Result<()> {
         sessions_dir: config.sessions_dir.clone(),
         users_dir: config.sessions_dir.join("users"),
         app_data_dir: config.sessions_dir.join(".hanagram"),
+        runtime_cache_dir: config.sessions_dir.join(".hanagram").join("runtime-cache"),
         meta_db_path: config
             .sessions_dir
             .join(".hanagram")
@@ -42,6 +43,9 @@ pub(crate) async fn run() -> Result<()> {
     tokio::fs::create_dir_all(&runtime.app_data_dir)
         .await
         .with_context(|| format!("failed to create {}", runtime.app_data_dir.display()))?;
+    tokio::fs::create_dir_all(&runtime.runtime_cache_dir)
+        .await
+        .with_context(|| format!("failed to create {}", runtime.runtime_cache_dir.display()))?;
 
     let tera = Arc::new(load_embedded_templates()?);
     let shared_state: SharedState = Arc::new(RwLock::new(HashMap::new()));
@@ -53,10 +57,12 @@ pub(crate) async fn run() -> Result<()> {
     let user_keys: UserKeyCache = Arc::new(RwLock::new(HashMap::new()));
     let meta_store = Arc::new(MetaStore::open(&runtime.meta_db_path).await?);
     let system_settings = Arc::new(RwLock::new(meta_store.load_system_settings().await?));
+    let runtime_cache = Arc::new(RuntimeCache::open(runtime.runtime_cache_dir.clone()).await?);
 
     let app_state = AppState {
         shared_state: Arc::clone(&shared_state),
         session_workers,
+        runtime_cache,
         tera,
         meta_store: Arc::clone(&meta_store),
         system_settings,
@@ -69,10 +75,14 @@ pub(crate) async fn run() -> Result<()> {
         http_client: HttpClient::new(),
     };
 
+    maintenance::run_startup_maintenance(&app_state).await?;
+
     let session_records = app_state.meta_store.list_all_session_records().await?;
     for session_record in session_records {
         sessions::register_session_record(&app_state, session_record).await;
     }
+
+    maintenance::spawn_background_maintenance(app_state.clone());
 
     let protected = Router::new()
         .merge(dashboard::routes())

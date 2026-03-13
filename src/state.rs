@@ -102,6 +102,16 @@ impl SessionInfo {
     pub fn recent_messages(&self) -> Vec<OtpMessage> {
         self.messages.iter().take(5).cloned().collect()
     }
+
+    pub fn notification_context(&self) -> SessionNotificationContext {
+        SessionNotificationContext {
+            user_id: self.user_id.clone(),
+            key: self.key.clone(),
+            phone: self.phone.clone(),
+            session_file: self.session_file.clone(),
+            status: self.status.clone(),
+        }
+    }
 }
 
 impl Serialize for SessionInfo {
@@ -122,7 +132,7 @@ impl Serialize for SessionInfo {
             .latest_code_message()
             .map(|message| message.received_at.timestamp());
 
-        let mut info = serializer.serialize_struct("SessionInfo", 12)?;
+        let mut info = serializer.serialize_struct("SessionInfo", 11)?;
         info.serialize_field("id", &self.id)?;
         info.serialize_field("user_id", &self.user_id)?;
         info.serialize_field("key", &self.key)?;
@@ -130,13 +140,21 @@ impl Serialize for SessionInfo {
         info.serialize_field("phone", &self.phone)?;
         info.serialize_field("session_file", &session_file)?;
         info.serialize_field("status", &self.status)?;
-        info.serialize_field("messages", &self.messages)?;
         info.serialize_field("latest_code", &latest_code)?;
         info.serialize_field("latest_message_at", &latest_message_at)?;
         info.serialize_field("latest_code_at_unix", &latest_code_at_unix)?;
         info.serialize_field("recent_messages", &recent_messages)?;
         info.end()
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionNotificationContext {
+    pub user_id: String,
+    pub key: String,
+    pub phone: String,
+    pub session_file: PathBuf,
+    pub status: SessionStatus,
 }
 
 pub type SharedState = Arc<RwLock<HashMap<String, SessionInfo>>>;
