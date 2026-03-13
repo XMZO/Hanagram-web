@@ -35,25 +35,101 @@
         };
 
         const SETTINGS_PANES = [{% if show_workspace_links %}"security", "notifications", "access"{% else %}"security"{% endif %}];
+        const SECURITY_PANES = [{% if show_workspace_links %}"overview", "password", "totp", "passkeys"{% else %}"overview", "password"{% endif %}];
+        const SETTINGS_PANE_STORAGE_KEY = "hanagram.settings.pane";
+        const SECURITY_PANE_STORAGE_KEY = "hanagram.settings.security-pane";
+
+        function readStoredPane(key) {
+            try {
+                return window.sessionStorage.getItem(key) || "";
+            } catch (_error) {
+                return "";
+            }
+        }
+
+        function writeStoredPane(key, value) {
+            try {
+                window.sessionStorage.setItem(key, value);
+            } catch (_error) {
+                // Ignore storage failures and keep the page interactive.
+            }
+        }
+
+        function setPillState(element, active) {
+            if (!element) { return; }
+            element.classList.toggle("bg-sage", active);
+            element.classList.toggle("text-white", active);
+            element.classList.toggle("border-sage", active);
+            element.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
+            element.classList.toggle("bg-white", !active);
+            element.classList.toggle("text-ink/74", !active);
+            element.classList.toggle("border-line", !active);
+        }
 
         function activateSettingsPane(rawHash) {
-            const requested = String(rawHash || window.location.hash || "#security").replace(/^#/, "");
-            const activePane = SETTINGS_PANES.includes(requested) ? requested : "security";
+            const requested = String(rawHash || window.location.hash || "").replace(/^#/, "");
+            const stored = readStoredPane(SETTINGS_PANE_STORAGE_KEY);
+            const activePane = SETTINGS_PANES.includes(requested)
+                ? requested
+                : (SETTINGS_PANES.includes(stored) ? stored : "security");
+
+            writeStoredPane(SETTINGS_PANE_STORAGE_KEY, activePane);
 
             document.querySelectorAll("[data-settings-pane]").forEach((panel) => {
                 panel.classList.toggle("hidden", panel.dataset.settingsPane !== activePane);
             });
 
             document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
-                const active = tab.dataset.settingsTab === activePane;
-                tab.classList.toggle("bg-sage", active);
-                tab.classList.toggle("text-white", active);
-                tab.classList.toggle("border-sage", active);
-                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-                tab.classList.toggle("bg-white", !active);
-                tab.classList.toggle("text-ink/74", !active);
-                tab.classList.toggle("border-line", !active);
+                setPillState(tab, tab.dataset.settingsTab === activePane);
             });
+        }
+
+        function activateSecurityPane(rawPane) {
+            const requested = String(rawPane || "").replace(/^#/, "");
+            const stored = readStoredPane(SECURITY_PANE_STORAGE_KEY);
+            const activePane = SECURITY_PANES.includes(requested)
+                ? requested
+                : (SECURITY_PANES.includes(stored) ? stored : SECURITY_PANES[0]);
+
+            writeStoredPane(SECURITY_PANE_STORAGE_KEY, activePane);
+
+            document.querySelectorAll("[data-security-pane]").forEach((panel) => {
+                panel.classList.toggle("hidden", panel.dataset.securityPane !== activePane);
+            });
+
+            document.querySelectorAll("[data-security-tab]").forEach((tab) => {
+                setPillState(tab, tab.dataset.securityTab === activePane);
+            });
+        }
+
+        function rememberNearestPane(form) {
+            const settingsPane = form.dataset.preserveSettingsPane
+                || form.closest("[data-settings-pane]")?.dataset.settingsPane;
+            const securityPane = form.dataset.preserveSecurityTab
+                || form.closest("[data-security-pane]")?.dataset.securityPane;
+
+            if (settingsPane) {
+                writeStoredPane(SETTINGS_PANE_STORAGE_KEY, settingsPane);
+            }
+            if (securityPane) {
+                writeStoredPane(SECURITY_PANE_STORAGE_KEY, securityPane);
+            }
+        }
+
+        function redirectToSettingsTarget(target) {
+            const destination = new URL(target, window.location.href);
+            const current = new URL(window.location.href);
+
+            if (
+                destination.pathname === current.pathname
+                && destination.search === current.search
+                && destination.hash === current.hash
+            ) {
+                window.location.reload();
+                return;
+            }
+
+            window.location.assign(destination.toString());
         }
 
         function base64UrlToBuffer(value) {
@@ -139,12 +215,41 @@
 
         window.addEventListener("DOMContentLoaded", () => {
             activateSettingsPane();
+            activateSecurityPane();
+
+            document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    writeStoredPane(SETTINGS_PANE_STORAGE_KEY, tab.dataset.settingsTab || "security");
+                });
+            });
+
+            document.querySelectorAll("[data-security-tab]").forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    activateSecurityPane(tab.dataset.securityTab);
+                });
+            });
+
+            document.querySelectorAll("[data-security-target]").forEach((trigger) => {
+                trigger.addEventListener("click", () => {
+                    activateSecurityPane(trigger.dataset.securityTarget);
+                });
+            });
+
+            document.querySelectorAll("form").forEach((form) => {
+                const settingsPane = form.dataset.preserveSettingsPane
+                    || form.closest("[data-settings-pane]")?.dataset.settingsPane;
+                const securityPane = form.dataset.preserveSecurityTab
+                    || form.closest("[data-security-pane]")?.dataset.securityPane;
+
+                if (!settingsPane && !securityPane) { return; }
+                form.addEventListener("submit", () => rememberNearestPane(form));
+            });
 
             const passkeyForm = document.querySelector("[data-passkey-register-form]");
             const passkeyFeedback = document.getElementById("passkey-feedback");
-            const passkeyButton = document.querySelector("[data-passkey-register-button]");
-            const passkeyName = document.querySelector('input[name="passkey_label"]');
-            const langInput = document.querySelector('input[name="lang"]');
+            const passkeyButton = passkeyForm?.querySelector("[data-passkey-register-button]");
+            const passkeyName = passkeyForm?.querySelector('input[name="passkey_label"]');
+            const langInput = passkeyForm?.querySelector('input[name="lang"]');
 
             function setPasskeyFeedback(message, isError) {
                 if (!passkeyFeedback) { return; }
@@ -165,6 +270,7 @@
 
             passkeyForm?.addEventListener("submit", async (event) => {
                 event.preventDefault();
+                rememberNearestPane(passkeyForm);
                 if (!window.PublicKeyCredential || !navigator.credentials?.create) {
                     setPasskeyFeedback(passkeyButton?.dataset.unsupported || "", true);
                     return;
@@ -220,7 +326,10 @@
                         throw new Error(finishPayload.error || passkeyButton?.dataset.failed || "");
                     }
 
-                    window.location.href = finishPayload.redirect_to || "/settings#security";
+                    writeStoredPane(SETTINGS_PANE_STORAGE_KEY, "security");
+                    writeStoredPane(SECURITY_PANE_STORAGE_KEY, "passkeys");
+                    setPasskeyFeedback("", false);
+                    redirectToSettingsTarget(finishPayload.redirect_to || "/settings#security");
                 } catch (error) {
                     setPasskeyFeedback(describePasskeyCreateError(error, passkeyButton), true);
                 } finally {
@@ -245,6 +354,12 @@
         }
         .tab-strip::-webkit-scrollbar {
             display: none;
+        }
+        details summary::-webkit-details-marker {
+            display: none;
+        }
+        details[open] .details-chevron {
+            transform: rotate(180deg);
         }
     </style>
 </head>
@@ -271,7 +386,6 @@
                     {% if show_admin %}
                     <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ admin_label }}</a>
                     {% endif %}
-                    <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
                     {% endif %}
                 </div>
             </div>
@@ -332,26 +446,21 @@
 
             <div class="mt-4">
                 <section data-settings-pane="security" class="space-y-4">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_nav_security }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ security_title }}</h2>
-                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ security_description }}</p>
-                        </div>
-                        {% if show_workspace_links %}
-                        <a href="{{ totp_setup_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
-                        {% endif %}
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_nav_security }}</p>
+                        <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ security_title }}</h2>
+                        <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ security_description }}</p>
                     </div>
 
                     {% if recovery_notice %}
-                    <article class="rounded-[1.45rem] border border-butter/60 bg-[#fff7e6] p-4">
+                    <article class="rounded-[1.45rem] border border-[#e8d3ad] bg-[#fff7e6] p-4">
                         <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-[#866434]">{{ recovery_refresh_title }}</p>
                                 <h3 class="mt-2 text-lg font-semibold text-ink sm:text-xl">{{ recovery_label }}</h3>
                                 <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/72">{{ recovery_refresh_message }}</p>
                             </div>
-                            <form method="post" action="{{ recovery_ack_action }}">
+                            <form method="post" action="{{ recovery_ack_action }}" data-preserve-settings-pane="security" data-preserve-security-tab="overview">
                                 <button type="submit" class="rounded-full border border-[#ddc48f] bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-[#fffaf0]">{{ recovery_ack_label }}</button>
                             </form>
                         </div>
@@ -363,9 +472,26 @@
                     </article>
                     {% endif %}
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr),minmax(0,1.05fr)]">
+                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
+                        <button type="button" data-security-tab="overview" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
+                            {{ i18n.settings_security_tab_overview_label }}
+                        </button>
+                        <button type="button" data-security-tab="password" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
+                            {{ i18n.settings_security_tab_password_label }}
+                        </button>
+                        {% if show_workspace_links %}
+                        <button type="button" data-security-tab="totp" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
+                            {{ i18n.settings_security_tab_totp_label }}
+                        </button>
+                        <button type="button" data-security-tab="passkeys" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
+                            {{ i18n.settings_security_tab_passkeys_label }}
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <section data-security-pane="overview" class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr),minmax(18rem,0.92fr)]">
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <div class="grid gap-3 sm:grid-cols-3">
+                            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                 <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
                                     <p class="mt-2 text-lg font-semibold">{{ totp_status }}</p>
@@ -381,110 +507,193 @@
                                     <p class="mt-2 text-lg font-semibold">{{ passkey_count }}</p>
                                     <p class="mt-3 text-sm leading-7 text-ink/62">{{ passkeys_hint }}</p>
                                 </div>
-                            </div>
-                            <div class="mt-3 rounded-[1.1rem] border border-line bg-paper px-4 py-4">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                                <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
-                                <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
+                                    <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
+                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                </div>
                             </div>
                         </article>
 
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
-                            <p class="mt-2 text-sm leading-7 text-ink/68">{{ password_description }}</p>
-                            <form method="post" action="{{ password_action }}" class="mt-4 grid gap-3">
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
-                            </form>
-                        </article>
-                    </div>
-
-                    {% if show_workspace_links %}
-                    <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ passkeys_label }}</p>
-                                <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
-                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ passkeys_description }}</p>
-                            </div>
-                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
-                        </div>
-
-                        <div id="passkey-feedback" class="mt-4 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
-
-                        <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
-                            <form
-                                data-passkey-register-form
-                                data-options-action="{{ passkey_register_options_action }}"
-                                data-finish-action="{{ passkey_register_finish_action }}"
-                                class="grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4"
-                            >
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <label class="block">
-                                    <span class="mb-2 block text-sm font-medium">{{ passkey_name_label }}</span>
-                                    <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
-                                </label>
-                                <p class="text-sm leading-7 text-ink/62">
-                                    {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
-                                </p>
-                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3 text-xs leading-6 text-ink/58">
-                                    <p class="font-semibold text-ink/72">{{ passkey_provider_notes_title }}</p>
-                                    <p class="mt-2">{{ passkey_google_hint }}</p>
-                                    <p class="mt-2">{{ passkey_bitwarden_hint }}</p>
-                                </div>
-                                <button
-                                    type="submit"
-                                    data-passkey-register-button
-                                    data-starting="{{ i18n.login_passkey_start_message }}"
-                                    data-awaiting="{{ i18n.login_passkey_finish_message }}"
-                                    data-failed="{{ i18n.passkey_registration_failed_message }}"
-                                    data-not-allowed="{{ i18n.passkey_registration_not_allowed_message }}"
-                                    data-incomplete-response="{{ i18n.passkey_registration_incomplete_response_message }}"
-                                    data-unsupported="{{ passkey_unavailable_message }}"
-                                    data-missing-label="{{ i18n.passkey_label_required_message }}"
-                                    {% if not passkey_supported %}disabled{% endif %}
-                                    class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
-                                >
-                                    {{ passkey_add_label }}
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_sections_title }}</p>
+                            <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ security_title }}</h3>
+                            <p class="mt-2 text-sm leading-7 text-ink/68">{{ security_description }}</p>
+                            <div class="mt-4 grid gap-3">
+                                <button type="button" data-security-target="password" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                                    <span class="block text-sm font-semibold text-ink">{{ password_title }}</span>
+                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ password_description }}</span>
                                 </button>
-                            </form>
-
-                            <div class="grid max-h-[32rem] gap-3 overflow-y-auto pr-1">
-                                {% if passkeys | length == 0 %}
-                                <div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">
-                                    {{ passkey_empty_label }}
-                                </div>
-                                {% else %}
-                                {% for passkey in passkeys %}
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                        <div class="min-w-0">
-                                            <p class="text-base font-semibold text-ink">{{ passkey.label }}</p>
-                                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3">
-                                                    <p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ passkey_created_label }}</p>
-                                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkey.created_at }}</p>
-                                                </div>
-                                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3">
-                                                    <p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ passkey_last_used_label }}</p>
-                                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkey.last_used_at }}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <form method="post" action="/settings/security/passkeys/{{ passkey.id }}/delete" data-confirm="{{ passkey_delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)">
-                                            <input type="hidden" name="lang" value="{{ lang }}">
-                                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ passkey_delete_label }}</button>
-                                        </form>
-                                    </div>
-                                </div>
-                                {% endfor %}
+                                {% if show_workspace_links %}
+                                <button type="button" data-security-target="totp" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                                    <span class="block text-sm font-semibold text-ink">{{ totp_setup_label }}</span>
+                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ totp_hint }}</span>
+                                </button>
+                                <button type="button" data-security-target="passkeys" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                                    <span class="block text-sm font-semibold text-ink">{{ passkeys_title }}</span>
+                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ passkeys_description }}</span>
+                                </button>
                                 {% endif %}
                             </div>
+                        </article>
+                    </section>
+
+                    <section data-security-pane="password" class="hidden">
+                        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr),minmax(18rem,0.92fr)]">
+                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                                <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
+                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ password_description }}</p>
+                                <form method="post" action="{{ password_action }}" class="mt-4 grid gap-3">
+                                    <input type="hidden" name="lang" value="{{ lang }}">
+                                    <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                    <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                    <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                    <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
+                                </form>
+                            </article>
+
+                            <aside class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
+                                    <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
+                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                </div>
+                                <div class="mt-3 rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ sessions_title }}</p>
+                                    <p class="mt-2 text-lg font-semibold">{{ active_session_count }}</p>
+                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ access_current_only_hint }}</p>
+                                </div>
+                            </aside>
                         </div>
-                    </article>
+                    </section>
+
+                    {% if show_workspace_links %}
+                    <section data-security-pane="totp" class="hidden">
+                        <div class="grid gap-4 xl:grid-cols-[minmax(18rem,0.92fr),minmax(0,1.08fr)]">
+                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <h3 class="text-lg font-semibold sm:text-xl">{{ totp_label }}</h3>
+                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ totp_status }}</span>
+                                </div>
+                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ totp_hint }}</p>
+                                <div class="mt-4 rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
+                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkeys_hint }}</p>
+                                </div>
+                                <a href="{{ totp_setup_href }}" class="mt-4 inline-flex rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
+                            </article>
+
+                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <h3 class="text-lg font-semibold sm:text-xl">{{ recovery_label }}</h3>
+                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recovery_remaining }}</span>
+                                </div>
+                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ recovery_hint }}</p>
+                                <div class="mt-4 rounded-[1rem] border border-[#ead7ae] bg-[#fffaf0] px-4 py-4 text-sm leading-7 text-ink/70">
+                                    {{ i18n.login_recovery_notice_hint }}
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+
+                    <section data-security-pane="passkeys" class="hidden">
+                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ passkeys_label }}</p>
+                                    <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
+                                    <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ passkeys_description }}</p>
+                                </div>
+                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
+                            </div>
+
+                            <div id="passkey-feedback" class="mt-4 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
+
+                            <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
+                                <div class="grid gap-3">
+                                    <form
+                                        data-passkey-register-form
+                                        data-options-action="{{ passkey_register_options_action }}"
+                                        data-finish-action="{{ passkey_register_finish_action }}"
+                                        class="grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4"
+                                    >
+                                        <input type="hidden" name="lang" value="{{ lang }}">
+                                        <label class="block">
+                                            <span class="mb-2 block text-sm font-medium">{{ passkey_name_label }}</span>
+                                            <div class="flex flex-col gap-3 sm:flex-row">
+                                                <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                                <button
+                                                    type="submit"
+                                                    data-passkey-register-button
+                                                    data-starting="{{ i18n.login_passkey_start_message }}"
+                                                    data-awaiting="{{ i18n.login_passkey_finish_message }}"
+                                                    data-failed="{{ i18n.passkey_registration_failed_message }}"
+                                                    data-not-allowed="{{ i18n.passkey_registration_not_allowed_message }}"
+                                                    data-incomplete-response="{{ i18n.passkey_registration_incomplete_response_message }}"
+                                                    data-unsupported="{{ passkey_unavailable_message }}"
+                                                    data-missing-label="{{ i18n.passkey_label_required_message }}"
+                                                    {% if not passkey_supported %}disabled{% endif %}
+                                                    class="shrink-0 rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
+                                                >
+                                                    {{ passkey_add_label }}
+                                                </button>
+                                            </div>
+                                        </label>
+                                        <p class="text-sm leading-7 text-ink/62">
+                                            {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
+                                        </p>
+                                    </form>
+
+                                    <details class="rounded-[1rem] border border-line bg-paper">
+                                        <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink">
+                                            <span>{{ passkey_provider_notes_title }}</span>
+                                            <span class="details-chevron text-ink/55 transition">&#9662;</span>
+                                        </summary>
+                                        <div class="border-t border-line px-4 py-4 text-sm leading-7 text-ink/62">
+                                            <p>{{ passkey_google_hint }}</p>
+                                            <p class="mt-2">{{ passkey_bitwarden_hint }}</p>
+                                        </div>
+                                    </details>
+                                </div>
+
+                                <div class="rounded-[1rem] border border-line bg-paper p-3">
+                                    {% if passkeys | length == 0 %}
+                                    <div class="rounded-[0.95rem] border border-dashed border-line bg-white px-4 py-8 text-sm leading-7 text-ink/60">
+                                        {{ passkey_empty_label }}
+                                    </div>
+                                    {% else %}
+                                    <div class="max-h-[24rem] overflow-y-auto rounded-[0.95rem] border border-line bg-white">
+                                        <div class="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.2fr),minmax(8rem,0.8fr),minmax(8rem,0.8fr),auto] gap-3 border-b border-line bg-[#fbf7f0] px-4 py-3 text-xs uppercase tracking-[0.18em] text-ink/45 sm:grid">
+                                            <p>{{ passkey_name_label }}</p>
+                                            <p>{{ passkey_created_label }}</p>
+                                            <p>{{ passkey_last_used_label }}</p>
+                                            <p class="text-right">{{ passkey_delete_label }}</p>
+                                        </div>
+                                        <div class="divide-y divide-line/70">
+                                            {% for passkey in passkeys %}
+                                            <div class="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1.2fr),minmax(8rem,0.8fr),minmax(8rem,0.8fr),auto] sm:items-center">
+                                                <div class="min-w-0">
+                                                    <p class="truncate text-sm font-semibold text-ink">{{ passkey.label }}</p>
+                                                    <div class="mt-2 grid gap-1 text-xs leading-6 text-ink/58 sm:hidden">
+                                                        <p><span class="font-medium text-ink/68">{{ passkey_created_label }}</span> {{ passkey.created_at }}</p>
+                                                        <p><span class="font-medium text-ink/68">{{ passkey_last_used_label }}</span> {{ passkey.last_used_at }}</p>
+                                                    </div>
+                                                </div>
+                                                <p class="hidden text-sm leading-6 text-ink/68 sm:block">{{ passkey.created_at }}</p>
+                                                <p class="hidden text-sm leading-6 text-ink/68 sm:block">{{ passkey.last_used_at }}</p>
+                                                <form method="post" action="/settings/security/passkeys/{{ passkey.id }}/delete" data-confirm="{{ passkey_delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)" class="sm:justify-self-end">
+                                                    <input type="hidden" name="lang" value="{{ lang }}">
+                                                    <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] sm:w-auto">{{ passkey_delete_label }}</button>
+                                                </form>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </article>
+                    </section>
                     {% endif %}
                 </section>
 
