@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
+use crate::web_auth;
+
 use super::auth;
 use super::middleware::{
     auth_session_is_active, clear_auth_session_sensitive_state, clear_pending_flows_for_user,
@@ -32,10 +34,75 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/admin/settings", post(admin_save_system_settings_handler))
 }
 
+fn admin_login_method_label(language: Language, method: Option<&str>) -> String {
+    match method.unwrap_or_default() {
+        web_auth::LOGIN_METHOD_PASSWORD_ONLY => {
+            String::from(language.translations().login_method_password_only_label)
+        }
+        web_auth::LOGIN_METHOD_PASSWORD_TOTP => {
+            String::from(language.translations().login_method_password_totp_label)
+        }
+        web_auth::LOGIN_METHOD_PASSWORD_RECOVERY => {
+            String::from(language.translations().login_method_password_recovery_label)
+        }
+        web_auth::LOGIN_METHOD_PASSWORD_PASSKEY => {
+            String::from(language.translations().login_method_password_passkey_label)
+        }
+        _ => String::from(language.translations().login_method_unknown_label),
+    }
+}
+
+fn humanize_audit_action(action_type: &str) -> String {
+    action_type.replace('_', " ")
+}
+
+fn audit_detail_field(details: &serde_json::Value, key: &str) -> Option<String> {
+    details.get(key).and_then(|value| match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Bool(flag) => Some(flag.to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        other => Some(other.to_string()),
+    })
+}
+
+fn pretty_audit_details(raw: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or_else(|| raw.to_owned())
+}
+
+fn audit_search_matches(log: &AuditLogView, search: &str) -> bool {
+    let needle = search.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+    [
+        Some(log.action_type.as_str()),
+        Some(log.action_label.as_str()),
+        log.actor_user_id.as_deref(),
+        log.actor_username.as_deref(),
+        log.subject_user_id.as_deref(),
+        log.subject_username.as_deref(),
+        log.username.as_deref(),
+        log.login_method.as_deref(),
+        log.reason.as_deref(),
+        log.passkey_label.as_deref(),
+        log.user_agent.as_deref(),
+        log.ip_address.as_deref(),
+        Some(log.details_pretty.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.to_ascii_lowercase().contains(&needle))
+}
+
 pub(crate) async fn render_admin_page(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
     language: Language,
+    audit_search: Option<&str>,
     banner: Option<PageBanner>,
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
@@ -85,6 +152,102 @@ pub(crate) async fn render_admin_page(
             .clone(),
     );
     let telegram_api_status = telegram_api_status_summary(&system_settings, language);
+    let usernames_by_id = raw_users
+        .iter()
+        .map(|user| (user.id.clone(), user.username.clone()))
+        .collect::<HashMap<_, _>>();
+    let audit_log_views = audit_logs
+        .iter()
+        .map(|log| {
+            let parsed_details = serde_json::from_str::<serde_json::Value>(&log.details_json)
+                .unwrap_or(serde_json::Value::Null);
+            let actor_username = log
+                .actor_user_id
+                .as_ref()
+                .and_then(|id| usernames_by_id.get(id))
+                .cloned();
+            let subject_username = log
+                .subject_user_id
+                .as_ref()
+                .and_then(|id| usernames_by_id.get(id))
+                .cloned();
+            let login_method_raw = audit_detail_field(&parsed_details, "login_method");
+            let reason =
+                audit_detail_field(&parsed_details, "reason").map(|value| value.replace('_', " "));
+
+            AuditLogView {
+                action_type: log.action_type.clone(),
+                action_label: humanize_audit_action(&log.action_type),
+                actor_user_id: log.actor_user_id.clone(),
+                actor_username,
+                subject_user_id: log.subject_user_id.clone(),
+                subject_username: subject_username.clone(),
+                username: audit_detail_field(&parsed_details, "username")
+                    .or_else(|| subject_username.clone()),
+                ip_address: log.ip_address.clone(),
+                user_agent: audit_detail_field(&parsed_details, "user_agent"),
+                success: log.success,
+                created_at_unix: log.created_at_unix,
+                login_method: login_method_raw
+                    .as_deref()
+                    .map(|method| admin_login_method_label(language, Some(method))),
+                reason,
+                passkey_label: audit_detail_field(&parsed_details, "passkey_label"),
+                details_pretty: pretty_audit_details(&log.details_json),
+            }
+        })
+        .collect::<Vec<_>>();
+    let filtered_audit_logs = audit_search
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|search| {
+            audit_log_views
+                .iter()
+                .filter(|log| audit_search_matches(log, search))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| audit_log_views.clone());
+    let mut latest_auth_by_user_id = HashMap::<String, (Option<String>, i64, bool)>::new();
+    for log in &audit_log_views {
+        if log.action_type != web_auth::AUTH_AUDIT_LOGIN_SUCCESS
+            && log.action_type != web_auth::AUTH_AUDIT_LOGIN_FAILURE
+        {
+            continue;
+        }
+        let Some(subject_user_id) = &log.subject_user_id else {
+            continue;
+        };
+        latest_auth_by_user_id
+            .entry(subject_user_id.clone())
+            .or_insert((log.login_method.clone(), log.created_at_unix, log.success));
+    }
+    let recent_auth_activity = audit_log_views
+        .iter()
+        .filter(|log| {
+            log.action_type == web_auth::AUTH_AUDIT_LOGIN_SUCCESS
+                || log.action_type == web_auth::AUTH_AUDIT_LOGIN_FAILURE
+        })
+        .take(8)
+        .map(|log| RecentAuthActivityView {
+            username: log
+                .username
+                .clone()
+                .or_else(|| log.subject_username.clone())
+                .or_else(|| log.actor_username.clone())
+                .unwrap_or_else(|| String::from("-")),
+            action_label: log.action_label.clone(),
+            method_label: log
+                .login_method
+                .clone()
+                .unwrap_or_else(|| admin_login_method_label(language, None)),
+            success: log.success,
+            created_at_unix: log.created_at_unix,
+            ip_address: log.ip_address.clone(),
+            reason: log.reason.clone(),
+            passkey_label: log.passkey_label.clone(),
+        })
+        .collect::<Vec<_>>();
 
     let mut locked_users_count = 0_usize;
     let mut total_active_auth_sessions = 0_usize;
@@ -125,6 +288,7 @@ pub(crate) async fn render_admin_page(
             mfa_enabled_users += 1;
         }
         total_active_auth_sessions += active_sessions;
+        let user_id = user.id.clone();
         users.push(AdminUserView {
             id: user.id,
             username: user.username,
@@ -138,7 +302,13 @@ pub(crate) async fn render_admin_page(
             password_reset_required: user.security.password_needs_reset,
             active_sessions,
             recovery_codes_remaining,
+            passkey_count: user.security.passkeys.len(),
             last_login_ip: user.security.last_login_ip,
+            last_auth_method: latest_auth_by_user_id
+                .get(&user_id)
+                .and_then(|value| value.0.clone()),
+            last_auth_at_unix: latest_auth_by_user_id.get(&user_id).map(|value| value.1),
+            last_auth_success: latest_auth_by_user_id.get(&user_id).map(|value| value.2),
         });
     }
     let total_users = users.len();
@@ -306,7 +476,15 @@ pub(crate) async fn render_admin_page(
         "user_recovery_codes_label",
         &translations.admin_user_recovery_codes_label,
     );
+    context.insert(
+        "user_passkeys_label",
+        &translations.admin_user_passkeys_label,
+    );
     context.insert("user_last_ip_label", &translations.admin_user_last_ip_label);
+    context.insert(
+        "user_last_auth_label",
+        &translations.admin_user_last_auth_label,
+    );
     context.insert("audit_title", &translations.admin_audit_title);
     context.insert("audit_description", &translations.admin_audit_description);
     context.insert("rollup_title", &translations.admin_rollup_title);
@@ -323,6 +501,16 @@ pub(crate) async fn render_admin_page(
     context.insert(
         "audit_subject_label",
         &translations.admin_audit_subject_label,
+    );
+    context.insert(
+        "audit_username_label",
+        &translations.admin_audit_username_label,
+    );
+    context.insert("audit_method_label", &translations.admin_audit_method_label);
+    context.insert("audit_reason_label", &translations.admin_audit_reason_label);
+    context.insert(
+        "audit_user_agent_label",
+        &translations.admin_audit_user_agent_label,
     );
     context.insert("audit_time_label", &translations.admin_audit_time_label);
     context.insert(
@@ -352,15 +540,47 @@ pub(crate) async fn render_admin_page(
         "overview_audit_rows_label",
         &translations.admin_overview_audit_rows_label,
     );
+    context.insert("recent_auth_title", &translations.admin_recent_auth_title);
+    context.insert(
+        "recent_auth_description",
+        &translations.admin_recent_auth_description,
+    );
+    context.insert(
+        "recent_auth_empty_label",
+        &translations.admin_recent_auth_empty_label,
+    );
+    context.insert("audit_search_label", &translations.admin_audit_search_label);
+    context.insert(
+        "audit_search_placeholder",
+        &translations.admin_audit_search_placeholder,
+    );
+    context.insert(
+        "audit_search_submit_label",
+        &translations.admin_audit_search_submit_label,
+    );
+    context.insert(
+        "audit_search_clear_label",
+        &translations.admin_audit_search_clear_label,
+    );
+    context.insert(
+        "audit_filtered_label",
+        &translations.admin_audit_filtered_label,
+    );
     context.insert("policy_description", &translations.admin_policy_description);
     context.insert("total_users", &total_users);
     context.insert("locked_users_count", &locked_users_count);
     context.insert("total_active_auth_sessions", &total_active_auth_sessions);
     context.insert("mfa_enabled_users", &mfa_enabled_users);
     context.insert("audit_log_count", &audit_logs.len());
+    context.insert("audit_filtered_count", &filtered_audit_logs.len());
     context.insert("users", &users);
-    context.insert("audit_logs", &audit_logs);
+    context.insert("audit_logs", &filtered_audit_logs);
     context.insert("audit_rollups", &audit_rollups);
+    context.insert("recent_auth_activity", &recent_auth_activity);
+    context.insert(
+        "audit_search_value",
+        &audit_search.unwrap_or_default().trim(),
+    );
     context.insert(
         "delete_confirm_message",
         &translations.admin_delete_confirm_message,
@@ -393,14 +613,23 @@ pub(crate) async fn render_admin_page(
 async fn admin_page_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
-    Query(query): Query<LangQuery>,
+    Query(query): Query<AdminPageQuery>,
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
     if authenticated.user.role != UserRole::Admin {
         return Redirect::to(&dashboard_href(language)).into_response();
     }
-    match render_admin_page(&app_state, &authenticated, language, None, &headers).await {
+    match render_admin_page(
+        &app_state,
+        &authenticated,
+        language,
+        query.audit_search.as_deref(),
+        None,
+        &headers,
+    )
+    .await
+    {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -425,6 +654,7 @@ async fn admin_create_user_handler(
                 &app_state,
                 &authenticated,
                 language,
+                None,
                 Some(PageBanner::error(error.to_string())),
                 &headers,
             )
@@ -442,6 +672,7 @@ async fn admin_create_user_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(strength.reasons.join("; "))),
             &headers,
         )
@@ -463,6 +694,7 @@ async fn admin_create_user_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(
                 language.translations().admin_username_exists_message,
             )),
@@ -483,6 +715,7 @@ async fn admin_create_user_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(error.to_string())),
             &headers,
         )
@@ -499,6 +732,7 @@ async fn admin_create_user_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(error.to_string())),
             &headers,
         )
@@ -525,6 +759,7 @@ async fn admin_create_user_handler(
         &app_state,
         &authenticated,
         language,
+        None,
         Some(PageBanner::success(
             language.translations().admin_user_created_message,
         )),
@@ -570,6 +805,7 @@ async fn admin_unlock_user_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(error.to_string())),
             &headers,
         )
@@ -596,6 +832,7 @@ async fn admin_unlock_user_handler(
         &app_state,
         &authenticated,
         language,
+        None,
         Some(PageBanner::success(
             language.translations().admin_user_unlocked_message,
         )),
@@ -707,6 +944,7 @@ async fn admin_reset_user_handler(
                 &app_state,
                 &authenticated,
                 language,
+                None,
                 Some(PageBanner::error(error.to_string())),
                 &headers,
             )
@@ -736,6 +974,7 @@ async fn admin_reset_user_handler(
             details_json: serde_json::json!({
                 "username": user.username,
                 "temporary_password_issued": true,
+                "passkeys_cleared": true,
                 "session_records_removed": reset_result.session_record_ids.len(),
                 "auth_sessions_revoked": reset_result.auth_session_ids.len()
             })
@@ -753,6 +992,7 @@ async fn admin_reset_user_handler(
         &app_state,
         &authenticated,
         language,
+        None,
         Some(PageBanner::success(banner_message)),
         &headers,
     )
@@ -798,6 +1038,7 @@ async fn admin_delete_user_handler(
                     &app_state,
                     &authenticated,
                     language,
+                    None,
                     Some(PageBanner::error(error.to_string())),
                     &headers,
                 )
@@ -838,6 +1079,7 @@ async fn admin_delete_user_handler(
         &app_state,
         &authenticated,
         language,
+        None,
         Some(PageBanner::success(
             language.translations().admin_user_deleted_message,
         )),
@@ -912,6 +1154,7 @@ async fn admin_revoke_user_sessions_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::success(
                 language.translations().admin_user_sessions_revoked_message,
             )),
@@ -963,6 +1206,7 @@ async fn admin_save_system_settings_handler(
                     &app_state,
                     &authenticated,
                     language,
+                    None,
                     Some(PageBanner::error(error.to_string())),
                     &headers,
                 )
@@ -998,6 +1242,7 @@ async fn admin_save_system_settings_handler(
                     &app_state,
                     &authenticated,
                     language,
+                    None,
                     Some(PageBanner::error(error.to_string())),
                     &headers,
                 )
@@ -1033,6 +1278,7 @@ async fn admin_save_system_settings_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(error.to_string())),
             &headers,
         )
@@ -1048,6 +1294,7 @@ async fn admin_save_system_settings_handler(
             &app_state,
             &authenticated,
             language,
+            None,
             Some(PageBanner::error(format!(
                 "{}{}",
                 language.translations().admin_settings_refresh_failed_prefix,
@@ -1090,6 +1337,7 @@ async fn admin_save_system_settings_handler(
         &app_state,
         &authenticated,
         language,
+        None,
         Some(PageBanner::success(
             language.translations().admin_settings_saved_message,
         )),

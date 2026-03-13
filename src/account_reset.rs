@@ -39,6 +39,7 @@ pub fn clear_user_credentials(user: &mut UserRecord) {
     user.security.last_login_ip = None;
     user.security.preferred_idle_timeout_minutes = None;
     user.security.bot_notification_settings = Default::default();
+    user.security.passkeys.clear();
     user.updated_at_unix = Utc::now().timestamp();
 }
 
@@ -178,6 +179,13 @@ mod tests {
         user.security.preferred_idle_timeout_minutes = Some(30);
         user.security.bot_notification_settings.enabled = true;
         user.security.bot_notification_settings.bot_token = String::from("bot-token");
+        user.security.passkeys.push(crate::store::StoredPasskey {
+            id: String::from("passkey-1"),
+            label: String::from("My Passkey"),
+            credential_json: String::from("{}"),
+            created_at_unix: Utc::now().timestamp(),
+            last_used_at_unix: None,
+        });
         store.save_user(&user).await.expect("user should save");
 
         store
@@ -230,6 +238,7 @@ mod tests {
         assert!(user.security.preferred_idle_timeout_minutes.is_none());
         assert!(!user.security.bot_notification_settings.enabled);
         assert!(user.security.bot_notification_settings.bot_token.is_empty());
+        assert!(user.security.passkeys.is_empty());
 
         let saved_user = store
             .get_user_by_id(&user.id)

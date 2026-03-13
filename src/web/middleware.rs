@@ -7,6 +7,7 @@ use super::shared::*;
 fn enforced_redirect_target(
     path: &str,
     requires_password_reset: bool,
+    requires_recovery_ack: bool,
     requires_totp_setup: bool,
     recovery_codes_remaining: i64,
 ) -> Option<&'static str> {
@@ -14,6 +15,15 @@ fn enforced_redirect_target(
         path == "/settings" || path == "/settings/security/password" || path == "/logout";
     if requires_password_reset {
         if allow_password_reset {
+            return None;
+        }
+        return Some("/settings#security");
+    }
+
+    let allow_recovery_ack =
+        path == "/settings" || path == "/settings/security/recovery/ack" || path == "/logout";
+    if requires_recovery_ack {
+        if allow_recovery_ack {
             return None;
         }
         return Some("/settings#security");
@@ -54,9 +64,15 @@ pub(crate) async fn require_login(
         return response;
     };
 
+    let recovery_notice_pending = app_state
+        .recovery_notices
+        .read()
+        .await
+        .contains_key(&authenticated.auth_session.id);
     if let Some(target) = enforced_redirect_target(
         request.uri().path(),
         authenticated.requires_password_reset,
+        recovery_notice_pending,
         authenticated.requires_totp_setup,
         authenticated.recovery_codes_remaining,
     ) {
@@ -145,6 +161,16 @@ pub(crate) async fn clear_pending_flows_for_auth_session(
 ) {
     app_state.totp_setups.write().await.remove(auth_session_id);
     app_state
+        .passkey_registrations
+        .write()
+        .await
+        .retain(|_, flow| flow.auth_session_id != auth_session_id);
+    app_state
+        .recovery_notices
+        .write()
+        .await
+        .remove(auth_session_id);
+    app_state
         .phone_flows
         .write()
         .await
@@ -157,6 +183,21 @@ pub(crate) async fn clear_pending_flows_for_auth_session(
 }
 
 pub(crate) async fn clear_pending_flows_for_user(app_state: &AppState, user_id: &str) {
+    app_state
+        .passkey_registrations
+        .write()
+        .await
+        .retain(|_, flow| flow.user_id != user_id);
+    app_state
+        .passkey_authentications
+        .write()
+        .await
+        .retain(|_, flow| flow.user_id != user_id);
+    app_state
+        .recovery_notices
+        .write()
+        .await
+        .retain(|_, notice| notice.user_id != user_id);
     app_state
         .phone_flows
         .write()
@@ -246,17 +287,36 @@ mod tests {
 
     #[test]
     fn password_reset_takes_precedence_over_totp_setup() {
-        assert_eq!(enforced_redirect_target("/settings", true, true, 0), None);
         assert_eq!(
-            enforced_redirect_target("/settings/security/password", true, true, 0),
+            enforced_redirect_target("/settings", true, false, true, 0),
             None
         );
         assert_eq!(
-            enforced_redirect_target("/settings/security/totp/setup", true, true, 0),
+            enforced_redirect_target("/settings/security/password", true, false, true, 0),
+            None
+        );
+        assert_eq!(
+            enforced_redirect_target("/settings/security/totp/setup", true, false, true, 0),
             Some("/settings#security")
         );
         assert_eq!(
-            enforced_redirect_target("/sessions/new", true, true, 0),
+            enforced_redirect_target("/sessions/new", true, false, true, 0),
+            Some("/settings#security")
+        );
+    }
+
+    #[test]
+    fn recovery_notice_redirects_before_totp_setup() {
+        assert_eq!(
+            enforced_redirect_target("/settings", false, true, true, 5),
+            None
+        );
+        assert_eq!(
+            enforced_redirect_target("/settings/security/totp/setup", false, true, true, 5),
+            Some("/settings#security")
+        );
+        assert_eq!(
+            enforced_redirect_target("/sessions/new", false, true, false, 5),
             Some("/settings#security")
         );
     }
@@ -264,11 +324,11 @@ mod tests {
     #[test]
     fn totp_redirect_applies_after_password_reset_is_cleared() {
         assert_eq!(
-            enforced_redirect_target("/settings", false, true, 0),
+            enforced_redirect_target("/settings", false, false, true, 0),
             Some("/settings/security/totp/setup")
         );
         assert_eq!(
-            enforced_redirect_target("/settings/security/totp/setup", false, true, 0),
+            enforced_redirect_target("/settings/security/totp/setup", false, false, true, 0),
             None
         );
     }

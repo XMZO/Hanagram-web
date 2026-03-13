@@ -41,6 +41,8 @@ pub(crate) use tower_http::trace::TraceLayer;
 pub(crate) use tracing::{info, warn};
 pub(crate) use tracing_subscriber::EnvFilter;
 pub(crate) use uuid::Uuid;
+pub(crate) use webauthn_rp::request::auth::AuthenticationServerState;
+pub(crate) use webauthn_rp::request::register::RegistrationServerState;
 
 pub(crate) use hanagram_web::account_reset::{delete_user_account, reset_user_account};
 pub(crate) use hanagram_web::security::{
@@ -116,6 +118,11 @@ pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 10] = [
 pub(crate) type PendingPhoneFlows = Arc<RwLock<HashMap<String, PendingPhoneLogin>>>;
 pub(crate) type PendingQrFlows = Arc<RwLock<HashMap<String, PendingQrLogin>>>;
 pub(crate) type PendingTotpSetups = Arc<RwLock<HashMap<String, PendingTotpSetup>>>;
+pub(crate) type PendingPasskeyRegistrations =
+    Arc<RwLock<HashMap<String, PendingPasskeyRegistration>>>;
+pub(crate) type PendingPasskeyAuthentications =
+    Arc<RwLock<HashMap<String, PendingPasskeyAuthentication>>>;
+pub(crate) type PendingRecoveryNotices = Arc<RwLock<HashMap<String, PendingRecoveryNotice>>>;
 pub(crate) type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>>;
 pub(crate) type MetaStoreHandle = Arc<MetaStore>;
 pub(crate) type UnlockCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
@@ -133,6 +140,9 @@ pub(crate) struct AppState {
     pub(crate) phone_flows: PendingPhoneFlows,
     pub(crate) qr_flows: PendingQrFlows,
     pub(crate) totp_setups: PendingTotpSetups,
+    pub(crate) passkey_registrations: PendingPasskeyRegistrations,
+    pub(crate) passkey_authentications: PendingPasskeyAuthentications,
+    pub(crate) recovery_notices: PendingRecoveryNotices,
     pub(crate) unlock_cache: UnlockCache,
     pub(crate) user_keys: UserKeyCache,
     pub(crate) http_client: HttpClient,
@@ -183,6 +193,32 @@ pub(crate) struct PendingTotpSetup {
     pub(crate) secret: SharedSensitiveString,
     pub(crate) recovery_codes: Vec<SharedSensitiveString>,
     pub(crate) otp_auth_uri: SharedSensitiveString,
+}
+
+pub(crate) struct PendingPasskeyRegistration {
+    pub(crate) user_id: String,
+    pub(crate) auth_session_id: String,
+    pub(crate) label: String,
+    pub(crate) rp_id: String,
+    pub(crate) origin: String,
+    pub(crate) state: RegistrationServerState,
+}
+
+pub(crate) struct PendingPasskeyAuthentication {
+    pub(crate) user_id: String,
+    pub(crate) username: String,
+    pub(crate) rp_id: String,
+    pub(crate) origin: String,
+    pub(crate) state: AuthenticationServerState,
+    pub(crate) master_key: SharedMasterKey,
+    pub(crate) requires_totp_setup: bool,
+    pub(crate) requires_password_reset: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct PendingRecoveryNotice {
+    pub(crate) user_id: String,
+    pub(crate) recovery_codes: Vec<SharedSensitiveString>,
 }
 
 pub(crate) struct TelegramClientSession {
@@ -347,7 +383,55 @@ pub(crate) struct AdminUserView {
     pub(crate) password_reset_required: bool,
     pub(crate) active_sessions: usize,
     pub(crate) recovery_codes_remaining: i64,
+    pub(crate) passkey_count: usize,
     pub(crate) last_login_ip: Option<String>,
+    pub(crate) last_auth_method: Option<String>,
+    pub(crate) last_auth_at_unix: Option<i64>,
+    pub(crate) last_auth_success: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct PasskeyView {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) created_at: String,
+    pub(crate) last_used_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct RecoveryNoticeView {
+    pub(crate) codes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct AuditLogView {
+    pub(crate) action_type: String,
+    pub(crate) action_label: String,
+    pub(crate) actor_user_id: Option<String>,
+    pub(crate) actor_username: Option<String>,
+    pub(crate) subject_user_id: Option<String>,
+    pub(crate) subject_username: Option<String>,
+    pub(crate) username: Option<String>,
+    pub(crate) ip_address: Option<String>,
+    pub(crate) user_agent: Option<String>,
+    pub(crate) success: bool,
+    pub(crate) created_at_unix: i64,
+    pub(crate) login_method: Option<String>,
+    pub(crate) reason: Option<String>,
+    pub(crate) passkey_label: Option<String>,
+    pub(crate) details_pretty: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct RecentAuthActivityView {
+    pub(crate) username: String,
+    pub(crate) action_label: String,
+    pub(crate) method_label: String,
+    pub(crate) success: bool,
+    pub(crate) created_at_unix: i64,
+    pub(crate) ip_address: Option<String>,
+    pub(crate) reason: Option<String>,
+    pub(crate) passkey_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -420,12 +504,62 @@ pub(crate) struct LangQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub(crate) struct AdminPageQuery {
+    pub(crate) lang: Option<String>,
+    pub(crate) audit_search: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub(crate) struct LoginForm {
     pub(crate) username: String,
     pub(crate) password: String,
     pub(crate) mfa_code: Option<String>,
     pub(crate) recovery_code: Option<String>,
     pub(crate) lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PasskeyStartLoginRequest {
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PasskeyFinishLoginRequest {
+    pub(crate) request_id: String,
+    pub(crate) credential: serde_json::Value,
+    pub(crate) lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PasskeyStartRegistrationRequest {
+    pub(crate) label: String,
+    pub(crate) lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PasskeyFinishRegistrationRequest {
+    pub(crate) registration_id: String,
+    pub(crate) credential: serde_json::Value,
+    pub(crate) lang: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct PasskeyChallengeResponse {
+    pub(crate) request_id: String,
+    pub(crate) options: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct PasskeyRegistrationChallengeResponse {
+    pub(crate) registration_id: String,
+    pub(crate) options: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct PasskeyFinishResponse {
+    pub(crate) redirect_to: String,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -32,6 +32,16 @@ pub struct BotNotificationSettings {
     pub template: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct StoredPasskey {
+    pub id: String,
+    pub label: String,
+    pub credential_json: String,
+    pub created_at_unix: i64,
+    pub last_used_at_unix: Option<i64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct SystemSettings {
@@ -108,6 +118,7 @@ pub struct UserSecurityState {
     pub last_login_ip: Option<String>,
     pub preferred_idle_timeout_minutes: Option<u32>,
     pub bot_notification_settings: BotNotificationSettings,
+    pub passkeys: Vec<StoredPasskey>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

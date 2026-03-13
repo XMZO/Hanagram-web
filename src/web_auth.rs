@@ -17,9 +17,18 @@ use hanagram_web::security::{
     wrap_master_key,
 };
 use hanagram_web::store::{
-    AuthSessionRecord, MetaStore, NewAuditEntry, SystemSettings, UserRecord, UserRole,
+    AuthSessionRecord, MetaStore, NewAuditEntry, StoredPasskey, SystemSettings, UserRecord,
+    UserRole,
 };
 use serde_json::json;
+use uuid::Uuid;
+use webauthn_rp::bin::{Decode, Encode};
+use webauthn_rp::request::PublicKeyCredentialDescriptor;
+use webauthn_rp::request::register::UserHandle;
+use webauthn_rp::response::register::{
+    CompressedPubKey, DynamicState, StaticState, UncompressedPubKey,
+};
+use webauthn_rp::response::{AuthTransports, CredentialId};
 
 use crate::i18n::Language;
 
@@ -30,6 +39,13 @@ pub const AUTH_AUDIT_LOGIN_FAILURE: &str = "login_failure";
 pub const AUTH_AUDIT_REGISTER: &str = "user_registered";
 pub const AUTH_AUDIT_PASSWORD_CHANGED: &str = "password_changed";
 pub const AUTH_AUDIT_TOTP_UPDATED: &str = "totp_updated";
+pub const AUTH_AUDIT_PASSKEY_ADDED: &str = "passkey_added";
+pub const AUTH_AUDIT_PASSKEY_REMOVED: &str = "passkey_removed";
+pub const AUTH_AUDIT_RECOVERY_CODES_ROTATED: &str = "recovery_codes_rotated";
+pub const LOGIN_METHOD_PASSWORD_ONLY: &str = "password_only";
+pub const LOGIN_METHOD_PASSWORD_TOTP: &str = "password_totp";
+pub const LOGIN_METHOD_PASSWORD_RECOVERY: &str = "password_recovery_code";
+pub const LOGIN_METHOD_PASSWORD_PASSKEY: &str = "password_passkey";
 
 #[derive(Clone, Debug)]
 pub struct AuthenticatedSession {
@@ -53,6 +69,7 @@ pub struct LoginResult {
     pub master_key: MasterKey,
     pub requires_totp_setup: bool,
     pub requires_password_reset: bool,
+    pub recovery_notice_codes: Option<Vec<SharedSensitiveString>>,
 }
 
 pub struct TotpSetupMaterial {
@@ -61,12 +78,55 @@ pub struct TotpSetupMaterial {
     pub recovery_codes: Vec<SharedSensitiveString>,
 }
 
+pub struct PasskeyLoginChallenge {
+    pub user: UserRecord,
+    pub master_key: MasterKey,
+    pub requires_totp_setup: bool,
+    pub requires_password_reset: bool,
+}
+
+struct VerifiedPrimaryLogin {
+    user: UserRecord,
+    master_key: MasterKey,
+    requires_totp_setup: bool,
+    requires_password_reset: bool,
+}
+
 #[derive(Debug)]
 pub enum LoginError {
     InvalidCredentials,
     MissingSecondFactor,
     InvalidSecondFactor,
     LockedUntil(i64),
+}
+
+const STORED_PASSKEY_VERSION: u8 = 1;
+
+pub(crate) type StoredPasskeyStaticState =
+    StaticState<CompressedPubKey<[u8; 32], [u8; 32], [u8; 48], Vec<u8>>>;
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct StoredPasskeyMaterial {
+    version: u8,
+    credential_id_b64: String,
+    transports: u8,
+    static_state_b64: String,
+    dynamic_state_b64: String,
+}
+
+struct DecodedStoredPasskey {
+    credential_id: CredentialId<Vec<u8>>,
+    transports: AuthTransports,
+    static_state_b64: String,
+    static_state: StoredPasskeyStaticState,
+    dynamic_state: DynamicState,
+}
+
+pub(crate) struct PasskeyAuthenticationMaterial {
+    pub(crate) label: String,
+    pub(crate) credential_id: CredentialId<Vec<u8>>,
+    pub(crate) static_state: StoredPasskeyStaticState,
+    pub(crate) dynamic_state: DynamicState,
 }
 
 pub async fn register_user(
@@ -172,16 +232,15 @@ pub fn initialize_user_credentials(
     Ok(master_key)
 }
 
-pub async fn authenticate_user(
+async fn verify_primary_credentials(
     store: &MetaStore,
     settings: &SystemSettings,
     username: &str,
     password: &str,
-    mfa_code: Option<&str>,
-    recovery_code: Option<&str>,
     ip_address: Option<&str>,
     user_agent: Option<&str>,
-) -> Result<LoginResult, LoginError> {
+    login_method: Option<&str>,
+) -> Result<VerifiedPrimaryLogin, LoginError> {
     let Some(mut user) = store
         .get_user_by_username(
             &normalize_username(username).map_err(|_| LoginError::InvalidCredentials)?,
@@ -189,7 +248,17 @@ pub async fn authenticate_user(
         .await
         .map_err(|_| LoginError::InvalidCredentials)?
     else {
-        audit_login_failure(store, None, username, ip_address, "user_not_found").await;
+        audit_login_failure(
+            store,
+            None,
+            username,
+            ip_address,
+            user_agent,
+            "user_not_found",
+            login_method,
+            None,
+        )
+        .await;
         return Err(LoginError::InvalidCredentials);
     };
 
@@ -201,7 +270,10 @@ pub async fn authenticate_user(
                 Some(&user.id),
                 &user.username,
                 ip_address,
+                user_agent,
                 "account_locked",
+                login_method,
+                None,
             )
             .await;
             return Err(LoginError::LockedUntil(locked_until));
@@ -214,7 +286,10 @@ pub async fn authenticate_user(
             Some(&user.id),
             &user.username,
             ip_address,
+            user_agent,
             "password_not_set",
+            login_method,
+            None,
         )
         .await;
         return Err(LoginError::InvalidCredentials);
@@ -229,7 +304,15 @@ pub async fn authenticate_user(
     .map_err(|_| LoginError::InvalidCredentials)?
     {
         PasswordVerification::Invalid => {
-            register_failed_login(store, settings, &mut user, ip_address).await;
+            register_failed_login(
+                store,
+                settings,
+                &mut user,
+                ip_address,
+                user_agent,
+                login_method,
+            )
+            .await;
             return Err(LoginError::InvalidCredentials);
         }
         PasswordVerification::ValidNeedsRehash => {
@@ -244,100 +327,29 @@ pub async fn authenticate_user(
 
     let master_key = load_user_master_key(&user, password, &settings.argon_policy)
         .map_err(|_| LoginError::InvalidCredentials)?;
-    let requires_totp = settings
-        .totp_policy
-        .applies_to(user.role == UserRole::Admin);
-    let requires_password_reset = user.security.password_needs_reset;
 
-    if user.security.totp_enabled {
-        let secret = decrypt_user_totp_secret(&user, master_key.as_slice())
-            .map_err(|_| LoginError::InvalidSecondFactor)?;
-        let recent_steps = store
-            .list_recent_totp_steps(&user.id, now.div_euclid(TOTP_PERIOD_SECONDS) - 2)
-            .await
-            .map_err(|_| LoginError::InvalidSecondFactor)?;
-        let used_steps = recent_steps.into_iter().collect::<HashSet<_>>();
-        let mut satisfied = false;
+    Ok(VerifiedPrimaryLogin {
+        requires_totp_setup: settings
+            .totp_policy
+            .applies_to(user.role == UserRole::Admin)
+            && !user.security.totp_enabled,
+        requires_password_reset: user.security.password_needs_reset,
+        user,
+        master_key,
+    })
+}
 
-        if let Some(code) = mfa_code.filter(|value| !value.trim().is_empty()) {
-            match verify_totp(secret.as_str(), code, now, 1, &used_steps)
-                .map_err(|_| LoginError::InvalidSecondFactor)?
-            {
-                TotpVerification::Valid { matched_step } => {
-                    store
-                        .mark_totp_step_used(&user.id, matched_step)
-                        .await
-                        .map_err(|_| LoginError::InvalidSecondFactor)?;
-                    store
-                        .prune_used_totp_steps(now.div_euclid(TOTP_PERIOD_SECONDS) - 8)
-                        .await
-                        .ok();
-                    satisfied = true;
-                }
-                TotpVerification::Replay | TotpVerification::Invalid => {}
-            }
-        }
-
-        if !satisfied {
-            if let Some(candidate) = recovery_code.filter(|value| !value.trim().is_empty()) {
-                let recovery_codes = store
-                    .list_active_recovery_code_hashes(&user.id)
-                    .await
-                    .map_err(|_| LoginError::InvalidSecondFactor)?;
-                for (code_id, code_hash) in recovery_codes {
-                    if verify_recovery_code(candidate, &code_hash)
-                        .map_err(|_| LoginError::InvalidSecondFactor)?
-                    {
-                        store
-                            .mark_recovery_code_used(&code_id)
-                            .await
-                            .map_err(|_| LoginError::InvalidSecondFactor)?;
-                        satisfied = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if !satisfied {
-            audit_login_failure(
-                store,
-                Some(&user.id),
-                &user.username,
-                ip_address,
-                "second_factor_required",
-            )
-            .await;
-            return Err(if mfa_code.is_some() || recovery_code.is_some() {
-                LoginError::InvalidSecondFactor
-            } else {
-                LoginError::MissingSecondFactor
-            });
-        }
-    } else if requires_totp {
-        let session_token = generate_session_token();
-        let auth_session = issue_session_token(
-            store,
-            settings,
-            &user,
-            &session_token,
-            ip_address,
-            user_agent,
-        )
-        .await
-        .map_err(|_| LoginError::InvalidCredentials)?;
-
-        reset_successful_login_state(store, &mut user, ip_address).await;
-        audit_login_success(store, &user, ip_address, true).await;
-        return Ok(LoginResult {
-            auth_session,
-            session_token,
-            master_key,
-            requires_totp_setup: true,
-            requires_password_reset,
-        });
-    }
-
+async fn complete_login(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    verified: VerifiedPrimaryLogin,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+    login_method: &'static str,
+    passkey_label: Option<&str>,
+    recovery_codes_rotated: bool,
+) -> Result<LoginResult, LoginError> {
+    let mut user = verified.user;
     let session_token = generate_session_token();
     let auth_session = issue_session_token(
         store,
@@ -351,14 +363,527 @@ pub async fn authenticate_user(
     .map_err(|_| LoginError::InvalidCredentials)?;
 
     reset_successful_login_state(store, &mut user, ip_address).await;
-    audit_login_success(store, &user, ip_address, false).await;
+    audit_login_success(
+        store,
+        &user,
+        ip_address,
+        user_agent,
+        verified.requires_totp_setup,
+        login_method,
+        passkey_label,
+        recovery_codes_rotated,
+    )
+    .await;
+
     Ok(LoginResult {
         auth_session,
         session_token,
-        master_key,
-        requires_totp_setup: false,
-        requires_password_reset,
+        master_key: verified.master_key,
+        requires_totp_setup: verified.requires_totp_setup,
+        requires_password_reset: verified.requires_password_reset,
+        recovery_notice_codes: None,
     })
+}
+
+fn encode_passkey(
+    credential_id: CredentialId<&[u8]>,
+    transports: AuthTransports,
+    static_state: StaticState<UncompressedPubKey<'_>>,
+    dynamic_state: DynamicState,
+) -> Result<String> {
+    let static_state_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        static_state
+            .encode()
+            .expect("static state encoding is infallible"),
+    );
+    let dynamic_state_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        dynamic_state
+            .encode()
+            .expect("dynamic state encoding is infallible"),
+    );
+    let credential_id_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        credential_id
+            .encode()
+            .expect("credential id encoding is infallible"),
+    );
+    serde_json::to_string(&StoredPasskeyMaterial {
+        version: STORED_PASSKEY_VERSION,
+        credential_id_b64,
+        transports: transports
+            .encode()
+            .expect("transport encoding is infallible"),
+        static_state_b64,
+        dynamic_state_b64,
+    })
+    .context("failed to encode stored passkey")
+}
+
+fn decode_passkey(record: &StoredPasskey) -> Result<DecodedStoredPasskey> {
+    let material: StoredPasskeyMaterial =
+        serde_json::from_str(&record.credential_json).context("failed to parse stored passkey")?;
+    ensure!(
+        material.version == STORED_PASSKEY_VERSION,
+        "unsupported stored passkey version"
+    );
+
+    let static_state_b64 = material.static_state_b64.clone();
+    let credential_id_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(material.credential_id_b64)
+        .context("failed to decode stored passkey credential id")?;
+    let static_state_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(static_state_b64.as_str())
+        .context("failed to decode stored passkey static state")?;
+    let dynamic_state_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(material.dynamic_state_b64)
+        .context("failed to decode stored passkey dynamic state")?;
+    let dynamic_state_bytes: [u8; 7] = dynamic_state_bytes
+        .try_into()
+        .map_err(|_| anyhow!("stored passkey dynamic state has invalid length"))?;
+
+    Ok(DecodedStoredPasskey {
+        credential_id: CredentialId::decode(credential_id_bytes)
+            .context("failed to decode stored passkey credential id")?,
+        transports: AuthTransports::decode(material.transports)
+            .context("failed to decode stored passkey transports")?,
+        static_state_b64,
+        static_state: StoredPasskeyStaticState::decode(static_state_bytes.as_slice())
+            .context("failed to decode stored passkey static state")?,
+        dynamic_state: DynamicState::decode(dynamic_state_bytes)
+            .context("failed to decode stored passkey dynamic state")?,
+    })
+}
+
+fn passkey_descriptor(decoded: &DecodedStoredPasskey) -> PublicKeyCredentialDescriptor<Vec<u8>> {
+    PublicKeyCredentialDescriptor {
+        id: decoded.credential_id.clone(),
+        transports: decoded.transports,
+    }
+}
+
+pub(crate) fn user_handle_for(user: &UserRecord) -> Result<UserHandle<Vec<u8>>> {
+    UserHandle::try_from(user.id.as_bytes().to_vec()).context("failed to construct user handle")
+}
+
+pub(crate) fn passkey_descriptors(
+    user: &UserRecord,
+) -> Result<Vec<PublicKeyCredentialDescriptor<Vec<u8>>>> {
+    user.security
+        .passkeys
+        .iter()
+        .map(decode_passkey)
+        .map(|result| result.map(|decoded| passkey_descriptor(&decoded)))
+        .collect()
+}
+
+pub(crate) fn user_has_passkey_credential_id(
+    user: &UserRecord,
+    credential_id: &CredentialId<Vec<u8>>,
+) -> Result<bool> {
+    for record in &user.security.passkeys {
+        if decode_passkey(record)?.credential_id == credential_id.clone() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn passkey_authentication_material(
+    user: &UserRecord,
+    credential_id: &CredentialId<Vec<u8>>,
+) -> Result<Option<PasskeyAuthenticationMaterial>> {
+    for record in &user.security.passkeys {
+        let decoded = decode_passkey(record)?;
+        if decoded.credential_id == credential_id.clone() {
+            return Ok(Some(PasskeyAuthenticationMaterial {
+                label: record.label.clone(),
+                credential_id: decoded.credential_id,
+                static_state: decoded.static_state,
+                dynamic_state: decoded.dynamic_state,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn hash_shared_recovery_codes(recovery_codes: &[SharedSensitiveString]) -> Result<Vec<String>> {
+    let mut recovery_code_hashes = Vec::with_capacity(recovery_codes.len());
+    for code in recovery_codes {
+        recovery_code_hashes.push(hash_recovery_code(
+            code.as_ref().as_str(),
+            &ArgonPolicy::minimum(),
+        )?);
+    }
+    Ok(recovery_code_hashes)
+}
+
+pub async fn rotate_recovery_codes(
+    store: &MetaStore,
+    user: &UserRecord,
+    reason: &str,
+) -> Result<Vec<SharedSensitiveString>> {
+    let recovery_codes = generate_recovery_codes(RECOVERY_CODE_COUNT)
+        .into_iter()
+        .map(into_sensitive_string)
+        .map(share_sensitive_string)
+        .collect::<Vec<_>>();
+    let recovery_code_hashes = hash_shared_recovery_codes(&recovery_codes)?;
+    store
+        .replace_recovery_codes(&user.id, &recovery_code_hashes)
+        .await?;
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_RECOVERY_CODES_ROTATED),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: json!({
+                "username": user.username,
+                "reason": reason,
+                "recovery_codes": recovery_codes.len(),
+            })
+            .to_string(),
+        })
+        .await?;
+    Ok(recovery_codes)
+}
+
+pub async fn add_passkey_to_user(
+    store: &MetaStore,
+    user: &mut UserRecord,
+    label: &str,
+    credential_id: CredentialId<&[u8]>,
+    transports: AuthTransports,
+    static_state: StaticState<UncompressedPubKey<'_>>,
+    dynamic_state: DynamicState,
+) -> Result<()> {
+    let normalized_label = label.trim();
+    ensure!(
+        !normalized_label.is_empty(),
+        "passkey label cannot be empty"
+    );
+    let encoded = encode_passkey(credential_id, transports, static_state, dynamic_state)?;
+    let passkey_id = Uuid::new_v4().to_string();
+    user.security.passkeys.push(StoredPasskey {
+        id: passkey_id,
+        label: normalized_label.to_owned(),
+        credential_json: encoded,
+        created_at_unix: Utc::now().timestamp(),
+        last_used_at_unix: None,
+    });
+    user.updated_at_unix = Utc::now().timestamp();
+    store.save_user(user).await?;
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_PASSKEY_ADDED),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: json!({
+                "username": user.username,
+                "label": normalized_label,
+                "passkey_count": user.security.passkeys.len(),
+            })
+            .to_string(),
+        })
+        .await?;
+    Ok(())
+}
+
+pub async fn remove_passkey_from_user(
+    store: &MetaStore,
+    user: &mut UserRecord,
+    passkey_id: &str,
+) -> Result<bool> {
+    let original_len = user.security.passkeys.len();
+    let removed = user
+        .security
+        .passkeys
+        .iter()
+        .find(|record| record.id == passkey_id)
+        .map(|record| record.label.clone());
+    user.security
+        .passkeys
+        .retain(|record| record.id != passkey_id);
+    if user.security.passkeys.len() == original_len {
+        return Ok(false);
+    }
+    user.updated_at_unix = Utc::now().timestamp();
+    store.save_user(user).await?;
+    store
+        .record_audit(&NewAuditEntry {
+            action_type: String::from(AUTH_AUDIT_PASSKEY_REMOVED),
+            actor_user_id: Some(user.id.clone()),
+            subject_user_id: Some(user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: json!({
+                "username": user.username,
+                "label": removed,
+                "passkey_count": user.security.passkeys.len(),
+            })
+            .to_string(),
+        })
+        .await?;
+    Ok(true)
+}
+
+pub async fn passkey_registered_to_other_user(
+    store: &MetaStore,
+    current_user_id: &str,
+    credential_id: &CredentialId<Vec<u8>>,
+) -> Result<bool> {
+    let users = store.list_users().await?;
+    for user in users {
+        if user.id == current_user_id {
+            continue;
+        }
+        if user_has_passkey_credential_id(&user, credential_id)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn update_user_passkey_usage(
+    user: &mut UserRecord,
+    credential_id: &CredentialId<Vec<u8>>,
+    dynamic_state: DynamicState,
+) -> Result<Option<String>> {
+    for record in &mut user.security.passkeys {
+        let decoded = decode_passkey(record)?;
+        if decoded.credential_id == credential_id.clone() {
+            let dynamic_state_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                dynamic_state
+                    .encode()
+                    .expect("dynamic state encoding is infallible"),
+            );
+            record.credential_json = serde_json::to_string(&StoredPasskeyMaterial {
+                version: STORED_PASSKEY_VERSION,
+                credential_id_b64: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                    decoded
+                        .credential_id
+                        .encode()
+                        .expect("credential id encoding is infallible"),
+                ),
+                transports: decoded
+                    .transports
+                    .encode()
+                    .expect("transport encoding is infallible"),
+                static_state_b64: decoded.static_state_b64,
+                dynamic_state_b64,
+            })
+            .context("failed to encode updated stored passkey")?;
+            record.last_used_at_unix = Some(Utc::now().timestamp());
+            return Ok(Some(record.label.clone()));
+        }
+    }
+    Ok(None)
+}
+
+pub async fn authenticate_user(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    username: &str,
+    password: &str,
+    mfa_code: Option<&str>,
+    recovery_code: Option<&str>,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+) -> Result<LoginResult, LoginError> {
+    let attempted_login_method = if recovery_code.is_some_and(|value| !value.trim().is_empty()) {
+        LOGIN_METHOD_PASSWORD_RECOVERY
+    } else if mfa_code.is_some_and(|value| !value.trim().is_empty()) {
+        LOGIN_METHOD_PASSWORD_TOTP
+    } else {
+        LOGIN_METHOD_PASSWORD_ONLY
+    };
+    let verified = verify_primary_credentials(
+        store,
+        settings,
+        username,
+        password,
+        ip_address,
+        user_agent,
+        Some(attempted_login_method),
+    )
+    .await?;
+    let now = Utc::now().timestamp();
+    if verified.user.security.totp_enabled {
+        let secret = decrypt_user_totp_secret(&verified.user, verified.master_key.as_slice())
+            .map_err(|_| LoginError::InvalidSecondFactor)?;
+        let recent_steps = store
+            .list_recent_totp_steps(&verified.user.id, now.div_euclid(TOTP_PERIOD_SECONDS) - 2)
+            .await
+            .map_err(|_| LoginError::InvalidSecondFactor)?;
+        let used_steps = recent_steps.into_iter().collect::<HashSet<_>>();
+        let mut recovery_notice_codes = None;
+        let mut login_method = LOGIN_METHOD_PASSWORD_ONLY;
+
+        if let Some(code) = mfa_code.filter(|value| !value.trim().is_empty()) {
+            match verify_totp(secret.as_str(), code, now, 1, &used_steps)
+                .map_err(|_| LoginError::InvalidSecondFactor)?
+            {
+                TotpVerification::Valid { matched_step } => {
+                    store
+                        .mark_totp_step_used(&verified.user.id, matched_step)
+                        .await
+                        .map_err(|_| LoginError::InvalidSecondFactor)?;
+                    store
+                        .prune_used_totp_steps(now.div_euclid(TOTP_PERIOD_SECONDS) - 8)
+                        .await
+                        .ok();
+                    login_method = LOGIN_METHOD_PASSWORD_TOTP;
+                }
+                TotpVerification::Replay | TotpVerification::Invalid => {}
+            }
+        }
+
+        if login_method == LOGIN_METHOD_PASSWORD_ONLY {
+            if let Some(candidate) = recovery_code.filter(|value| !value.trim().is_empty()) {
+                let recovery_codes = store
+                    .list_active_recovery_code_hashes(&verified.user.id)
+                    .await
+                    .map_err(|_| LoginError::InvalidSecondFactor)?;
+                for (code_id, code_hash) in recovery_codes {
+                    if verify_recovery_code(candidate, &code_hash)
+                        .map_err(|_| LoginError::InvalidSecondFactor)?
+                    {
+                        store
+                            .mark_recovery_code_used(&code_id)
+                            .await
+                            .map_err(|_| LoginError::InvalidSecondFactor)?;
+                        recovery_notice_codes = Some(
+                            rotate_recovery_codes(store, &verified.user, "recovery_code_login")
+                                .await
+                                .map_err(|_| LoginError::InvalidSecondFactor)?,
+                        );
+                        login_method = LOGIN_METHOD_PASSWORD_RECOVERY;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if login_method == LOGIN_METHOD_PASSWORD_ONLY {
+            audit_login_failure(
+                store,
+                Some(&verified.user.id),
+                &verified.user.username,
+                ip_address,
+                user_agent,
+                "second_factor_required",
+                Some(attempted_login_method),
+                None,
+            )
+            .await;
+            return Err(if mfa_code.is_some() || recovery_code.is_some() {
+                LoginError::InvalidSecondFactor
+            } else {
+                LoginError::MissingSecondFactor
+            });
+        }
+
+        let mut login_result = complete_login(
+            store,
+            settings,
+            verified,
+            ip_address,
+            user_agent,
+            login_method,
+            None,
+            recovery_notice_codes.is_some(),
+        )
+        .await?;
+        login_result.recovery_notice_codes = recovery_notice_codes;
+        return Ok(login_result);
+    }
+
+    complete_login(
+        store,
+        settings,
+        verified,
+        ip_address,
+        user_agent,
+        LOGIN_METHOD_PASSWORD_ONLY,
+        None,
+        false,
+    )
+    .await
+}
+
+pub async fn begin_passkey_login(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    username: &str,
+    password: &str,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+) -> Result<PasskeyLoginChallenge, LoginError> {
+    let verified = verify_primary_credentials(
+        store,
+        settings,
+        username,
+        password,
+        ip_address,
+        user_agent,
+        Some(LOGIN_METHOD_PASSWORD_PASSKEY),
+    )
+    .await?;
+    if passkey_descriptors(&verified.user)
+        .map_err(|_| LoginError::InvalidSecondFactor)?
+        .is_empty()
+    {
+        audit_login_failure(
+            store,
+            Some(&verified.user.id),
+            &verified.user.username,
+            ip_address,
+            user_agent,
+            "passkey_not_configured",
+            Some(LOGIN_METHOD_PASSWORD_PASSKEY),
+            None,
+        )
+        .await;
+        return Err(LoginError::MissingSecondFactor);
+    }
+
+    Ok(PasskeyLoginChallenge {
+        user: verified.user,
+        master_key: verified.master_key,
+        requires_totp_setup: verified.requires_totp_setup,
+        requires_password_reset: verified.requires_password_reset,
+    })
+}
+
+pub async fn authenticate_user_with_passkey(
+    store: &MetaStore,
+    settings: &SystemSettings,
+    user: UserRecord,
+    master_key: MasterKey,
+    requires_totp_setup: bool,
+    requires_password_reset: bool,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+    passkey_label: Option<&str>,
+) -> Result<LoginResult, LoginError> {
+    complete_login(
+        store,
+        settings,
+        VerifiedPrimaryLogin {
+            user,
+            master_key,
+            requires_totp_setup,
+            requires_password_reset,
+        },
+        ip_address,
+        user_agent,
+        LOGIN_METHOD_PASSWORD_PASSKEY,
+        passkey_label,
+        false,
+    )
+    .await
 }
 
 pub async fn resolve_authenticated_session(
@@ -469,13 +994,7 @@ pub async fn save_totp_setup(
     recovery_codes: &[SharedSensitiveString],
 ) -> Result<()> {
     let encrypted_secret = encrypt_bytes(master_key, secret.as_bytes())?;
-    let mut recovery_code_hashes = Vec::new();
-    for code in recovery_codes {
-        recovery_code_hashes.push(hash_recovery_code(
-            code.as_ref().as_str(),
-            &ArgonPolicy::minimum(),
-        )?);
-    }
+    let recovery_code_hashes = hash_shared_recovery_codes(recovery_codes)?;
 
     user.security.totp_secret_json =
         Some(serde_json::to_string(&encrypted_secret).context("failed to encode totp secret")?);
@@ -750,6 +1269,8 @@ async fn register_failed_login(
     settings: &SystemSettings,
     user: &mut UserRecord,
     ip_address: Option<&str>,
+    user_agent: Option<&str>,
+    login_method: Option<&str>,
 ) {
     user.security.login_failures = user.security.login_failures.saturating_add(1);
     let delay = hanagram_web::security::next_lockout_delay(
@@ -769,7 +1290,10 @@ async fn register_failed_login(
         Some(&user.id),
         &user.username,
         ip_address,
+        user_agent,
         "invalid_password",
+        login_method,
+        None,
     )
     .await;
 }
@@ -794,7 +1318,10 @@ async fn audit_login_failure(
     user_id: Option<&str>,
     username: &str,
     ip_address: Option<&str>,
+    user_agent: Option<&str>,
     reason: &str,
+    login_method: Option<&str>,
+    passkey_label: Option<&str>,
 ) {
     let _ = store
         .record_audit(&NewAuditEntry {
@@ -805,23 +1332,57 @@ async fn audit_login_failure(
             success: false,
             details_json: json!({
                 "username": username,
-                "reason": reason
+                "reason": reason,
+                "login_method": login_method,
+                "passkey_label": passkey_label,
+                "user_agent": user_agent
             })
             .to_string(),
         })
         .await;
 }
 
+pub async fn record_login_failure(
+    store: &MetaStore,
+    user_id: Option<&str>,
+    username: &str,
+    ip_address: Option<&str>,
+    user_agent: Option<&str>,
+    reason: &str,
+    login_method: Option<&str>,
+    passkey_label: Option<&str>,
+) {
+    audit_login_failure(
+        store,
+        user_id,
+        username,
+        ip_address,
+        user_agent,
+        reason,
+        login_method,
+        passkey_label,
+    )
+    .await;
+}
+
 async fn audit_login_success(
     store: &MetaStore,
     user: &UserRecord,
     ip_address: Option<&str>,
+    user_agent: Option<&str>,
     requires_totp_setup: bool,
+    login_method: &str,
+    passkey_label: Option<&str>,
+    recovery_codes_rotated: bool,
 ) {
     let details = json!({
         "username": user.username,
+        "login_method": login_method,
+        "passkey_label": passkey_label,
         "requires_totp_setup": requires_totp_setup,
-        "new_ip": ip_address.is_some() && user.security.last_login_ip.as_deref() != ip_address
+        "new_ip": ip_address.is_some() && user.security.last_login_ip.as_deref() != ip_address,
+        "recovery_codes_rotated": recovery_codes_rotated,
+        "user_agent": user_agent,
     });
     let _ = store
         .record_audit(&NewAuditEntry {

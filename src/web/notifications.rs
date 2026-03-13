@@ -144,7 +144,8 @@ async fn render_notification_workspace_page(
             auth::render_settings_page(app_state, authenticated, language, banner, headers).await
         }
         Some("admin") if authenticated.user.role == UserRole::Admin => {
-            admin::render_admin_page(app_state, authenticated, language, banner, headers).await
+            admin::render_admin_page(app_state, authenticated, language, None, banner, headers)
+                .await
         }
         _ => {
             render_notification_settings_page(app_state, authenticated, language, banner, headers)

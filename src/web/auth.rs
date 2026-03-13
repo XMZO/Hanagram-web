@@ -2,6 +2,19 @@
 // Copyright (C) 2026 Hanagram-web contributors
 
 use crate::web_auth;
+use webauthn_rp::AuthenticatedCredential;
+use webauthn_rp::request::auth::{
+    AllowedCredentials, AuthenticationVerificationOptions, PublicKeyCredentialRequestOptions,
+};
+use webauthn_rp::request::register::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialUserEntity,
+    RegistrationVerificationOptions,
+};
+use webauthn_rp::request::{
+    AsciiDomain, Credentials, DomainOrigin, RpId, UserVerificationRequirement,
+};
+use webauthn_rp::response::auth::Authentication;
+use webauthn_rp::response::register::Registration;
 
 use super::middleware::{
     cache_user_master_key, clear_auth_session_sensitive_state, clear_invalid_cookie_state,
@@ -16,6 +29,11 @@ pub(crate) fn public_routes() -> Router<AppState> {
             get(register_page_handler).post(register_submit_handler),
         )
         .route("/login", get(login_page_handler).post(login_submit_handler))
+        .route(
+            "/login/passkey/options",
+            post(login_passkey_options_handler),
+        )
+        .route("/login/passkey/finish", post(login_passkey_finish_handler))
         .route("/logout", post(logout_handler))
         .route("/language/{language_code}", get(select_language_handler))
 }
@@ -31,6 +49,22 @@ pub(crate) fn protected_routes() -> Router<AppState> {
         .route(
             "/settings/security/totp/setup",
             get(totp_setup_page_handler).post(confirm_totp_setup_handler),
+        )
+        .route(
+            "/settings/security/passkeys/register/options",
+            post(start_passkey_registration_handler),
+        )
+        .route(
+            "/settings/security/passkeys/register/finish",
+            post(finish_passkey_registration_handler),
+        )
+        .route(
+            "/settings/security/passkeys/{passkey_id}/delete",
+            post(delete_passkey_handler),
+        )
+        .route(
+            "/settings/security/recovery/ack",
+            post(acknowledge_recovery_notice_handler),
         )
 }
 
@@ -76,6 +110,89 @@ fn sanitized_language_return_path(headers: &HeaderMap) -> String {
     }
 }
 
+struct PasskeyRelyingParty {
+    rp_id: String,
+    origin: String,
+}
+
+fn json_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(ApiErrorResponse {
+            error: message.into(),
+        }),
+    )
+        .into_response()
+}
+
+fn request_host(headers: &HeaderMap) -> Option<String> {
+    for header_name in ["x-forwarded-host", "host"] {
+        let Some(value) = headers.get(header_name) else {
+            continue;
+        };
+        let Ok(raw_value) = value.to_str() else {
+            continue;
+        };
+        let Some(candidate) = raw_value
+            .split(',')
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        return Some(candidate.to_owned());
+    }
+
+    None
+}
+
+fn passkey_relying_party(
+    headers: &HeaderMap,
+    language: Language,
+) -> std::result::Result<PasskeyRelyingParty, String> {
+    let translations = language.translations();
+    let Some(host) = request_host(headers) else {
+        return Err(String::from(translations.passkey_not_supported_message));
+    };
+
+    let scheme = if request_uses_https(headers) {
+        "https"
+    } else {
+        "http"
+    };
+    let origin = format!("{scheme}://{host}");
+    let rp_id = host.split(':').next().unwrap_or_default().trim().to_owned();
+    if rp_id.is_empty() {
+        return Err(String::from(translations.passkey_not_supported_message));
+    }
+    if scheme != "https" && rp_id != "localhost" {
+        return Err(String::from(translations.passkey_not_supported_message));
+    }
+    if rp_id.parse::<std::net::IpAddr>().is_ok() {
+        return Err(String::from(translations.passkey_not_supported_message));
+    }
+
+    Ok(PasskeyRelyingParty { rp_id, origin })
+}
+
+fn passkey_rp_id(rp_id: &str) -> Result<RpId> {
+    Ok(RpId::Domain(
+        AsciiDomain::try_from(rp_id.to_owned()).context("failed to parse passkey rp id")?,
+    ))
+}
+
+fn passkey_allowed_origin(origin: &str) -> Result<DomainOrigin<'_, '_>> {
+    DomainOrigin::try_from(origin).context("failed to parse passkey origin")
+}
+
+fn passkey_public_key_options<T: serde::Serialize>(client_state: &T) -> Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "publicKey": serde_json::to_value(client_state)
+            .context("failed to serialize passkey client state")?
+    }))
+}
+
 async fn render_login_page(
     app_state: &AppState,
     language: Language,
@@ -86,6 +203,7 @@ async fn render_login_page(
     let languages = language_options(language, "/login");
     let settings = app_state.system_settings.read().await.clone();
     let show_register = registration_page_allowed(&app_state.meta_store, &settings).await;
+    let passkey_availability = passkey_relying_party(headers, language).err();
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -99,6 +217,21 @@ async fn render_login_page(
     context.insert("recovery_label", &translations.login_recovery_label);
     context.insert("mfa_hint", &translations.login_mfa_hint);
     context.insert("ready_label", &translations.login_ready_label);
+    context.insert(
+        "recovery_toggle_label",
+        &translations.login_recovery_toggle_label,
+    );
+    context.insert(
+        "recovery_back_label",
+        &translations.login_recovery_back_label,
+    );
+    context.insert("passkey_label", &translations.login_passkey_label);
+    context.insert("passkey_hint", &translations.login_passkey_hint);
+    context.insert("passkey_supported", &(passkey_availability.is_none()));
+    context.insert(
+        "passkey_unavailable_message",
+        &passkey_availability.unwrap_or_default(),
+    );
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "login.html", &context)
@@ -212,6 +345,37 @@ pub(crate) async fn render_settings_page(
     let bot_destination = bot_destination_summary(&bot_settings, language);
     let bot_template_preview = template_preview(&bot_settings.template, 68);
     let bot_placeholders = build_bot_placeholder_hints(language).to_vec();
+    let passkey_views = authenticated
+        .user
+        .security
+        .passkeys
+        .iter()
+        .map(|record| PasskeyView {
+            id: record.id.clone(),
+            label: record.label.clone(),
+            created_at: format_unix_timestamp(record.created_at_unix),
+            last_used_at: record
+                .last_used_at_unix
+                .map(format_unix_timestamp)
+                .unwrap_or_else(|| String::from("-")),
+        })
+        .collect::<Vec<_>>();
+    let recovery_notice = app_state
+        .recovery_notices
+        .read()
+        .await
+        .get(&authenticated.auth_session.id)
+        .cloned()
+        .map(|notice| RecoveryNoticeView {
+            codes: notice
+                .recovery_codes
+                .iter()
+                .map(|code| code.as_ref().as_str().to_owned())
+                .collect(),
+        });
+    let show_workspace_links = !authenticated.requires_password_reset && recovery_notice.is_none();
+    let passkey_unavailable_message = passkey_relying_party(headers, language).err();
+    let passkey_supported = passkey_unavailable_message.is_none();
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -223,10 +387,7 @@ pub(crate) async fn render_settings_page(
         "password_reset_required",
         &authenticated.requires_password_reset,
     );
-    context.insert(
-        "show_workspace_links",
-        &(!authenticated.requires_password_reset),
-    );
+    context.insert("show_workspace_links", &show_workspace_links);
     context.insert("show_admin", &(authenticated.user.role == UserRole::Admin));
     context.insert("admin_href", &admin_href(language));
     context.insert("dashboard_href", &dashboard_href(language));
@@ -257,6 +418,9 @@ pub(crate) async fn render_settings_page(
         &authenticated.recovery_codes_remaining.to_string(),
     );
     context.insert("recovery_hint", &translations.settings_recovery_hint);
+    context.insert("passkeys_label", &translations.settings_passkeys_label);
+    context.insert("passkeys_hint", &translations.settings_passkeys_hint);
+    context.insert("passkey_count", &authenticated.user.security.passkeys.len());
     context.insert("idle_label", &translations.settings_idle_label);
     context.insert("idle_timeout", &idle_timeout);
     context.insert(
@@ -279,6 +443,57 @@ pub(crate) async fn render_settings_page(
     );
     context.insert("totp_setup_href", "/settings/security/totp/setup");
     context.insert("totp_setup_label", &translations.settings_totp_setup_label);
+    context.insert("passkeys_title", &translations.settings_passkeys_title);
+    context.insert(
+        "passkeys_description",
+        &translations.settings_passkeys_description,
+    );
+    context.insert("passkeys", &passkey_views);
+    context.insert("passkey_supported", &passkey_supported);
+    context.insert(
+        "passkey_unavailable_message",
+        &passkey_unavailable_message.unwrap_or_default(),
+    );
+    context.insert(
+        "passkey_name_label",
+        &translations.settings_passkey_name_label,
+    );
+    context.insert(
+        "passkey_name_placeholder",
+        &translations.settings_passkey_name_placeholder,
+    );
+    context.insert(
+        "passkey_add_label",
+        &translations.settings_passkey_add_label,
+    );
+    context.insert(
+        "passkey_created_label",
+        &translations.settings_passkey_created_label,
+    );
+    context.insert(
+        "passkey_last_used_label",
+        &translations.settings_passkey_last_used_label,
+    );
+    context.insert(
+        "passkey_empty_label",
+        &translations.settings_passkey_empty_label,
+    );
+    context.insert(
+        "passkey_delete_label",
+        &translations.settings_passkey_delete_label,
+    );
+    context.insert(
+        "passkey_delete_confirm_message",
+        &translations.settings_passkey_delete_confirm,
+    );
+    context.insert(
+        "passkey_register_options_action",
+        "/settings/security/passkeys/register/options",
+    );
+    context.insert(
+        "passkey_register_finish_action",
+        "/settings/security/passkeys/register/finish",
+    );
     context.insert("password_title", &translations.settings_password_title);
     context.insert("password_action", "/settings/security/password");
     context.insert(
@@ -387,6 +602,20 @@ pub(crate) async fn render_settings_page(
             .settings_access_other_sessions_hint
             .replace("{count}", &other_session_count.to_string()),
     );
+    context.insert("recovery_notice", &recovery_notice);
+    context.insert(
+        "recovery_refresh_title",
+        &translations.settings_recovery_refresh_title,
+    );
+    context.insert(
+        "recovery_refresh_message",
+        &translations.settings_recovery_refresh_message,
+    );
+    context.insert("recovery_ack_action", "/settings/security/recovery/ack");
+    context.insert(
+        "recovery_ack_label",
+        &translations.settings_recovery_ack_label,
+    );
     context.insert("banner", &banner);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -487,7 +716,14 @@ async fn login_page_handler(
     if let Ok(Some(authenticated)) =
         resolve_authenticated_session(&app_state.meta_store, &settings, &headers).await
     {
-        let target = if authenticated.requires_password_reset {
+        let target = if app_state
+            .recovery_notices
+            .read()
+            .await
+            .contains_key(&authenticated.auth_session.id)
+        {
+            security_settings_target()
+        } else if authenticated.requires_password_reset {
             security_settings_target()
         } else if authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0 {
             String::from("/settings/security/totp/setup")
@@ -554,8 +790,20 @@ async fn login_submit_handler(
             )
             .await;
 
+            if let Some(recovery_notice_codes) = &login_result.recovery_notice_codes {
+                app_state.recovery_notices.write().await.insert(
+                    login_result.auth_session.id.clone(),
+                    PendingRecoveryNotice {
+                        user_id: login_result.auth_session.user_id.clone(),
+                        recovery_codes: recovery_notice_codes.clone(),
+                    },
+                );
+            }
+
             let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
-            let redirect_target = if login_result.requires_password_reset {
+            let redirect_target = if login_result.recovery_notice_codes.is_some()
+                || login_result.requires_password_reset
+            {
                 security_settings_target()
             } else if login_result.requires_totp_setup {
                 String::from("/settings/security/totp/setup")
@@ -614,6 +862,428 @@ async fn login_submit_handler(
                 Err(status) => status.into_response(),
             }
         }
+    }
+}
+
+async fn login_passkey_options_handler(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PasskeyStartLoginRequest>,
+) -> Response {
+    let language = detect_language(&headers, request.lang.as_deref());
+    let translations = language.translations();
+    let passkey_rp = match passkey_relying_party(&headers, language) {
+        Ok(value) => value,
+        Err(message) => return json_error_response(StatusCode::BAD_REQUEST, message),
+    };
+    let settings = app_state.system_settings.read().await.clone();
+    let ip_address = extract_client_ip(&headers);
+    let user_agent = extract_user_agent(&headers);
+
+    let challenge = match web_auth::begin_passkey_login(
+        &app_state.meta_store,
+        &settings,
+        &request.username,
+        &request.password,
+        ip_address.as_deref(),
+        user_agent.as_deref(),
+    )
+    .await
+    {
+        Ok(challenge) => challenge,
+        Err(LoginError::LockedUntil(locked_until)) => {
+            return json_error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                translations
+                    .login_locked_until_message
+                    .replace("{locked_until}", &locked_until.to_string()),
+            );
+        }
+        Err(LoginError::MissingSecondFactor) => {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_no_credentials_message,
+            );
+        }
+        Err(LoginError::InvalidSecondFactor | LoginError::InvalidCredentials) => {
+            return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
+        }
+    };
+
+    let rp_id = match passkey_rp_id(&passkey_rp.rp_id) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed parsing passkey rp id {} for {}: {}",
+                passkey_rp.rp_id, challenge.user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let descriptors = match web_auth::passkey_descriptors(&challenge.user) {
+        Ok(value) if value.is_empty() => {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_no_credentials_message,
+            );
+        }
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed loading passkey descriptors for {}: {}",
+                challenge.user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let mut allowed_credentials = AllowedCredentials::with_capacity(descriptors.len());
+    for descriptor in descriptors {
+        allowed_credentials.push(descriptor.into());
+    }
+    let mut request_options =
+        match PublicKeyCredentialRequestOptions::second_factor(&rp_id, allowed_credentials) {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    "failed configuring passkey authentication for {}: {}",
+                    challenge.user.username, error
+                );
+                return json_error_response(
+                    StatusCode::BAD_REQUEST,
+                    translations.passkey_authentication_failed_message,
+                );
+            }
+        };
+    request_options.user_verification = UserVerificationRequirement::Required;
+    let (state, client_state) = match request_options.start_ceremony() {
+        Ok(values) => values,
+        Err(error) => {
+            warn!(
+                "failed starting passkey authentication for {}: {}",
+                challenge.user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+
+    let request_id = Uuid::new_v4().to_string();
+    let challenge_username = challenge.user.username.clone();
+    app_state.passkey_authentications.write().await.insert(
+        request_id.clone(),
+        PendingPasskeyAuthentication {
+            user_id: challenge.user.id,
+            username: challenge.user.username,
+            rp_id: passkey_rp.rp_id,
+            origin: passkey_rp.origin,
+            state,
+            master_key: share_master_key(challenge.master_key),
+            requires_totp_setup: challenge.requires_totp_setup,
+            requires_password_reset: challenge.requires_password_reset,
+        },
+    );
+    let options = match passkey_public_key_options(&client_state) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed serializing passkey authentication options for {}: {}",
+                challenge_username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+
+    Json(PasskeyChallengeResponse {
+        request_id,
+        options,
+    })
+    .into_response()
+}
+
+async fn login_passkey_finish_handler(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PasskeyFinishLoginRequest>,
+) -> Response {
+    let language = detect_language(&headers, request.lang.as_deref());
+    let translations = language.translations();
+    let Some(pending) = app_state
+        .passkey_authentications
+        .write()
+        .await
+        .remove(&request.request_id)
+    else {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_challenge_expired_message,
+        );
+    };
+    let rp_id = match passkey_rp_id(&pending.rp_id) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed rebuilding passkey rp {} for {}: {}",
+                pending.rp_id, pending.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let allowed_origin = match passkey_allowed_origin(&pending.origin) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed rebuilding passkey origin {} for {}: {}",
+                pending.origin, pending.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let authentication: Authentication = match serde_json::from_value(request.credential) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed decoding passkey authentication payload for {}: {}",
+                pending.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let credential_id = authentication.raw_id().into();
+
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&pending.user_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
+    };
+    let passkey = match web_auth::passkey_authentication_material(&user, &credential_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            web_auth::record_login_failure(
+                &app_state.meta_store,
+                Some(&user.id),
+                &user.username,
+                extract_client_ip(&headers).as_deref(),
+                extract_user_agent(&headers).as_deref(),
+                "passkey_not_found",
+                Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+                None,
+            )
+            .await;
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_not_found_message,
+            );
+        }
+        Err(error) => {
+            warn!(
+                "failed loading passkey material for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let user_handle = match web_auth::user_handle_for(&user) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing user handle for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let mut credential = match AuthenticatedCredential::new(
+        (&passkey.credential_id).into(),
+        (&user_handle).into(),
+        passkey.static_state,
+        passkey.dynamic_state,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing passkey credential for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+    let verification_options: AuthenticationVerificationOptions<
+        '_,
+        '_,
+        DomainOrigin<'_, '_>,
+        DomainOrigin<'_, '_>,
+    > = AuthenticationVerificationOptions {
+        allowed_origins: std::slice::from_ref(&allowed_origin),
+        update_uv: true,
+        ..AuthenticationVerificationOptions::default()
+    };
+    if let Err(error) = pending.state.verify(
+        &rp_id,
+        &authentication,
+        &mut credential,
+        &verification_options,
+    ) {
+        warn!(
+            "failed finishing passkey authentication for {}: {}",
+            pending.username, error
+        );
+        web_auth::record_login_failure(
+            &app_state.meta_store,
+            Some(&user.id),
+            &user.username,
+            extract_client_ip(&headers).as_deref(),
+            extract_user_agent(&headers).as_deref(),
+            "passkey_verification_failed",
+            Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+            Some(passkey.label.as_str()),
+        )
+        .await;
+        return json_error_response(
+            StatusCode::UNAUTHORIZED,
+            translations.passkey_authentication_failed_message,
+        );
+    }
+    let passkey_label = passkey.label;
+    let updated_dynamic_state = credential.dynamic_state();
+    match web_auth::update_user_passkey_usage(&mut user, &credential_id, updated_dynamic_state) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            web_auth::record_login_failure(
+                &app_state.meta_store,
+                Some(&user.id),
+                &user.username,
+                extract_client_ip(&headers).as_deref(),
+                extract_user_agent(&headers).as_deref(),
+                "passkey_not_found",
+                Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+                Some(passkey_label.as_str()),
+            )
+            .await;
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_not_found_message,
+            );
+        }
+        Err(error) => {
+            warn!(
+                "failed updating passkey usage for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    }
+    user.updated_at_unix = Utc::now().timestamp();
+    if let Err(error) = app_state.meta_store.save_user(&user).await {
+        warn!(
+            "failed saving updated passkey usage for {}: {}",
+            user.username, error
+        );
+        return json_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            translations.passkey_authentication_failed_message,
+        );
+    }
+
+    let mut master_key_bytes = [0_u8; 32];
+    master_key_bytes.copy_from_slice(pending.master_key.as_ref().as_ref());
+    let settings = app_state.system_settings.read().await.clone();
+    let login_result = match web_auth::authenticate_user_with_passkey(
+        &app_state.meta_store,
+        &settings,
+        user,
+        zeroize::Zeroizing::new(master_key_bytes),
+        pending.requires_totp_setup,
+        pending.requires_password_reset,
+        extract_client_ip(&headers).as_deref(),
+        extract_user_agent(&headers).as_deref(),
+        Some(passkey_label.as_str()),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(LoginError::LockedUntil(locked_until)) => {
+            return json_error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                translations
+                    .login_locked_until_message
+                    .replace("{locked_until}", &locked_until.to_string()),
+            );
+        }
+        Err(_) => {
+            return json_error_response(
+                StatusCode::UNAUTHORIZED,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
+
+    cache_user_master_key(
+        &app_state,
+        &login_result.auth_session.user_id,
+        &login_result.auth_session.id,
+        login_result.master_key,
+    )
+    .await;
+
+    let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
+    let redirect_target = if login_result.requires_password_reset {
+        security_settings_target()
+    } else if login_result.requires_totp_setup {
+        String::from("/settings/security/totp/setup")
+    } else {
+        login_redirect_target(language)
+    };
+    let mut response = Json(PasskeyFinishResponse {
+        redirect_to: redirect_target,
+    })
+    .into_response();
+    let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
+    match set_cookie_header(&build_auth_cookie(
+        &login_result.session_token,
+        max_age,
+        cookie_secure,
+    )) {
+        Ok(cookie) => {
+            response.headers_mut().insert(header::SET_COOKIE, cookie);
+            response
+        }
+        Err(status) => status.into_response(),
     }
 }
 
@@ -774,6 +1444,448 @@ async fn change_password_handler(
             Err(status) => status.into_response(),
         },
     }
+}
+
+async fn start_passkey_registration_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(request): Json<PasskeyStartRegistrationRequest>,
+) -> Response {
+    let language = detect_language(&headers, request.lang.as_deref());
+    let translations = language.translations();
+    if authenticated.requires_password_reset {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.settings_password_reset_required_message,
+        );
+    }
+    let label = request.label.trim();
+    if label.is_empty() {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_label_required_message,
+        );
+    }
+    let passkey_rp = match passkey_relying_party(&headers, language) {
+        Ok(value) => value,
+        Err(message) => return json_error_response(StatusCode::BAD_REQUEST, message),
+    };
+    let Some(user) = app_state
+        .meta_store
+        .get_user_by_id(&authenticated.user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
+    };
+    let rp_id = match passkey_rp_id(&passkey_rp.rp_id) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed parsing passkey rp id {}: {}",
+                passkey_rp.rp_id, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let user_handle = match web_auth::user_handle_for(&user) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing passkey user handle for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let passkey_name = match user.username.as_str().try_into() {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing passkey username for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let passkey_display_name = match user.username.as_str().try_into() {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing passkey display name for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let user_entity = PublicKeyCredentialUserEntity {
+        name: passkey_name,
+        id: (&user_handle).into(),
+        display_name: Some(passkey_display_name),
+    };
+    let exclude_credentials = match web_auth::passkey_descriptors(&user) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!("failed decoding passkeys for {}: {}", user.username, error);
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let (state, client_state) =
+        match PublicKeyCredentialCreationOptions::passkey(&rp_id, user_entity, exclude_credentials)
+            .start_ceremony()
+        {
+            Ok(values) => values,
+            Err(error) => {
+                warn!(
+                    "failed starting passkey registration for {}: {}",
+                    user.username, error
+                );
+                return json_error_response(
+                    StatusCode::BAD_REQUEST,
+                    translations.passkey_registration_failed_message,
+                );
+            }
+        };
+
+    let registration_id = Uuid::new_v4().to_string();
+    app_state.passkey_registrations.write().await.insert(
+        registration_id.clone(),
+        PendingPasskeyRegistration {
+            user_id: user.id,
+            auth_session_id: authenticated.auth_session.id.clone(),
+            label: label.to_owned(),
+            rp_id: passkey_rp.rp_id,
+            origin: passkey_rp.origin,
+            state,
+        },
+    );
+    let options = match passkey_public_key_options(&client_state) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed serializing passkey registration options for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+
+    Json(PasskeyRegistrationChallengeResponse {
+        registration_id,
+        options,
+    })
+    .into_response()
+}
+
+async fn finish_passkey_registration_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(request): Json<PasskeyFinishRegistrationRequest>,
+) -> Response {
+    let language = detect_language(&headers, request.lang.as_deref());
+    let translations = language.translations();
+    if authenticated.requires_password_reset {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.settings_password_reset_required_message,
+        );
+    }
+    let Some(pending) = app_state
+        .passkey_registrations
+        .write()
+        .await
+        .remove(&request.registration_id)
+    else {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_challenge_expired_message,
+        );
+    };
+    if pending.user_id != authenticated.user.id {
+        return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
+    }
+
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&authenticated.user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
+    };
+    let rp_id = match passkey_rp_id(&pending.rp_id) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed rebuilding passkey rp {} for registration: {}",
+                pending.rp_id, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let allowed_origin = match passkey_allowed_origin(&pending.origin) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed rebuilding passkey origin {} for registration: {}",
+                pending.origin, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let user_handle = match web_auth::user_handle_for(&user) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed constructing passkey user handle for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let registration: Registration = match serde_json::from_value(request.credential) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed decoding passkey registration payload for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let verification_options: RegistrationVerificationOptions<
+        '_,
+        '_,
+        DomainOrigin<'_, '_>,
+        DomainOrigin<'_, '_>,
+    > = RegistrationVerificationOptions {
+        allowed_origins: std::slice::from_ref(&allowed_origin),
+        ..RegistrationVerificationOptions::default()
+    };
+    let registered = match pending.state.verify(
+        &rp_id,
+        (&user_handle).into(),
+        &registration,
+        &verification_options,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed finishing passkey registration for {}: {}",
+                authenticated.user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    };
+    let (
+        credential_id,
+        transports,
+        _registered_user_handle,
+        static_state,
+        dynamic_state,
+        _metadata,
+    ) = registered.into_parts();
+    let credential_id_owned = credential_id.into();
+    let duplicate_on_self =
+        match web_auth::user_has_passkey_credential_id(&user, &credential_id_owned) {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    "failed decoding current passkeys for {}: {}",
+                    user.username, error
+                );
+                return json_error_response(
+                    StatusCode::BAD_REQUEST,
+                    translations.passkey_registration_failed_message,
+                );
+            }
+        };
+    if duplicate_on_self {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_registration_failed_message,
+        );
+    }
+    match web_auth::passkey_registered_to_other_user(
+        &app_state.meta_store,
+        &user.id,
+        &credential_id_owned,
+    )
+    .await
+    {
+        Ok(true) => {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+        Ok(false) => {}
+        Err(error) => {
+            warn!(
+                "failed checking duplicate passkeys for {}: {}",
+                user.username, error
+            );
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_registration_failed_message,
+            );
+        }
+    }
+    if let Err(error) = web_auth::add_passkey_to_user(
+        &app_state.meta_store,
+        &mut user,
+        &pending.label,
+        credential_id,
+        transports,
+        static_state,
+        dynamic_state,
+    )
+    .await
+    {
+        warn!("failed saving passkey for {}: {}", user.username, error);
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_registration_failed_message,
+        );
+    }
+
+    Json(PasskeyFinishResponse {
+        redirect_to: security_settings_target(),
+    })
+    .into_response()
+}
+
+async fn delete_passkey_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(passkey_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    if authenticated.requires_password_reset {
+        return match render_settings_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(
+                language
+                    .translations()
+                    .settings_password_reset_required_message,
+            )),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        };
+    }
+    let Some(mut user) = app_state
+        .meta_store
+        .get_user_by_id(&authenticated.user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Redirect::to("/login").into_response();
+    };
+
+    match web_auth::remove_passkey_from_user(&app_state.meta_store, &mut user, &passkey_id).await {
+        Ok(true) => {
+            let mut refreshed = authenticated.clone();
+            refreshed.user = user;
+            match render_settings_page(
+                &app_state,
+                &refreshed,
+                language,
+                Some(PageBanner::success(
+                    language.translations().passkey_deleted_message,
+                )),
+                &headers,
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            }
+        }
+        Ok(false) => match render_settings_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(
+                language.translations().passkey_not_found_message,
+            )),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        },
+        Err(error) => match render_settings_page(
+            &app_state,
+            &authenticated,
+            language,
+            Some(PageBanner::error(error.to_string())),
+            &headers,
+        )
+        .await
+        {
+            Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
+            Err(status) => status.into_response(),
+        },
+    }
+}
+
+async fn acknowledge_recovery_notice_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+) -> Response {
+    app_state
+        .recovery_notices
+        .write()
+        .await
+        .remove(&authenticated.auth_session.id);
+    Redirect::to(&security_settings_target()).into_response()
 }
 
 async fn update_idle_timeout_handler(

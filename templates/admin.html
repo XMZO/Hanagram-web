@@ -139,7 +139,8 @@
                         <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ users_description }}</p>
                     </div>
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(18rem,0.78fr),minmax(0,1.22fr)]">
+                    <div class="grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
+                        <div class="grid gap-4">
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
                             <h3 class="text-lg font-semibold sm:text-xl">{{ create_user_title }}</h3>
                             <form method="post" action="/admin/users/create" class="mt-4 grid gap-3">
@@ -149,6 +150,45 @@
                                 <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ create_user_label }}</button>
                             </form>
                         </article>
+
+                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <h3 class="text-lg font-semibold sm:text-xl">{{ recent_auth_title }}</h3>
+                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ recent_auth_description }}</p>
+                                </div>
+                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recent_auth_activity | length }}</span>
+                            </div>
+
+                            {% if recent_auth_activity | length == 0 %}
+                            <div class="mt-4 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ recent_auth_empty_label }}</div>
+                            {% else %}
+                            <div class="mt-4 grid max-h-[24rem] gap-3 overflow-y-auto pr-1">
+                                {% for item in recent_auth_activity %}
+                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <p class="text-sm font-semibold text-ink">{{ item.username }}</p>
+                                        <span class="rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] {% if item.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+                                            {% if item.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
+                                        </span>
+                                        {% if item.passkey_label %}
+                                        <span class="rounded-full border border-line bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/72">{{ user_passkeys_label }} {{ item.passkey_label }}</span>
+                                        {% endif %}
+                                    </div>
+                                    <p class="mt-2 text-sm leading-7 text-ink/70">{{ item.method_label }}</p>
+                                    {% if item.reason %}
+                                    <p class="mt-2 text-xs leading-6 text-ink/58">{{ audit_reason_label }} {{ item.reason }}</p>
+                                    {% endif %}
+                                    <div class="mt-3 flex flex-wrap gap-2 text-xs text-ink/55">
+                                        <span class="rounded-full border border-line bg-white px-3 py-1">{{ user_last_ip_label }} {{ item.ip_address | default(value='-') }}</span>
+                                        <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_time_label }} <span data-admin-unix-time="{{ item.created_at_unix }}">{{ item.created_at_unix }}</span></span>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </article>
+                        </div>
 
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
                             <div class="flex flex-wrap items-center gap-3">
@@ -169,10 +209,27 @@
                                                 {% if user.locked %}<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">{{ locked_badge_label }}</span>{% endif %}
                                             </div>
 
-                                            <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                                            <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                                 <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ user_active_sessions_label }}</p><p class="mt-2 text-sm font-medium">{{ user.active_sessions }}</p></div>
                                                 <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ user_recovery_codes_label }}</p><p class="mt-2 text-sm font-medium">{{ user.recovery_codes_remaining }}</p></div>
+                                                <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ user_passkeys_label }}</p><p class="mt-2 text-sm font-medium">{{ user.passkey_count }}</p></div>
                                                 <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ user_last_ip_label }}</p><p class="mt-2 break-all text-sm font-medium">{{ user.last_login_ip | default(value='-') }}</p></div>
+                                            </div>
+                                            <div class="mt-3 rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3">
+                                                <p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ user_last_auth_label }}</p>
+                                                {% if user.last_auth_at_unix %}
+                                                <div class="mt-2 flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
+                                                    <span>{{ user.last_auth_method | default(value='-') }}</span>
+                                                    {% if user.last_auth_success %}
+                                                    <span class="rounded-full border border-sage/35 bg-[#eef4ee] px-3 py-1 text-xs font-semibold text-sageDeep">{{ audit_success_label }}</span>
+                                                    {% else %}
+                                                    <span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-semibold text-[#98675f]">{{ audit_failure_label }}</span>
+                                                    {% endif %}
+                                                </div>
+                                                <p class="mt-2 text-sm text-ink/62"><span data-admin-unix-time="{{ user.last_auth_at_unix }}">{{ user.last_auth_at_unix }}</span></p>
+                                                {% else %}
+                                                <p class="mt-2 text-sm font-medium text-ink/62">-</p>
+                                                {% endif %}
                                             </div>
                                         </div>
 
@@ -324,6 +381,7 @@
 
                         <div class="flex flex-wrap gap-2">
                             <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ overview_audit_rows_label }} · {{ audit_log_count }}</span>
+                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_label }} · {{ audit_filtered_count }}</span>
                             <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ rollup_title }} · {{ audit_rollups | length }}</span>
                         </div>
                     </div>
@@ -334,8 +392,8 @@
                             <p class="mt-2 text-2xl font-semibold">{{ audit_log_count }}</p>
                         </article>
                         <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
-                            <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ audit_limit_label }}</p>
-                            <p class="mt-2 text-2xl font-semibold">{{ system_settings.audit_detail_limit }}</p>
+                            <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ audit_filtered_label }}</p>
+                            <p class="mt-2 text-2xl font-semibold">{{ audit_filtered_count }}</p>
                         </article>
                         <article class="rounded-[1.15rem] border border-sage/30 bg-mist px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.2em] text-sageDeep/75">{{ rollup_title }}</p>
@@ -350,8 +408,18 @@
                                     <h3 class="text-lg font-semibold sm:text-xl">{{ audit_title }}</h3>
                                     <p class="mt-2 text-sm leading-7 text-ink/68">{{ audit_description }}</p>
                                 </div>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_log_count }}</span>
+                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_count }}</span>
                             </div>
+
+                            <form method="get" action="/admin#audit" class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4 sm:grid-cols-[minmax(0,1fr),auto,auto] sm:items-end">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <label class="block">
+                                    <span class="mb-2 block text-sm font-medium">{{ audit_search_label }}</span>
+                                    <input type="text" name="audit_search" value="{{ audit_search_value }}" placeholder="{{ audit_search_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                </label>
+                                <button type="submit" class="rounded-[1rem] border border-line bg-white px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-paper">{{ audit_search_submit_label }}</button>
+                                <a href="/admin#audit" class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-center text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</a>
+                            </form>
 
                             {% if audit_logs | length == 0 %}
                             <div class="mt-4 rounded-[1.1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ audit_empty_label }}</div>
@@ -363,23 +431,41 @@
                                         <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                             <div class="min-w-0">
                                                 <div class="flex flex-wrap items-center gap-2">
-                                                    <p class="break-all text-sm font-semibold text-ink">{{ log.action_type }}</p>
+                                                    <p class="break-all text-sm font-semibold text-ink">{{ log.action_label }}</p>
                                                     <span class="rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] {% if log.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
                                                         {% if log.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
                                                     </span>
+                                                    {% if log.login_method %}
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/72">{{ audit_method_label }} {{ log.login_method }}</span>
+                                                    {% endif %}
+                                                    {% if log.passkey_label %}
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/72">{{ user_passkeys_label }} {{ log.passkey_label }}</span>
+                                                    {% endif %}
                                                 </div>
                                                 <div class="mt-2 flex flex-wrap gap-2 text-xs text-ink/55">
-                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_actor_label }} {{ log.actor_user_id | default(value="-") }}</span>
-                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_subject_label }} {{ log.subject_user_id | default(value="-") }}</span>
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_actor_label }} {% if log.actor_username %}{{ log.actor_username }}{% elif log.actor_user_id %}{{ log.actor_user_id }}{% else %}-{% endif %}</span>
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_subject_label }} {% if log.subject_username %}{{ log.subject_username }}{% elif log.subject_user_id %}{{ log.subject_user_id }}{% else %}-{% endif %}</span>
+                                                    {% if log.username %}
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_username_label }} {{ log.username }}</span>
+                                                    {% endif %}
                                                     <span class="rounded-full border border-line bg-white px-3 py-1">{{ user_last_ip_label }} {{ log.ip_address | default(value="-") }}</span>
+                                                    {% if log.reason %}
+                                                    <span class="rounded-full border border-line bg-white px-3 py-1">{{ audit_reason_label }} {{ log.reason }}</span>
+                                                    {% endif %}
                                                 </div>
                                             </div>
                                             <p class="shrink-0 text-xs text-ink/52">{{ audit_time_label }} <span data-admin-unix-time="{{ log.created_at_unix }}">{{ log.created_at_unix }}</span></p>
                                         </div>
                                     </summary>
                                     <div class="border-t border-line px-4 py-4">
+                                        {% if log.user_agent %}
+                                        <div class="rounded-[1rem] border border-line bg-white px-4 py-3 text-sm leading-7 text-ink/68">
+                                            <p class="text-xs uppercase tracking-[0.2em] text-ink/45">{{ audit_user_agent_label }}</p>
+                                            <p class="mt-2 break-words">{{ log.user_agent }}</p>
+                                        </div>
+                                        {% endif %}
                                         <p class="text-xs uppercase tracking-[0.2em] text-ink/45">{{ audit_details_label }}</p>
-                                        <pre class="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-[1rem] border border-line bg-white px-4 py-3 font-mono text-xs leading-6 text-ink/72">{{ log.details_json }}</pre>
+                                        <pre class="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-[1rem] border border-line bg-white px-4 py-3 font-mono text-xs leading-6 text-ink/72">{{ log.details_pretty }}</pre>
                                     </div>
                                 </details>
                                 {% endfor %}

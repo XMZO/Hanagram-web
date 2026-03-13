@@ -56,7 +56,144 @@
             });
         }
 
-        window.addEventListener("DOMContentLoaded", () => activateSettingsPane());
+        function base64UrlToBuffer(value) {
+            const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+            const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+            const binary = window.atob(padded);
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) {
+                bytes[index] = binary.charCodeAt(index);
+            }
+            return bytes.buffer;
+        }
+
+        function bufferToBase64Url(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            bytes.forEach((value) => {
+                binary += String.fromCharCode(value);
+            });
+            return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+        }
+
+        function mapPublicKeyCreationOptions(options) {
+            const publicKey = { ...options };
+            publicKey.challenge = base64UrlToBuffer(publicKey.challenge);
+            publicKey.user = { ...publicKey.user, id: base64UrlToBuffer(publicKey.user.id) };
+            if (Array.isArray(publicKey.excludeCredentials)) {
+                publicKey.excludeCredentials = publicKey.excludeCredentials.map((credential) => ({
+                    ...credential,
+                    id: base64UrlToBuffer(credential.id)
+                }));
+            }
+            return publicKey;
+        }
+
+        function serializeRegistrationCredential(credential) {
+            return {
+                id: credential.id,
+                rawId: bufferToBase64Url(credential.rawId),
+                type: credential.type,
+                response: {
+                    attestationObject: bufferToBase64Url(credential.response.attestationObject),
+                    clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+                    transports: typeof credential.response.getTransports === "function" ? credential.response.getTransports() : null
+                },
+                clientExtensionResults: credential.getClientExtensionResults()
+            };
+        }
+
+        window.addEventListener("DOMContentLoaded", () => {
+            activateSettingsPane();
+
+            const passkeyForm = document.querySelector("[data-passkey-register-form]");
+            const passkeyFeedback = document.getElementById("passkey-feedback");
+            const passkeyButton = document.querySelector("[data-passkey-register-button]");
+            const passkeyName = document.querySelector('input[name="passkey_label"]');
+            const langInput = document.querySelector('input[name="lang"]');
+
+            function setPasskeyFeedback(message, isError) {
+                if (!passkeyFeedback) { return; }
+                if (!message) {
+                    passkeyFeedback.classList.add("hidden");
+                    passkeyFeedback.textContent = "";
+                    return;
+                }
+                passkeyFeedback.classList.remove("hidden");
+                passkeyFeedback.textContent = message;
+                passkeyFeedback.classList.toggle("border-peach/35", Boolean(isError));
+                passkeyFeedback.classList.toggle("bg-[#fbefec]", Boolean(isError));
+                passkeyFeedback.classList.toggle("text-[#98675f]", Boolean(isError));
+                passkeyFeedback.classList.toggle("border-sage/35", !isError);
+                passkeyFeedback.classList.toggle("bg-[#eef4ee]", !isError);
+                passkeyFeedback.classList.toggle("text-sageDeep", !isError);
+            }
+
+            passkeyForm?.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                if (!window.PublicKeyCredential || !navigator.credentials?.create) {
+                    setPasskeyFeedback(passkeyButton?.dataset.unsupported || "", true);
+                    return;
+                }
+                if (!passkeyName?.value.trim()) {
+                    setPasskeyFeedback(passkeyButton?.dataset.missingLabel || "", true);
+                    passkeyName?.focus();
+                    return;
+                }
+
+                setPasskeyFeedback(passkeyButton?.dataset.starting || "", false);
+                if (passkeyButton) { passkeyButton.disabled = true; }
+
+                try {
+                    const optionsResponse = await fetch(passkeyForm.dataset.optionsAction, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        },
+                        body: JSON.stringify({
+                            label: passkeyName.value,
+                            lang: langInput?.value || null
+                        })
+                    });
+                    const optionsPayload = await optionsResponse.json().catch(() => ({}));
+                    if (!optionsResponse.ok) {
+                        throw new Error(optionsPayload.error || passkeyButton?.dataset.failed || "");
+                    }
+
+                    setPasskeyFeedback(passkeyButton?.dataset.awaiting || "", false);
+                    const credential = await navigator.credentials.create({
+                        publicKey: mapPublicKeyCreationOptions(optionsPayload.options.publicKey)
+                    });
+                    if (!credential) {
+                        throw new Error(passkeyButton?.dataset.failed || "");
+                    }
+
+                    const finishResponse = await fetch(passkeyForm.dataset.finishAction, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        },
+                        body: JSON.stringify({
+                            registration_id: optionsPayload.registration_id,
+                            credential: serializeRegistrationCredential(credential),
+                            lang: langInput?.value || null
+                        })
+                    });
+                    const finishPayload = await finishResponse.json().catch(() => ({}));
+                    if (!finishResponse.ok) {
+                        throw new Error(finishPayload.error || passkeyButton?.dataset.failed || "");
+                    }
+
+                    window.location.href = finishPayload.redirect_to || "/settings#security";
+                } catch (error) {
+                    setPasskeyFeedback(error instanceof Error ? error.message : passkeyButton?.dataset.failed || "", true);
+                } finally {
+                    if (passkeyButton) { passkeyButton.disabled = false; }
+                }
+            });
+        });
         window.addEventListener("hashchange", () => activateSettingsPane());
     </script>
     <style>
@@ -106,7 +243,7 @@
             </div>
 
             <div class="border-t border-line/80 px-5 py-4 lg:px-6">
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
                         <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
                         <p class="mt-2 text-lg font-semibold">{{ totp_status }}</p>
@@ -114,6 +251,10 @@
                     <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
                         <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ recovery_label }}</p>
                         <p class="mt-2 text-lg font-semibold">{{ recovery_remaining }}</p>
+                    </article>
+                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
+                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
+                        <p class="mt-2 text-lg font-semibold">{{ passkey_count }}</p>
                     </article>
                     <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
                         <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
@@ -168,9 +309,29 @@
                         {% endif %}
                     </div>
 
+                    {% if recovery_notice %}
+                    <article class="rounded-[1.45rem] border border-butter/60 bg-[#fff7e6] p-4">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-[#866434]">{{ recovery_refresh_title }}</p>
+                                <h3 class="mt-2 text-lg font-semibold text-ink sm:text-xl">{{ recovery_label }}</h3>
+                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/72">{{ recovery_refresh_message }}</p>
+                            </div>
+                            <form method="post" action="{{ recovery_ack_action }}">
+                                <button type="submit" class="rounded-full border border-[#ddc48f] bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-[#fffaf0]">{{ recovery_ack_label }}</button>
+                            </form>
+                        </div>
+                        <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                            {% for code in recovery_notice.codes %}
+                            <div class="rounded-[1rem] border border-[#ead7ae] bg-white px-4 py-3 font-mono text-sm font-semibold tracking-[0.12em] text-ink">{{ code }}</div>
+                            {% endfor %}
+                        </div>
+                    </article>
+                    {% endif %}
+
                     <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr),minmax(0,1.05fr)]">
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <div class="grid gap-3 sm:grid-cols-2">
+                            <div class="grid gap-3 sm:grid-cols-3">
                                 <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
                                     <p class="mt-2 text-lg font-semibold">{{ totp_status }}</p>
@@ -180,6 +341,11 @@
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ recovery_label }}</p>
                                     <p class="mt-2 text-lg font-semibold">{{ recovery_remaining }}</p>
                                     <p class="mt-3 text-sm leading-7 text-ink/62">{{ recovery_hint }}</p>
+                                </div>
+                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
+                                    <p class="mt-2 text-lg font-semibold">{{ passkey_count }}</p>
+                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ passkeys_hint }}</p>
                                 </div>
                             </div>
                             <div class="mt-3 rounded-[1.1rem] border border-line bg-paper px-4 py-4">
@@ -201,6 +367,84 @@
                             </form>
                         </article>
                     </div>
+
+                    {% if show_workspace_links %}
+                    <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ passkeys_label }}</p>
+                                <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
+                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ passkeys_description }}</p>
+                            </div>
+                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
+                        </div>
+
+                        <div id="passkey-feedback" class="mt-4 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
+
+                        <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
+                            <form
+                                data-passkey-register-form
+                                data-options-action="{{ passkey_register_options_action }}"
+                                data-finish-action="{{ passkey_register_finish_action }}"
+                                class="grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4"
+                            >
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <label class="block">
+                                    <span class="mb-2 block text-sm font-medium">{{ passkey_name_label }}</span>
+                                    <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                </label>
+                                <p class="text-sm leading-7 text-ink/62">
+                                    {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
+                                </p>
+                                <button
+                                    type="submit"
+                                    data-passkey-register-button
+                                    data-starting="{{ i18n.login_passkey_start_message }}"
+                                    data-awaiting="{{ i18n.login_passkey_finish_message }}"
+                                    data-failed="{{ i18n.passkey_registration_failed_message }}"
+                                    data-unsupported="{{ passkey_unavailable_message }}"
+                                    data-missing-label="{{ i18n.passkey_label_required_message }}"
+                                    {% if not passkey_supported %}disabled{% endif %}
+                                    class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
+                                >
+                                    {{ passkey_add_label }}
+                                </button>
+                            </form>
+
+                            <div class="grid max-h-[32rem] gap-3 overflow-y-auto pr-1">
+                                {% if passkeys | length == 0 %}
+                                <div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">
+                                    {{ passkey_empty_label }}
+                                </div>
+                                {% else %}
+                                {% for passkey in passkeys %}
+                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                        <div class="min-w-0">
+                                            <p class="text-base font-semibold text-ink">{{ passkey.label }}</p>
+                                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3">
+                                                    <p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ passkey_created_label }}</p>
+                                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkey.created_at }}</p>
+                                                </div>
+                                                <div class="rounded-[0.95rem] border border-line/70 bg-white/85 px-4 py-3">
+                                                    <p class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ passkey_last_used_label }}</p>
+                                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkey.last_used_at }}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <form method="post" action="/settings/security/passkeys/{{ passkey.id }}/delete" data-confirm="{{ passkey_delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)">
+                                            <input type="hidden" name="lang" value="{{ lang }}">
+                                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ passkey_delete_label }}</button>
+                                        </form>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </article>
+                    {% endif %}
                 </section>
 
                 {% if show_workspace_links %}

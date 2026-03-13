@@ -53,6 +53,10 @@ pub(crate) async fn run() -> Result<()> {
     let phone_flows: PendingPhoneFlows = Arc::new(RwLock::new(HashMap::new()));
     let qr_flows: PendingQrFlows = Arc::new(RwLock::new(HashMap::new()));
     let totp_setups: PendingTotpSetups = Arc::new(RwLock::new(HashMap::new()));
+    let passkey_registrations: PendingPasskeyRegistrations = Arc::new(RwLock::new(HashMap::new()));
+    let passkey_authentications: PendingPasskeyAuthentications =
+        Arc::new(RwLock::new(HashMap::new()));
+    let recovery_notices: PendingRecoveryNotices = Arc::new(RwLock::new(HashMap::new()));
     let unlock_cache: UnlockCache = Arc::new(RwLock::new(HashMap::new()));
     let user_keys: UserKeyCache = Arc::new(RwLock::new(HashMap::new()));
     let meta_store = Arc::new(MetaStore::open(&runtime.meta_db_path).await?);
@@ -70,6 +74,9 @@ pub(crate) async fn run() -> Result<()> {
         phone_flows,
         qr_flows,
         totp_setups,
+        passkey_registrations,
+        passkey_authentications,
+        recovery_notices,
         unlock_cache,
         user_keys,
         http_client: HttpClient::new(),
