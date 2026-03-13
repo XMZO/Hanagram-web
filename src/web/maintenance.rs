@@ -45,7 +45,8 @@ async fn perform_runtime_maintenance(app_state: &AppState) -> Result<()> {
 }
 
 fn trim_process_allocator() {
-    #[cfg(target_os = "linux")]
+    // `malloc_trim` is a glibc-specific hook and is not exposed on musl targets.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
     unsafe {
         libc::malloc_trim(0);
     }
