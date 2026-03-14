@@ -80,16 +80,21 @@
         .float-in { animation: float-in 0.72s ease both; }
         .card-flash { animation: card-flash 1.35s ease; }
         .modal-panel {
-            animation: modal-rise 0.28s ease;
             background: rgba(255, 250, 242, 0.985);
             box-shadow: 0 28px 72px rgba(79, 67, 59, 0.16);
         }
         .modal-sheet {
-            width: min(100%, 46rem);
+            width: 100%;
         }
         .modal-pane-scroll { scrollbar-gutter: stable; }
         .tab-strip { scrollbar-width: none; }
         .tab-strip::-webkit-scrollbar { display: none; }
+        .clamp-2 {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+        }
         @keyframes float-in {
             from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
@@ -103,11 +108,26 @@
             from { opacity: 0; transform: translateY(12px) scale(0.985); }
             to { opacity: 1; transform: translateY(0) scale(1); }
         }
+        @keyframes modal-slide-in {
+            from { opacity: 0; transform: translateX(18px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
         @media (prefers-reduced-motion: reduce) {
             .float-in, .card-flash, .modal-panel { animation: none; }
             * { scroll-behavior: auto !important; transition: none !important; }
         }
+        @media (min-width: 640px) {
+            .modal-panel {
+                animation: modal-slide-in 0.24s ease;
+            }
+            .modal-sheet {
+                width: min(100%, 30rem);
+            }
+        }
         @media (max-width: 640px) {
+            .modal-panel {
+                animation: modal-rise 0.28s ease;
+            }
             .modal-sheet {
                 width: 100%;
             }
@@ -604,9 +624,9 @@
 <body class="min-h-screen font-sans text-ink antialiased">
     <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
 
-    <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-        <section class="paper-shadow float-in overflow-hidden rounded-[1.9rem] border border-line/80 bg-paper/95">
-            <div class="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.1fr),minmax(19rem,0.9fr)] lg:px-6 lg:py-6">
+    <main class="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
+        <section class="paper-shadow float-in overflow-hidden rounded-[1.55rem] border border-line/80 bg-paper/95">
+            <div class="grid gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1fr),minmax(19rem,23rem)] lg:px-5 lg:py-5">
                 <div>
                     <div class="flex flex-wrap items-center gap-2">
                         <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-ink/60">
@@ -616,8 +636,8 @@
                             {{ current_username }}
                         </span>
                     </div>
-                    <h1 class="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{{ i18n.hero_title }}</h1>
-                    <p class="mt-3 max-w-2xl text-sm leading-7 text-ink/72">
+                    <h1 class="mt-3 font-display text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.35rem]">{{ i18n.hero_title }}</h1>
+                    <p class="mt-2 max-w-xl text-sm leading-6 text-ink/72">
                         {{ i18n.hero_description_prefix }}
                         <span class="rounded-full bg-latte px-3 py-1 font-mono text-[0.95rem] text-ink">777000</span>
                         {{ i18n.hero_description_suffix }}
@@ -625,19 +645,19 @@
                 </div>
 
                 <div class="grid gap-3">
-                    <div class="rounded-[1.45rem] border border-line/80 bg-white/80 p-4">
+                    <div class="rounded-[1.15rem] border border-line/80 bg-white/86 p-3.5">
                         <div class="flex flex-col gap-3">
                             <div class="flex flex-wrap items-center justify-between gap-3">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
                                 <a
                                     href="{{ setup_href }}"
-                                    class="rounded-full border border-line bg-latte px-4 py-1.5 text-sm text-ink/80 transition hover:border-sage hover:bg-[#e8dccb]"
+                                    class="rounded-full border border-line bg-latte px-3.5 py-1.5 text-sm text-ink/80 transition hover:border-sage hover:bg-[#e8dccb]"
                                 >
                                     {{ i18n.dashboard_add_session }}
                                 </a>
                             </div>
 
-                            <div class="flex flex-wrap items-center gap-2">
+                            <div class="flex flex-wrap items-center gap-1.5">
                                 <div class="inline-flex rounded-full border border-line bg-paper p-1">
                                     {% for option in languages %}
                                     <a
@@ -651,14 +671,14 @@
                                 </div>
                                 <a
                                     href="{{ settings_href }}"
-                                    class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                    class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
                                 >
                                     {{ settings_label }}
                                 </a>
                                 {% if show_admin %}
                                 <a
                                     href="{{ admin_href }}"
-                                    class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                    class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
                                 >
                                     {{ admin_label }}
                                 </a>
@@ -666,7 +686,7 @@
                                 <form method="post" action="{{ logout_action }}">
                                     <button
                                         type="submit"
-                                        class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                        class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
                                     >
                                         {{ i18n.logout }}
                                     </button>
@@ -676,14 +696,14 @@
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-2">
-                        <div class="rounded-[1.3rem] border border-line/80 bg-white/85 px-4 py-3.5">
+                        <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_status }}</p>
-                            <p class="mt-2 text-sm leading-7 text-ink/70">{{ i18n.dashboard_workspace_title }}</p>
+                            <p class="mt-1.5 text-sm leading-6 text-ink/70">{{ i18n.dashboard_workspace_title }}</p>
                         </div>
-                        <div class="rounded-[1.3rem] border border-line/80 bg-white/85 px-4 py-3.5">
+                        <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_updated }}</p>
-                            <p class="mt-2 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
-                            <p class="mt-2 text-sm leading-6 text-ink/62">{{ i18n.stat_connected }} · <span data-role="connected-summary">{{ connected_count }}/{{ total_sessions }}</span></p>
+                            <p class="mt-1.5 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
+                            <p class="mt-1 text-sm leading-6 text-ink/62">{{ i18n.stat_connected }} · <span data-role="connected-summary">{{ connected_count }}/{{ total_sessions }}</span></p>
                         </div>
                     </div>
                 </div>
@@ -691,19 +711,19 @@
         </section>
 
         {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.6rem] border px-5 py-4 text-sm leading-7 whitespace-pre-line {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+        <section class="paper-shadow mt-4 rounded-[1.2rem] border px-4 py-3.5 text-sm leading-6 whitespace-pre-line {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
             {{ banner.message }}
         </section>
         {% endif %}
 
         {% if transport_warning %}
-        <section class="paper-shadow mt-4 rounded-[1.6rem] border border-butter/70 bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
+        <section class="paper-shadow mt-4 rounded-[1.2rem] border border-butter/70 bg-[#fff6e6] px-4 py-3.5 text-sm leading-6 text-[#866434]">
             <p class="font-semibold">{{ transport_warning.title }}</p>
             <p class="mt-2">{{ transport_warning.message }}</p>
         </section>
         {% endif %}
 
-        <section class="paper-shadow mt-4 rounded-[1.75rem] border border-line/80 bg-paper/95 p-4 sm:p-5">
+        <section class="paper-shadow mt-4 rounded-[1.45rem] border border-line/80 bg-paper/95 p-3.5 sm:p-4">
             <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
                 <a href="#status" data-dashboard-tab="status" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_status }}</a>
                 <a href="#sessions" data-dashboard-tab="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
@@ -715,8 +735,8 @@
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_sessions }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_sessions_title }}</h2>
-                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_sessions_description }}</p>
+                            <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.dashboard_sessions_title }}</h2>
+                            <p class="mt-1.5 max-w-2xl text-sm leading-6 text-ink/68">{{ i18n.dashboard_sessions_description }}</p>
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ i18n.stat_accounts }} · {{ sessions | length }}</span>
@@ -726,9 +746,9 @@
                     </div>
 
                     {% if sessions | length == 0 %}
-                    <section class="rounded-[1.5rem] border border-dashed border-line bg-white/78 px-6 py-10 text-center">
+                    <section class="rounded-[1.2rem] border border-dashed border-line bg-white/78 px-5 py-8 text-center">
                         <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
-                        <p class="mx-auto mt-4 max-w-2xl text-lg leading-8 text-ink/70">
+                        <p class="mx-auto mt-3 max-w-xl text-base leading-7 text-ink/70">
                             {{ i18n.empty_state_description_prefix }}
                             <span class="rounded-full bg-latte px-3 py-1 font-mono text-sm text-ink">.session</span>
                             {{ i18n.empty_state_description_suffix }}
@@ -741,58 +761,62 @@
                         </a>
                     </section>
                     {% else %}
-                    <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                    <section class="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
                         {% for session in sessions %}
                         <article
-                            class="paper-shadow float-in rounded-[1.5rem] border border-line/80 bg-white/84 p-4 transition hover:-translate-y-1 hover:border-sage/45"
+                            class="float-in rounded-[1.18rem] border border-line/80 bg-white/88 p-3.5 transition hover:border-sage/45"
                             style="animation-delay: {{ loop.index0 * 70 }}ms;"
                             data-session-card
                             data-session-key="{{ session.id }}"
                             data-session-modal-id="session-modal-{{ loop.index }}"
                             data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
                         >
-                            <div class="flex items-start justify-between gap-4">
+                            <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <div class="flex items-center gap-3">
-                                        <span data-role="status-dot" class="h-3 w-3 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
-                                        <p data-role="session-name" class="truncate text-lg font-semibold text-ink">{{ session.key }}</p>
+                                    <div class="flex items-center gap-2.5">
+                                        <span data-role="status-dot" class="h-2.5 w-2.5 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_6px_rgba(145,167,146,0.14)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_6px_rgba(231,213,174,0.24)]{% else %}bg-peach shadow-[0_0_0_6px_rgba(216,167,155,0.18)]{% endif %}"></span>
+                                        <p data-role="session-name" class="truncate text-[1rem] font-semibold text-ink">{{ session.key }}</p>
                                     </div>
-                                    <p data-role="session-phone" class="mt-2 inline-flex rounded-full border border-line/80 bg-white/92 px-3 py-1 font-mono text-[0.76rem] text-ink/58">{{ session.phone }}</p>
-                                    <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
+                                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                                        <p data-role="session-phone" class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ session.phone }}</p>
+                                        <span data-new-indicator class="hidden rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-[#a66c60]">
+                                            {{ i18n.new_code_badge }}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <div class="flex flex-col items-end gap-2">
-                                    <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-xs {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
+                                    <span data-role="status-badge" class="rounded-full border px-2.5 py-1 text-[0.68rem] {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
                                         {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
                                     </span>
-                                    <span data-new-indicator class="hidden rounded-full border border-peach/30 bg-[#fbefec] px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[#a66c60]">
-                                        {{ i18n.new_code_badge }}
-                                    </span>
                                 </div>
                             </div>
 
-                            <div class="mt-4 rounded-[1.3rem] border border-line/80 bg-white/88 px-4 py-3.5">
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
-                                <p data-role="latest-code" class="mt-2.5 font-mono text-[1.9rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.05rem]">
-                                    {{ session.latest_code | default(value=i18n.otp_placeholder) }}
-                                </p>
-                            </div>
-
-                            <div class="mt-3.5 flex items-end justify-between gap-4">
+                            <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
                                 <div class="min-w-0">
+                                    <p data-role="session-note" class="clamp-2 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
                                     <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
-                                    <p data-role="latest-update" class="mt-1.5 truncate font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
+                                    <p data-role="latest-update" class="mt-1 truncate font-mono text-[0.7rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
                                 </div>
+                                <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3 py-2.5 sm:min-w-[8.25rem]">
+                                    <p class="text-[0.65rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.latest_otp }}</p>
+                                    <p data-role="latest-code" class="mt-1.5 font-mono text-[1.3rem] font-semibold tracking-[0.12em] text-ink">
+                                        {{ session.latest_code | default(value=i18n.otp_placeholder) }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="mt-3 flex items-center justify-end gap-2">
                                 <button
                                     type="button"
-                                    class="shrink-0 rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
+                                    class="shrink-0 rounded-full border border-line bg-latte px-3.5 py-1.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
                                     onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')"
                                 >
                                     {{ i18n.open_details }}
                                 </button>
                             </div>
 
-                            <p data-role="session-error" class="mt-3 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
+                            <p data-role="session-error" class="mt-2.5 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
                                 {{ session.status.error | default(value="") }}
                             </p>
                         </article>
@@ -805,9 +829,9 @@
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_shortcuts }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_shortcuts_title }}</h2>
+                            <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.dashboard_shortcuts_title }}</h2>
                         </div>
-                        <p class="max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_shortcuts_description }}</p>
+                        <p class="max-w-2xl text-sm leading-6 text-ink/68">{{ i18n.dashboard_shortcuts_description }}</p>
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -836,14 +860,14 @@
                     <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_workspace_eyebrow }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ i18n.dashboard_workspace_title }}</h2>
+                            <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.dashboard_workspace_title }}</h2>
                         </div>
                         {% if i18n.dashboard_workspace_description | length > 0 %}
-                        <p class="max-w-3xl text-sm leading-7 text-ink/68">{{ i18n.dashboard_workspace_description }}</p>
+                        <p class="max-w-2xl text-sm leading-6 text-ink/68">{{ i18n.dashboard_workspace_description }}</p>
                         {% endif %}
                     </div>
 
-                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <div class="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
                         <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ i18n.stat_accounts }}</p>
                             <p class="mt-2 text-2xl font-semibold" data-role="total-count">{{ total_sessions }}</p>
@@ -867,12 +891,12 @@
                         </article>
                     </div>
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.2fr),minmax(0,1.1fr),minmax(18rem,0.82fr)]">
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                    <div class="grid gap-3 xl:grid-cols-[minmax(0,1.05fr),minmax(0,1.05fr),minmax(16rem,0.8fr)]">
+                        <article class="rounded-[1.2rem] border border-line bg-white/90 p-4">
                             <div class="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_attention_title }}</p>
-                                    <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ i18n.dashboard_attention_title }}</h3>
+                                    <h3 class="mt-1.5 text-base font-semibold sm:text-lg">{{ i18n.dashboard_attention_title }}</h3>
                                 </div>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ i18n.status_error }} + {{ i18n.status_connecting }} · <span data-role="attention-count">{{ attention_count }}</span></span>
                             </div>
@@ -907,7 +931,7 @@
                             </div>
                         </article>
 
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <article class="rounded-[1.2rem] border border-line bg-white/90 p-4">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_recent_activity_title }}</p>
                                 <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ i18n.dashboard_recent_activity_title }}</h3>
@@ -924,7 +948,7 @@
                                                 <span class="h-3 w-3 rounded-full {% if session.status.kind == 'connected' %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == 'connecting' %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
                                                 <p class="truncate text-sm font-semibold text-ink">{{ session.key }}</p>
                                             </div>
-                                            <p class="mt-2 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
+                                            <p class="clamp-2 mt-2 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
                                         </div>
                                         <div class="flex items-center gap-2">
                                             <span class="rounded-full border px-3 py-1 text-xs {% if session.status.kind == 'connected' %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == 'connecting' %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
@@ -944,7 +968,7 @@
                         </article>
 
                         <div class="space-y-4">
-                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <article class="rounded-[1.2rem] border border-line bg-white/90 p-4">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_shortcuts_title }}</p>
@@ -974,7 +998,7 @@
                                 </div>
                             </article>
 
-                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                            <article class="rounded-[1.2rem] border border-line bg-white/90 p-4">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_refresh_title }}</p>
                                 <div class="mt-4 grid gap-3">
                                     <div class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3">
@@ -997,12 +1021,12 @@
         <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.id }}" class="hidden fixed inset-0 z-50">
             <div class="absolute inset-0 bg-[rgba(79,67,59,0.18)] backdrop-blur-[6px] sm:bg-[rgba(79,67,59,0.24)]" data-modal-close="session-modal-{{ loop.index }}"></div>
 
-            <div class="relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-center sm:px-4 sm:py-8">
-                <section class="modal-sheet modal-panel relative flex max-h-[86vh] w-full flex-col overflow-hidden overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:max-h-[88vh] sm:rounded-[1.9rem] sm:p-5 lg:p-6">
+            <div class="relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-stretch sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
+                <section class="modal-sheet modal-panel relative flex max-h-[86vh] w-full flex-col overflow-hidden overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:h-[calc(100vh-1.5rem)] sm:max-h-none sm:rounded-[1.7rem] sm:p-5">
                     <div class="flex flex-col gap-4 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
-                            <h2 data-role="session-name" class="mt-2 font-display text-[1.75rem] font-semibold leading-tight text-ink sm:text-[2.1rem]">{{ session.key }}</h2>
+                            <h2 data-role="session-name" class="mt-2 font-display text-[1.7rem] font-semibold leading-tight text-ink sm:text-[1.95rem]">{{ session.key }}</h2>
                             <p data-role="session-phone" class="mt-3 inline-flex rounded-full border border-line bg-white px-3 py-1 font-mono text-[0.78rem] text-ink/58">{{ session.phone }}</p>
                         </div>
 
@@ -1028,7 +1052,7 @@
 
                     <div class="mt-4 min-h-0 flex-1">
                         <section data-session-pane="overview" class="modal-pane-scroll hidden h-full overflow-y-auto pr-1">
-                            <div class="grid gap-3 lg:grid-cols-[minmax(0,1.02fr),minmax(0,0.98fr)]">
+                            <div class="grid gap-3">
                                 <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-4 py-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.latest_otp }}</p>
                                     <p data-role="latest-code" class="mt-3 font-mono text-[1.85rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.2rem]">
@@ -1045,7 +1069,7 @@
                         </section>
 
                         <section data-session-pane="tools" class="modal-pane-scroll hidden h-full overflow-y-auto pr-1">
-                            <div class="grid gap-3 lg:grid-cols-2">
+                            <div class="grid gap-3">
                                 <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.export_session_title }}</p>
                                     <div class="mt-3 flex flex-wrap gap-2.5">
@@ -1082,7 +1106,7 @@
                                     </form>
                                 </div>
 
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4 lg:col-span-2">
+                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
                                     <div class="grid gap-3 sm:grid-cols-2">
                                         <button type="button" data-role="copy-code" data-code="{{ session.latest_code | default(value="") }}" data-label="{{ i18n.copy }}" data-copied="{{ i18n.copied }}" data-prompt-label="{{ i18n.copy_fallback }}" class="rounded-[0.95rem] border border-line bg-latte px-4 py-3 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] disabled:cursor-not-allowed disabled:opacity-45" onclick="copyCode(this)" {% if not session.latest_code %}disabled{% endif %}>{{ i18n.copy }}</button>
                                         <form method="post" action="/sessions/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
