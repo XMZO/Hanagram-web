@@ -3,6 +3,8 @@
 
 use std::io::Cursor;
 
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+
 use crate::web::middleware;
 use crate::web::shared::*;
 
@@ -93,6 +95,56 @@ fn encrypt_session_note(note: &str, master_key: &[u8]) -> Result<String> {
 
 fn decrypt_session_note(raw_note: &str, master_key: &[u8]) -> Result<(String, bool)> {
     decrypt_session_text_field(raw_note, master_key, SESSION_NOTE_PREFIX, "session note")
+}
+
+fn session_download_filename_fallback(session_key: &str) -> String {
+    let mut fallback = String::new();
+    let mut pending_dash = false;
+
+    for ch in session_key.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            Some(ch)
+        } else if matches!(ch, '.' | '-' | '_') {
+            Some(ch)
+        } else if ch.is_whitespace() {
+            Some('-')
+        } else {
+            None
+        };
+
+        match mapped {
+            Some('-') if fallback.is_empty() || pending_dash => {}
+            Some('-') => pending_dash = true,
+            Some(ch) => {
+                if pending_dash {
+                    fallback.push('-');
+                    pending_dash = false;
+                }
+                fallback.push(ch);
+            }
+            None => {}
+        }
+    }
+
+    let fallback = fallback.trim_matches(['-', '.', '_']).to_owned();
+    if fallback.is_empty() {
+        String::from("session")
+    } else {
+        fallback
+    }
+}
+
+fn build_session_download_content_disposition(session_key: &str) -> Result<HeaderValue> {
+    let fallback = format!(
+        "{}.session",
+        session_download_filename_fallback(session_key)
+    );
+    let unicode_filename = format!("{session_key}.session");
+    let encoded_filename = utf8_percent_encode(&unicode_filename, NON_ALPHANUMERIC).to_string();
+    HeaderValue::from_str(&format!(
+        "attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded_filename}"
+    ))
+    .context("failed building content-disposition header")
 }
 
 pub(crate) async fn persist_session_record(
@@ -324,10 +376,7 @@ pub(crate) async fn export_owned_session_file(
                     header::CONTENT_TYPE,
                     HeaderValue::from_static("application/octet-stream"),
                 );
-                match HeaderValue::from_str(&format!(
-                    "attachment; filename=\"{}.session\"",
-                    session.session_key
-                )) {
+                match build_session_download_content_disposition(&session.session_key) {
                     Ok(value) => {
                         response
                             .headers_mut()
@@ -462,5 +511,17 @@ mod tests {
         let unpacked =
             unpack_session_storage_bytes(packed.as_slice()).expect("unpack session payload");
         assert_eq!(unpacked.as_slice(), plaintext.as_slice());
+    }
+
+    #[test]
+    fn content_disposition_supports_unicode_session_names() {
+        let header = build_session_download_content_disposition("中文 🚀 会话")
+            .expect("content disposition should support unicode names");
+        let value = header.to_str().expect("header should stay ascii");
+
+        assert!(value.contains("filename=\"session.session\""));
+        assert!(value.contains("filename*=UTF-8''"));
+        assert!(value.contains("%E4%B8%AD%E6%96%87"));
+        assert!(value.contains("%F0%9F%9A%80"));
     }
 }

@@ -29,6 +29,7 @@ hmac = "0.12"
 libsql = { version = "0.9.29", default-features = false, features = ["core"] }
 libsql-sys = { version = "0.9.29", features = ["rusqlite"] }
 phonenumber = "0.3"
+percent-encoding = "2"
 qrcodegen = "1.8"
 rand = "0.8"
 regex = "1"

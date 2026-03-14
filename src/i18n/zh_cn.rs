@@ -144,7 +144,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     setup_qr_description: "生成二维码，用另一个已经登录的 Telegram 客户端扫码确认，就能新增一个可监控的会话。",
     setup_qr_button: "生成二维码",
     setup_session_name: "会话名称",
-    setup_session_name_hint: "可选。填写后会作为保存到磁盘的文件名。",
+    setup_session_name_hint: "可选。会作为面板中显示的会话名称，支持任意语言与 emoji。",
     setup_error_missing_string: "请先粘贴 Telethon 字符串会话。",
     setup_error_invalid_string: "这个 Telethon 字符串会话无法导入。",
     setup_error_missing_upload: "请选择要上传的 .session 文件。",

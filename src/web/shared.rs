@@ -1428,4 +1428,76 @@ mod tests {
         assert!(rendered.contains(translations.register_title));
         assert!(rendered.contains(translations.register_submit_label));
     }
+
+    #[test]
+    fn dashboard_template_renders_unicode_session_cards() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+
+        let language = Language::ZhCn;
+        let translations = language.translations();
+        let sessions = vec![DashboardSessionView {
+            id: String::from("session-1"),
+            key: String::from("会话 🚀 España العربية"),
+            note: String::from("用于测试复制卡片"),
+            phone: String::from("+86 138 0000 0000"),
+            session_file: String::from("sessions/session-1.session"),
+            status: DashboardStatusView {
+                kind: "connected",
+                connected: true,
+                error: None,
+            },
+            latest_code: Some(String::from("123456")),
+            latest_message_at: Some(String::from("2026-03-14 09:00:00 UTC")),
+            latest_code_at_unix: Some(1_773_486_000),
+            recent_messages: vec![DashboardMessageView {
+                received_at: String::from("2026-03-14 09:00:00 UTC"),
+                text: String::from("Telegram code: 123456"),
+                code: Some(String::from("123456")),
+            }],
+        }];
+
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert("languages", &language_options(language, "/"));
+        context.insert("current_username", "alice");
+        context.insert("show_admin", &false);
+        context.insert("logout_action", "/logout");
+        context.insert("setup_href", "/sessions/new");
+        context.insert("settings_href", "/settings");
+        context.insert("admin_href", "/admin");
+        context.insert("settings_label", &translations.nav_settings_label);
+        context.insert("admin_label", &translations.nav_admin_label);
+        context.insert("settings_security_href", "/settings#security");
+        context.insert("settings_notifications_href", "/settings#notifications");
+        context.insert("settings_access_href", "/settings#access");
+        context.insert("admin_overview_href", "/admin#users");
+        context.insert("banner", &Option::<PageBanner>::None);
+        context.insert("sessions", &sessions);
+        context.insert("attention_sessions", &Vec::<DashboardSessionView>::new());
+        context.insert("recent_activity_sessions", &sessions);
+        context.insert("total_sessions", &1);
+        context.insert("connected_count", &1);
+        context.insert("connecting_count", &0);
+        context.insert("error_count", &0);
+        context.insert("attention_count", &0);
+        context.insert("now", "2026-03-14 09:00:00 UTC");
+        context.insert("snapshot_api", "/api/dashboard/snapshot");
+        context.insert("dashboard_incremental_refresh_seconds", &3_u64);
+        context.insert("dashboard_full_refresh_seconds", &30_u64);
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+
+        let rendered = tera
+            .render("index.html", &context)
+            .expect("dashboard template should render");
+
+        assert!(rendered.contains("会话 🚀 España العربية"));
+        assert!(rendered.contains("data-role=\"copy-code-chip\""));
+        assert!(rendered.contains("copyDashboardCode(this)"));
+    }
 }

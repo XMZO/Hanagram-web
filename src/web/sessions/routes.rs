@@ -93,30 +93,34 @@ pub(crate) fn format_phone_display(raw: &str) -> String {
 
 fn sanitize_session_name(raw: &str) -> String {
     let mut cleaned = String::new();
-    let mut last_was_dash = false;
+    let mut pending_space = false;
 
     for ch in raw.trim().chars() {
-        let mapped = if ch.is_ascii_alphanumeric() {
-            Some(ch.to_ascii_lowercase())
-        } else if matches!(ch, '-' | '_') {
-            Some(ch)
-        } else if ch.is_whitespace() {
-            Some('-')
-        } else {
-            None
+        let mapped = match ch {
+            '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*' => Some(' '),
+            _ if ch.is_control() => None,
+            _ if ch.is_whitespace() => Some(' '),
+            _ => Some(ch),
         };
 
         match mapped {
-            Some('-') | Some('_') if last_was_dash => {}
+            Some(' ') => {
+                if !cleaned.is_empty() {
+                    pending_space = true;
+                }
+            }
             Some(ch) => {
-                last_was_dash = matches!(ch, '-' | '_');
+                if pending_space {
+                    cleaned.push(' ');
+                    pending_space = false;
+                }
                 cleaned.push(ch);
             }
             None => {}
         }
     }
 
-    let cleaned = cleaned.trim_matches(['-', '_']).to_owned();
+    let cleaned = cleaned.trim().to_owned();
     if cleaned.is_empty() {
         format!("session-{}", Utc::now().timestamp())
     } else {
@@ -1549,8 +1553,14 @@ mod tests {
 
     #[test]
     fn sanitize_session_name_falls_back_and_normalizes() {
-        assert_eq!(sanitize_session_name("Hello World"), "hello-world");
-        assert_eq!(sanitize_session_name("test__name"), "test_name");
+        assert_eq!(sanitize_session_name("Hello   World"), "Hello World");
+        assert_eq!(sanitize_session_name("中文 会话"), "中文 会话");
+        assert_eq!(sanitize_session_name("中文/会话:*"), "中文 会话");
+        assert_eq!(
+            sanitize_session_name("Español العربية हिन्दी 🚀🎉"),
+            "Español العربية हिन्दी 🚀🎉"
+        );
+        assert_eq!(sanitize_session_name("👨‍👩‍👧‍👦 family 会话"), "👨‍👩‍👧‍👦 family 会话");
         assert!(sanitize_session_name("  ").starts_with("session-"));
     }
 

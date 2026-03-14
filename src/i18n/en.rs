@@ -144,7 +144,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     setup_qr_description: "Generate a QR code and scan it with an already logged-in Telegram app to authorize a new session.",
     setup_qr_button: "Generate QR Code",
     setup_session_name: "Session Name",
-    setup_session_name_hint: "Optional. Used as the file name if provided.",
+    setup_session_name_hint: "Optional. Used as the display name shown in the dashboard. Unicode and emoji are supported.",
     setup_error_missing_string: "Paste a Telethon string session first.",
     setup_error_invalid_string: "That Telethon string session could not be imported.",
     setup_error_missing_upload: "Select a .session file to upload.",
