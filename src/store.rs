@@ -15,6 +15,7 @@ use crate::security::{
 
 const SYSTEM_SETTINGS_KEY: &str = "system_settings";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
+const AUTH_SESSION_UNLOCK_PREFIX: &str = "auth_unlock:";
 const APP_SCHEMA_VERSION: i64 = 2;
 const INCOMPATIBLE_SCHEMA_MESSAGE: &str = "existing metadata database schema is incompatible with this build; delete .hanagram/app.db and restart";
 
@@ -272,6 +273,54 @@ impl MetaStore {
         )
         .await
         .context("failed writing system settings")?;
+        Ok(())
+    }
+
+    pub async fn load_auth_session_unlock_material(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.connection()?;
+        let mut statement = conn
+            .prepare("SELECT value_json FROM metadata WHERE key = ?1 LIMIT 1")
+            .await?;
+        match statement
+            .query_row([auth_session_unlock_metadata_key(session_id)])
+            .await
+        {
+            Ok(row) => row
+                .get(0)
+                .context("failed to decode auth session unlock material")
+                .map(Some),
+            Err(libsql::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error).context("failed reading auth session unlock material"),
+        }
+    }
+
+    pub async fn save_auth_session_unlock_material(
+        &self,
+        session_id: &str,
+        value_json: &str,
+    ) -> Result<()> {
+        let conn = self.connection()?;
+        conn.execute(
+            "INSERT INTO metadata (key, value_json) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+            libsql::params![auth_session_unlock_metadata_key(session_id), value_json],
+        )
+        .await
+        .context("failed writing auth session unlock material")?;
+        Ok(())
+    }
+
+    pub async fn delete_auth_session_unlock_material(&self, session_id: &str) -> Result<()> {
+        let conn = self.connection()?;
+        conn.execute(
+            "DELETE FROM metadata WHERE key = ?1",
+            [auth_session_unlock_metadata_key(session_id)],
+        )
+        .await
+        .context("failed deleting auth session unlock material")?;
         Ok(())
     }
 
@@ -1243,6 +1292,10 @@ fn now_unix() -> i64 {
     Utc::now().timestamp()
 }
 
+fn auth_session_unlock_metadata_key(session_id: &str) -> String {
+    format!("{AUTH_SESSION_UNLOCK_PREFIX}{session_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1350,5 +1403,46 @@ mod tests {
         assert_eq!(rollups.len(), 1);
         assert_eq!(rollups[0].action_type, "login_failed");
         assert_eq!(rollups[0].total_count, 2);
+    }
+
+    #[tokio::test]
+    async fn auth_session_unlock_material_round_trips() {
+        let store = MetaStore::open_memory()
+            .await
+            .expect("metadata store should open in memory");
+
+        assert!(
+            store
+                .load_auth_session_unlock_material("session-a")
+                .await
+                .expect("unlock material lookup should succeed")
+                .is_none()
+        );
+
+        store
+            .save_auth_session_unlock_material("session-a", r#"{"wrapped":"value"}"#)
+            .await
+            .expect("unlock material should save");
+
+        assert_eq!(
+            store
+                .load_auth_session_unlock_material("session-a")
+                .await
+                .expect("unlock material should load"),
+            Some(String::from(r#"{"wrapped":"value"}"#))
+        );
+
+        store
+            .delete_auth_session_unlock_material("session-a")
+            .await
+            .expect("unlock material should delete");
+
+        assert!(
+            store
+                .load_auth_session_unlock_material("session-a")
+                .await
+                .expect("unlock material lookup should succeed")
+                .is_none()
+        );
     }
 }

@@ -21,6 +21,7 @@ use hanagram_web::store::{
     UserRole,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use webauthn_rp::bin::{Decode, Encode};
 use webauthn_rp::request::PublicKeyCredentialDescriptor;
@@ -46,6 +47,8 @@ pub const LOGIN_METHOD_PASSWORD_ONLY: &str = "password_only";
 pub const LOGIN_METHOD_PASSWORD_TOTP: &str = "password_totp";
 pub const LOGIN_METHOD_PASSWORD_RECOVERY: &str = "password_recovery_code";
 pub const LOGIN_METHOD_PASSWORD_PASSKEY: &str = "password_passkey";
+const AUTH_SESSION_UNLOCK_CONTEXT: &str = "hanagram-auth-session-unlock:v1";
+const AUTH_SESSION_UNLOCK_VERSION: u8 = 1;
 
 #[derive(Clone, Debug)]
 pub struct AuthenticatedSession {
@@ -137,6 +140,12 @@ pub(crate) struct PasskeyAuthenticationMaterial {
     pub(crate) credential_id: CredentialId<Vec<u8>>,
     pub(crate) static_state: StoredPasskeyStaticState,
     pub(crate) dynamic_state: DynamicState,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct StoredAuthSessionUnlockMaterial {
+    version: u8,
+    wrapped_master_key: EncryptedBlob,
 }
 
 pub async fn register_user(
@@ -457,6 +466,44 @@ async fn complete_login(
         requires_password_reset: verified.requires_password_reset,
         recovery_notice_codes: None,
     })
+}
+
+fn derive_auth_session_unlock_key(session_token: &str) -> MasterKey {
+    let digest =
+        Sha256::digest(format!("{AUTH_SESSION_UNLOCK_CONTEXT}:{session_token}").as_bytes());
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(digest.as_slice());
+    zeroize::Zeroizing::new(key)
+}
+
+pub fn wrap_auth_session_master_key(session_token: &str, master_key: &[u8]) -> Result<String> {
+    let wrapping_key = derive_auth_session_unlock_key(session_token);
+    let wrapped_master_key = encrypt_bytes(wrapping_key.as_slice(), master_key)?;
+    serde_json::to_string(&StoredAuthSessionUnlockMaterial {
+        version: AUTH_SESSION_UNLOCK_VERSION,
+        wrapped_master_key,
+    })
+    .context("failed to encode auth session unlock material")
+}
+
+pub fn unwrap_auth_session_master_key(
+    session_token: &str,
+    payload_json: &str,
+) -> Result<MasterKey> {
+    let payload: StoredAuthSessionUnlockMaterial = serde_json::from_str(payload_json)
+        .context("failed to parse auth session unlock material")?;
+    ensure!(
+        payload.version == AUTH_SESSION_UNLOCK_VERSION,
+        "unsupported auth session unlock material version"
+    );
+
+    let wrapping_key = derive_auth_session_unlock_key(session_token);
+    let plaintext = decrypt_bytes(wrapping_key.as_slice(), &payload.wrapped_master_key)?;
+    let master_key: [u8; 32] = plaintext
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("auth session unlock material had an unexpected length"))?;
+    Ok(zeroize::Zeroizing::new(master_key))
 }
 
 fn encode_passkey(
@@ -1628,5 +1675,16 @@ mod tests {
         user.security.banned_until_unix = Some(now - 1);
 
         assert!(current_ban_status(&user, now).is_none());
+    }
+
+    #[test]
+    fn auth_session_unlock_material_round_trips() {
+        let master_key = generate_master_key();
+        let payload = wrap_auth_session_master_key("session-token", master_key.as_slice())
+            .expect("unlock material should encode");
+        let restored = unwrap_auth_session_master_key("session-token", &payload)
+            .expect("unlock material should decode");
+
+        assert_eq!(restored.as_slice(), master_key.as_slice());
     }
 }

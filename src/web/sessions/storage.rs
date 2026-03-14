@@ -233,17 +233,15 @@ pub(crate) async fn persist_loaded_session(
 pub(crate) async fn save_new_session_record(
     app_state: &AppState,
     user_id: &str,
+    auth_session_id: &str,
     session_id: &str,
     session_name: &str,
     session: &LoadedSession,
 ) -> Result<SessionRecord> {
-    let master_key = app_state
-        .user_keys
-        .read()
-        .await
-        .get(user_id)
-        .cloned()
-        .context("user data is locked; sign in again to unlock it")?;
+    let master_key =
+        middleware::resolve_cached_user_master_key(app_state, user_id, auth_session_id)
+            .await
+            .context("user data is locked; sign in again to unlock it")?;
     let session_path = session_storage_path(&app_state.runtime, user_id, session_id);
     persist_loaded_session(master_key.as_ref().as_slice(), &session_path, session).await?;
 
@@ -370,18 +368,16 @@ pub(crate) async fn export_owned_session_file(
 pub(crate) async fn finalize_pending_session(
     app_state: &AppState,
     user_id: &str,
+    auth_session_id: &str,
     session_id: &str,
     session_name: &str,
     final_path: &Path,
     session_data: &[u8],
 ) -> Result<()> {
-    let master_key = app_state
-        .user_keys
-        .read()
-        .await
-        .get(user_id)
-        .cloned()
-        .context("user data is locked; sign in again to unlock it")?;
+    let master_key =
+        middleware::resolve_cached_user_master_key(app_state, user_id, auth_session_id)
+            .await
+            .context("user data is locked; sign in again to unlock it")?;
     let loaded = load_session(session_data).context("failed to decode pending session payload")?;
     persist_loaded_session(master_key.as_ref().as_slice(), final_path, &loaded.session).await?;
 

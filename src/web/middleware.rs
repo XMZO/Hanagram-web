@@ -4,6 +4,8 @@
 use super::sessions;
 use super::shared::*;
 
+pub(crate) const LOGIN_REAUTH_UNLOCK_LOCATION: &str = "/login?reauth=unlock";
+
 fn enforced_redirect_target(
     path: &str,
     requires_password_reset: bool,
@@ -64,6 +66,27 @@ pub(crate) async fn require_login(
         return response;
     };
 
+    if let Some(session_token) = find_cookie(request.headers(), AUTH_COOKIE_NAME) {
+        if ensure_auth_session_master_key(
+            &app_state,
+            &authenticated.user.id,
+            &authenticated.auth_session.id,
+            session_token,
+        )
+        .await
+        .is_none()
+        {
+            return revoke_auth_session_and_redirect_to_login(
+                &app_state,
+                &settings,
+                request.headers(),
+                &authenticated.auth_session,
+                LOGIN_REAUTH_UNLOCK_LOCATION,
+            )
+            .await;
+        }
+    }
+
     let recovery_notice_pending = app_state
         .recovery_notices
         .read()
@@ -104,31 +127,43 @@ pub(crate) async fn resolved_user_master_key(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
 ) -> Option<SharedMasterKey> {
-    if let Some(master_key) = app_state
-        .user_keys
-        .read()
-        .await
-        .get(&authenticated.user.id)
-        .cloned()
-    {
-        return Some(master_key);
-    }
-
-    app_state
-        .unlock_cache
-        .read()
-        .await
-        .get(&authenticated.auth_session.id)
-        .cloned()
+    resolve_cached_user_master_key(
+        app_state,
+        &authenticated.user.id,
+        &authenticated.auth_session.id,
+    )
+    .await
 }
 
-pub(crate) async fn cache_user_master_key(
+pub(crate) async fn resolve_cached_user_master_key(
     app_state: &AppState,
     user_id: &str,
     auth_session_id: &str,
-    master_key: MasterKey,
+) -> Option<SharedMasterKey> {
+    if let Some(master_key) = app_state.user_keys.read().await.get(user_id).cloned() {
+        return Some(master_key);
+    }
+
+    let master_key = app_state
+        .unlock_cache
+        .read()
+        .await
+        .get(auth_session_id)
+        .cloned()?;
+    app_state
+        .user_keys
+        .write()
+        .await
+        .insert(user_id.to_owned(), Arc::clone(&master_key));
+    Some(master_key)
+}
+
+async fn cache_shared_user_master_key(
+    app_state: &AppState,
+    user_id: &str,
+    auth_session_id: &str,
+    shared_master_key: SharedMasterKey,
 ) {
-    let shared_master_key = share_master_key(master_key);
     app_state
         .unlock_cache
         .write()
@@ -140,6 +175,168 @@ pub(crate) async fn cache_user_master_key(
         .await
         .insert(user_id.to_owned(), shared_master_key);
     sessions::unlock_user_sessions(app_state, user_id).await;
+}
+
+async fn persist_auth_session_master_key(
+    app_state: &AppState,
+    auth_session_id: &str,
+    session_token: &str,
+    master_key: &[u8],
+) -> Result<()> {
+    let payload_json = crate::web_auth::wrap_auth_session_master_key(session_token, master_key)?;
+    app_state
+        .meta_store
+        .save_auth_session_unlock_material(auth_session_id, &payload_json)
+        .await
+}
+
+pub(crate) async fn ensure_auth_session_master_key(
+    app_state: &AppState,
+    user_id: &str,
+    auth_session_id: &str,
+    session_token: &str,
+) -> Option<SharedMasterKey> {
+    if let Some(master_key) =
+        resolve_cached_user_master_key(app_state, user_id, auth_session_id).await
+    {
+        match app_state
+            .meta_store
+            .load_auth_session_unlock_material(auth_session_id)
+            .await
+        {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                if let Err(error) = persist_auth_session_master_key(
+                    app_state,
+                    auth_session_id,
+                    session_token,
+                    master_key.as_ref().as_slice(),
+                )
+                .await
+                {
+                    warn!(
+                        "failed persisting auth session unlock material for {}: {}",
+                        auth_session_id, error
+                    );
+                }
+            }
+            Err(error) => {
+                warn!(
+                    "failed checking auth session unlock material for {}: {}",
+                    auth_session_id, error
+                );
+            }
+        }
+        return Some(master_key);
+    }
+
+    let payload_json = match app_state
+        .meta_store
+        .load_auth_session_unlock_material(auth_session_id)
+        .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return None,
+        Err(error) => {
+            warn!(
+                "failed loading auth session unlock material for {}: {}",
+                auth_session_id, error
+            );
+            return None;
+        }
+    };
+    let master_key =
+        match crate::web_auth::unwrap_auth_session_master_key(session_token, &payload_json) {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    "failed restoring auth session unlock material for {}: {}",
+                    auth_session_id, error
+                );
+                if let Err(delete_error) = app_state
+                    .meta_store
+                    .delete_auth_session_unlock_material(auth_session_id)
+                    .await
+                {
+                    warn!(
+                        "failed deleting corrupted auth session unlock material for {}: {}",
+                        auth_session_id, delete_error
+                    );
+                }
+                return None;
+            }
+        };
+    let shared_master_key = share_master_key(master_key);
+    cache_shared_user_master_key(
+        app_state,
+        user_id,
+        auth_session_id,
+        Arc::clone(&shared_master_key),
+    )
+    .await;
+    Some(shared_master_key)
+}
+
+pub(crate) async fn revoke_auth_session_and_redirect_to_login(
+    app_state: &AppState,
+    settings: &SystemSettings,
+    headers: &HeaderMap,
+    auth_session: &AuthSessionRecord,
+    location: &str,
+) -> Response {
+    let _ = app_state
+        .meta_store
+        .revoke_auth_session(&auth_session.id)
+        .await;
+    clear_auth_session_sensitive_state(app_state, &auth_session.id).await;
+    drop_user_master_key_if_no_active_sessions(app_state, &auth_session.user_id).await;
+
+    let mut response = Redirect::to(location).into_response();
+    let cookie_secure = effective_auth_cookie_secure(settings, headers);
+    if let Ok(cookie) = set_cookie_header(&clear_auth_cookie(cookie_secure)) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
+
+pub(crate) async fn cache_user_master_key(
+    app_state: &AppState,
+    user_id: &str,
+    auth_session_id: &str,
+    master_key: MasterKey,
+) {
+    let shared_master_key = share_master_key(master_key);
+    cache_shared_user_master_key(app_state, user_id, auth_session_id, shared_master_key).await;
+}
+
+pub(crate) async fn cache_user_master_key_for_session(
+    app_state: &AppState,
+    user_id: &str,
+    auth_session_id: &str,
+    session_token: &str,
+    master_key: MasterKey,
+) {
+    let shared_master_key = share_master_key(master_key);
+    cache_shared_user_master_key(
+        app_state,
+        user_id,
+        auth_session_id,
+        Arc::clone(&shared_master_key),
+    )
+    .await;
+    if let Err(error) = persist_auth_session_master_key(
+        app_state,
+        auth_session_id,
+        session_token,
+        shared_master_key.as_ref().as_slice(),
+    )
+    .await
+    {
+        warn!(
+            "failed persisting auth session unlock material for {}: {}",
+            auth_session_id, error
+        );
+    }
 }
 
 pub(crate) fn auth_session_is_active(auth_session: &AuthSessionRecord, now: i64) -> bool {
@@ -215,6 +412,16 @@ pub(crate) async fn clear_auth_session_sensitive_state(
     auth_session_id: &str,
 ) {
     app_state.unlock_cache.write().await.remove(auth_session_id);
+    if let Err(error) = app_state
+        .meta_store
+        .delete_auth_session_unlock_material(auth_session_id)
+        .await
+    {
+        warn!(
+            "failed deleting auth session unlock material for {}: {}",
+            auth_session_id, error
+        );
+    }
     clear_pending_flows_for_auth_session(app_state, auth_session_id).await;
 }
 

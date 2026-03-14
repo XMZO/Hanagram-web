@@ -19,10 +19,18 @@ use webauthn_rp::response::register::Registration;
 use webauthn_rp::response::register::error::RegCeremonyErr;
 
 use super::middleware::{
-    cache_user_master_key, clear_auth_session_sensitive_state, clear_invalid_cookie_state,
-    drop_user_master_key_if_no_active_sessions, resolved_user_master_key,
+    LOGIN_REAUTH_UNLOCK_LOCATION, cache_user_master_key, cache_user_master_key_for_session,
+    clear_auth_session_sensitive_state, clear_invalid_cookie_state,
+    drop_user_master_key_if_no_active_sessions, ensure_auth_session_master_key,
+    resolved_user_master_key, revoke_auth_session_and_redirect_to_login,
 };
 use super::shared::*;
+
+#[derive(Debug, Default, Deserialize)]
+struct LoginPageQuery {
+    lang: Option<String>,
+    reauth: Option<String>,
+}
 
 pub(crate) fn public_routes() -> Router<AppState> {
     Router::new()
@@ -949,7 +957,7 @@ async fn select_language_handler(
 
 async fn login_page_handler(
     State(app_state): State<AppState>,
-    Query(query): Query<LangQuery>,
+    Query(query): Query<LoginPageQuery>,
     headers: HeaderMap,
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
@@ -958,6 +966,26 @@ async fn login_page_handler(
     if let Ok(Some(authenticated)) =
         resolve_authenticated_session(&app_state.meta_store, &settings, &headers).await
     {
+        if let Some(session_token) = find_cookie(&headers, AUTH_COOKIE_NAME) {
+            if ensure_auth_session_master_key(
+                &app_state,
+                &authenticated.user.id,
+                &authenticated.auth_session.id,
+                session_token,
+            )
+            .await
+            .is_none()
+            {
+                return revoke_auth_session_and_redirect_to_login(
+                    &app_state,
+                    &settings,
+                    &headers,
+                    &authenticated.auth_session,
+                    LOGIN_REAUTH_UNLOCK_LOCATION,
+                )
+                .await;
+            }
+        }
         let target = if app_state
             .recovery_notices
             .read()
@@ -976,7 +1004,13 @@ async fn login_page_handler(
     }
     clear_invalid_cookie_state(&app_state, &headers).await;
 
-    match render_login_page(&app_state, language, None, &headers).await {
+    let reauth_message = if query.reauth.as_deref() == Some("unlock") {
+        Some(language.translations().login_reauth_unlock_message)
+    } else {
+        None
+    };
+
+    match render_login_page(&app_state, language, reauth_message, &headers).await {
         Ok(html) => html.into_response(),
         Err(status) => status.into_response(),
     }
@@ -1024,10 +1058,11 @@ async fn login_submit_handler(
     .await
     {
         Ok(login_result) => {
-            cache_user_master_key(
+            cache_user_master_key_for_session(
                 &app_state,
                 &login_result.auth_session.user_id,
                 &login_result.auth_session.id,
+                &login_result.session_token,
                 login_result.master_key,
             )
             .await;
@@ -1507,10 +1542,11 @@ async fn login_passkey_finish_handler(
         }
     };
 
-    cache_user_master_key(
+    cache_user_master_key_for_session(
         &app_state,
         &login_result.auth_session.user_id,
         &login_result.auth_session.id,
+        &login_result.session_token,
         login_result.master_key,
     )
     .await;
@@ -1578,7 +1614,14 @@ async fn register_submit_handler(
             session_token,
             master_key,
         }) => {
-            cache_user_master_key(&app_state, &user.id, &auth_session.id, master_key).await;
+            cache_user_master_key_for_session(
+                &app_state,
+                &user.id,
+                &auth_session.id,
+                &session_token,
+                master_key,
+            )
+            .await;
 
             let max_age = i64::from(settings.session_absolute_ttl_hours) * 3600;
             let mut response = Redirect::to("/settings/security/totp/setup").into_response();
@@ -1661,13 +1704,24 @@ async fn change_password_handler(
     .await
     {
         Ok(master_key) => {
-            cache_user_master_key(
-                &app_state,
-                &user.id,
-                &authenticated.auth_session.id,
-                master_key,
-            )
-            .await;
+            if let Some(session_token) = find_cookie(&headers, AUTH_COOKIE_NAME) {
+                cache_user_master_key_for_session(
+                    &app_state,
+                    &user.id,
+                    &authenticated.auth_session.id,
+                    session_token,
+                    master_key,
+                )
+                .await;
+            } else {
+                cache_user_master_key(
+                    &app_state,
+                    &user.id,
+                    &authenticated.auth_session.id,
+                    master_key,
+                )
+                .await;
+            }
             let mut refreshed = authenticated.clone();
             refreshed.user = user;
             match render_settings_page(

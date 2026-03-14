@@ -455,6 +455,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     login_banned_permanent_reason_message: "This account is banned permanently. Reason: {reason}",
     login_require_mfa_message: "Enter a TOTP code or recovery code to finish signing in.",
     login_invalid_mfa_message: "The TOTP code or recovery code was invalid.",
+    login_reauth_unlock_message: "This session could not restore the unlock state for protected data. For safety, you were signed out. Please sign in again.",
     login_passkey_start_message: "Starting passkey verification…",
     login_passkey_finish_message: "Complete the passkey verification on your device…",
     login_passkey_error_message: "Passkey sign-in failed.",

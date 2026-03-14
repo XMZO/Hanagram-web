@@ -455,6 +455,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     login_banned_permanent_reason_message: "这个账号已被永久封禁。原因：{reason}",
     login_require_mfa_message: "请输入 TOTP 动态码或恢复码以完成登录。",
     login_invalid_mfa_message: "TOTP 动态码或恢复码不正确。",
+    login_reauth_unlock_message: "当前登录会话无法恢复受保护数据的解锁状态。为了安全，系统已将您退出，请重新登录。",
     login_passkey_start_message: "正在发起通行密钥验证…",
     login_passkey_finish_message: "请在设备上完成通行密钥验证…",
     login_passkey_error_message: "通行密钥登录失败。",

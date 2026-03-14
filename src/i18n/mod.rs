@@ -465,6 +465,7 @@ pub struct TranslationSet {
     pub login_banned_permanent_reason_message: &'static str,
     pub login_require_mfa_message: &'static str,
     pub login_invalid_mfa_message: &'static str,
+    pub login_reauth_unlock_message: &'static str,
     pub login_passkey_start_message: &'static str,
     pub login_passkey_finish_message: &'static str,
     pub login_passkey_error_message: &'static str,

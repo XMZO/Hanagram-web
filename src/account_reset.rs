@@ -79,6 +79,11 @@ async fn purge_user_account_state(
     let auth_sessions = store.list_auth_sessions_for_user(user_id).await?;
     let session_records = store.list_session_records_for_user(user_id).await?;
 
+    for auth_session in &auth_sessions {
+        store
+            .delete_auth_session_unlock_material(&auth_session.id)
+            .await?;
+    }
     store.revoke_all_auth_sessions_for_user(user_id).await?;
     store.replace_recovery_codes(user_id, &[]).await?;
     store.clear_used_totp_steps_for_user(user_id).await?;
@@ -196,7 +201,7 @@ mod tests {
             .mark_totp_step_used(&user.id, 42)
             .await
             .expect("totp step should save");
-        store
+        let auth_session = store
             .create_auth_session(
                 &user.id,
                 "token-hash",
@@ -207,6 +212,10 @@ mod tests {
             )
             .await
             .expect("auth session should save");
+        store
+            .save_auth_session_unlock_material(&auth_session.id, r#"{"wrapped":"value"}"#)
+            .await
+            .expect("unlock material should save");
 
         let user_dir = users_dir.join(&user.id);
         tokio::fs::create_dir_all(&user_dir)
@@ -280,6 +289,13 @@ mod tests {
                 .await
                 .expect("session records should load")
                 .is_empty()
+        );
+        assert!(
+            store
+                .load_auth_session_unlock_material(&result.auth_session_ids[0])
+                .await
+                .expect("unlock material should load")
+                .is_none()
         );
         assert!(!session_path.exists());
         assert!(!user_dir.exists());

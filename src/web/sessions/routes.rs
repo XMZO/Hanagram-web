@@ -308,6 +308,7 @@ async fn import_string_session_handler(
             if let Err(error) = save_new_session_record(
                 &app_state,
                 &authenticated.user.id,
+                &authenticated.auth_session.id,
                 &session_id,
                 &session_name,
                 &session,
@@ -533,6 +534,7 @@ async fn import_session_file_handler(
             if let Err(error) = save_new_session_record(
                 &app_state,
                 &authenticated.user.id,
+                &authenticated.auth_session.id,
                 &session_id,
                 &session_name,
                 &loaded_session.session,
@@ -1051,6 +1053,7 @@ async fn verify_phone_code_handler(
             if let Err(error) = finalize_pending_session(
                 &app_state,
                 &flow.user_id,
+                &flow.auth_session_id,
                 &flow.session_id,
                 &flow.session_name,
                 &flow.final_path,
@@ -1224,6 +1227,7 @@ async fn verify_phone_password_handler(
             if let Err(error) = finalize_pending_session(
                 &app_state,
                 &flow.user_id,
+                &flow.auth_session_id,
                 &flow.session_id,
                 &flow.session_name,
                 &flow.final_path,
@@ -1377,6 +1381,7 @@ async fn qr_flow_page_handler(
             if let Err(error) = finalize_pending_session(
                 &app_state,
                 &flow.user_id,
+                &flow.auth_session_id,
                 &flow.session_id,
                 &flow.session_name,
                 &flow.final_path,
