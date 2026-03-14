@@ -1343,7 +1343,7 @@ pub(crate) fn render_qr_svg(data: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ban_expires_at;
+    use super::*;
 
     #[test]
     fn parse_ban_expires_at_accepts_permanent_without_value() {
@@ -1356,5 +1356,76 @@ mod tests {
     #[test]
     fn parse_ban_expires_at_rejects_zero_length() {
         assert!(parse_ban_expires_at("0", "minutes").is_err());
+    }
+
+    #[test]
+    fn login_template_renders_with_login_page_context() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+
+        let language = Language::ZhCn;
+        let translations = language.translations();
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert("languages", &language_options(language, "/login"));
+        context.insert("error_message", &Option::<String>::None);
+        context.insert("show_register", &true);
+        context.insert("register_href", "/register");
+        context.insert("register_label", &translations.register_title);
+        context.insert("mfa_label", &translations.login_mfa_label);
+        context.insert("recovery_label", &translations.login_recovery_label);
+        context.insert("mfa_hint", &translations.login_mfa_hint);
+        context.insert("ready_label", &translations.login_ready_label);
+        context.insert(
+            "recovery_toggle_label",
+            &translations.login_recovery_toggle_label,
+        );
+        context.insert(
+            "recovery_back_label",
+            &translations.login_recovery_back_label,
+        );
+        context.insert("passkey_label", &translations.login_passkey_label);
+        context.insert("passkey_hint", &translations.login_passkey_hint);
+        context.insert("passkey_supported", &true);
+        context.insert("passkey_unavailable_message", "");
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+
+        let rendered = tera
+            .render("login.html", &context)
+            .expect("login template should render");
+
+        assert!(rendered.contains(translations.login_title));
+        assert!(rendered.contains(translations.login_password_tab_label));
+    }
+
+    #[test]
+    fn register_template_renders_with_register_page_context() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+
+        let language = Language::ZhCn;
+        let translations = language.translations();
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert("languages", &language_options(language, "/register"));
+        context.insert("error_message", &Option::<String>::None);
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+
+        let rendered = tera
+            .render("register.html", &context)
+            .expect("register template should render");
+
+        assert!(rendered.contains(translations.register_title));
+        assert!(rendered.contains(translations.register_submit_label));
     }
 }

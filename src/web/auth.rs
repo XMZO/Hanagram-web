@@ -312,15 +312,6 @@ async fn render_register_page(
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("languages", &languages);
-    context.insert("title", &translations.register_title);
-    context.insert("page_title", &translations.register_page_title);
-    context.insert("description", &translations.register_description);
-    context.insert("username_label", &translations.login_username);
-    context.insert("password_label", &translations.login_password);
-    context.insert("confirm_label", &translations.register_confirm_label);
-    context.insert("submit_label", &translations.register_submit_label);
-    context.insert("back_label", &translations.back_to_login_label);
-    context.insert("back_href", "/login");
     context.insert("error_message", &error_message);
     insert_transport_security_warning(&mut context, language, headers);
 
