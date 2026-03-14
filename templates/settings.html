@@ -38,6 +38,16 @@
         const SECURITY_PANES = [{% if show_workspace_links %}"overview", "password", "totp", "passkeys"{% else %}"overview", "password"{% endif %}];
         const SETTINGS_PANE_STORAGE_KEY = "hanagram.settings.pane";
         const SECURITY_PANE_STORAGE_KEY = "hanagram.settings.security-pane";
+        const LOCAL_SEGMENTS = {
+            notifications: {
+                panes: ["settings", "reference"],
+                storageKey: "hanagram.settings.notifications-pane"
+            },
+            access: {
+                panes: ["idle", "sessions"],
+                storageKey: "hanagram.settings.access-pane"
+            }
+        };
 
         function readStoredPane(key) {
             try {
@@ -102,17 +112,64 @@
             });
         }
 
+        function activateLocalSegment(group, rawPane) {
+            const config = LOCAL_SEGMENTS[group];
+            if (!config) { return ""; }
+
+            const requested = String(rawPane || "").replace(/^#/, "");
+            const stored = readStoredPane(config.storageKey);
+            const activePane = config.panes.includes(requested)
+                ? requested
+                : (config.panes.includes(stored) ? stored : config.panes[0]);
+
+            writeStoredPane(config.storageKey, activePane);
+
+            document.querySelectorAll(`[data-settings-segment-panel="${group}"]`).forEach((panel) => {
+                panel.classList.toggle("hidden", panel.dataset.settingsSegmentId !== activePane);
+            });
+
+            document.querySelectorAll(`[data-settings-segment-tab="${group}"]`).forEach((tab) => {
+                setPillState(tab, tab.dataset.settingsSegmentTarget === activePane);
+            });
+
+            return activePane;
+        }
+
+        function attachLocalSegment(group) {
+            const config = LOCAL_SEGMENTS[group];
+            if (!config) { return; }
+            const tabs = Array.from(document.querySelectorAll(`[data-settings-segment-tab="${group}"]`));
+            if (tabs.length === 0) { return; }
+
+            tabs.forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    activateLocalSegment(group, tab.dataset.settingsSegmentTarget || "");
+                });
+            });
+
+            activateLocalSegment(group, "");
+        }
+
         function rememberNearestPane(form) {
             const settingsPane = form.dataset.preserveSettingsPane
                 || form.closest("[data-settings-pane]")?.dataset.settingsPane;
             const securityPane = form.dataset.preserveSecurityTab
                 || form.closest("[data-security-pane]")?.dataset.securityPane;
+            const localSegmentPanel = form.closest("[data-settings-segment-panel]");
 
             if (settingsPane) {
                 writeStoredPane(SETTINGS_PANE_STORAGE_KEY, settingsPane);
             }
             if (securityPane) {
                 writeStoredPane(SECURITY_PANE_STORAGE_KEY, securityPane);
+            }
+            if (localSegmentPanel) {
+                const group = localSegmentPanel.dataset.settingsSegmentPanel;
+                const id = localSegmentPanel.dataset.settingsSegmentId;
+                const config = LOCAL_SEGMENTS[group];
+                if (config && id) {
+                    writeStoredPane(config.storageKey, id);
+                }
             }
         }
 
@@ -216,6 +273,8 @@
         window.addEventListener("DOMContentLoaded", () => {
             activateSettingsPane();
             activateSecurityPane();
+            attachLocalSegment("notifications");
+            attachLocalSegment("access");
 
             document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
                 tab.addEventListener("click", () => {
@@ -355,6 +414,9 @@
         .tab-strip::-webkit-scrollbar {
             display: none;
         }
+        .compact-scroll {
+            scrollbar-gutter: stable;
+        }
         details summary::-webkit-details-marker {
             display: none;
         }
@@ -489,49 +551,49 @@
                         {% endif %}
                     </div>
 
-                    <section data-security-pane="overview" class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr),minmax(18rem,0.92fr)]">
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                    <section data-security-pane="overview" class="grid gap-3 xl:grid-cols-[minmax(0,1.12fr),minmax(18rem,0.88fr)]">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ totp_status }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ totp_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ totp_status }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ totp_hint }}</p>
                                 </div>
-                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ recovery_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ recovery_remaining }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ recovery_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ recovery_remaining }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ recovery_hint }}</p>
                                 </div>
-                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ passkey_count }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ passkeys_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ passkey_count }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ passkeys_hint }}</p>
                                 </div>
-                                <div class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
                                 </div>
                             </div>
                         </article>
 
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_sections_title }}</p>
                             <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ security_title }}</h3>
-                            <p class="mt-2 text-sm leading-7 text-ink/68">{{ security_description }}</p>
-                            <div class="mt-4 grid gap-3">
-                                <button type="button" data-security-target="password" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ security_description }}</p>
+                            <div class="mt-3 grid gap-2.5">
+                                <button type="button" data-security-target="password" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
                                     <span class="block text-sm font-semibold text-ink">{{ password_title }}</span>
-                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ password_description }}</span>
+                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ password_description }}</span>
                                 </button>
                                 {% if show_workspace_links %}
-                                <button type="button" data-security-target="totp" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                                <button type="button" data-security-target="totp" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
                                     <span class="block text-sm font-semibold text-ink">{{ totp_setup_label }}</span>
-                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ totp_hint }}</span>
+                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ totp_hint }}</span>
                                 </button>
-                                <button type="button" data-security-target="passkeys" class="rounded-[1rem] border border-line bg-paper px-4 py-4 text-left transition hover:border-sage hover:bg-white">
+                                <button type="button" data-security-target="passkeys" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
                                     <span class="block text-sm font-semibold text-ink">{{ passkeys_title }}</span>
-                                    <span class="mt-2 block text-sm leading-6 text-ink/62">{{ passkeys_description }}</span>
+                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ passkeys_description }}</span>
                                 </button>
                                 {% endif %}
                             </div>
@@ -539,29 +601,31 @@
                     </section>
 
                     <section data-security-pane="password" class="hidden">
-                        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr),minmax(18rem,0.92fr)]">
-                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <div class="grid gap-3 xl:grid-cols-[minmax(0,1.04fr),minmax(18rem,0.96fr)]">
+                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                                 <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
-                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ password_description }}</p>
-                                <form method="post" action="{{ password_action }}" class="mt-4 grid gap-3">
+                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ password_description }}</p>
+                                <form method="post" action="{{ password_action }}" class="mt-3 grid gap-3">
                                     <input type="hidden" name="lang" value="{{ lang }}">
-                                    <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                    <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                    <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[1rem] border border-line bg-paper px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
-                                    <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
+                                    <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
+                                    <div class="grid gap-3 sm:grid-cols-2">
+                                        <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
+                                        <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
+                                    </div>
+                                    <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
                                 </form>
                             </article>
 
-                            <aside class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                            <aside class="grid gap-3">
+                                <div class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
                                 </div>
-                                <div class="mt-3 rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ sessions_title }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ active_session_count }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ access_current_only_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ active_session_count }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ access_current_only_hint }}</p>
                                 </div>
                             </aside>
                         </div>
@@ -569,27 +633,27 @@
 
                     {% if show_workspace_links %}
                     <section data-security-pane="totp" class="hidden">
-                        <div class="grid gap-4 xl:grid-cols-[minmax(18rem,0.92fr),minmax(0,1.08fr)]">
-                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <div class="grid gap-3 xl:grid-cols-[minmax(18rem,0.92fr),minmax(0,1.08fr)]">
+                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                                 <div class="flex flex-wrap items-center justify-between gap-3">
                                     <h3 class="text-lg font-semibold sm:text-xl">{{ totp_label }}</h3>
                                     <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ totp_status }}</span>
                                 </div>
-                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ totp_hint }}</p>
-                                <div class="mt-4 rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ totp_hint }}</p>
+                                <div class="mt-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
-                                    <p class="mt-2 text-sm leading-7 text-ink/68">{{ passkeys_hint }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ passkeys_hint }}</p>
                                 </div>
-                                <a href="{{ totp_setup_href }}" class="mt-4 inline-flex rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
+                                <a href="{{ totp_setup_href }}" class="mt-3 inline-flex rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
                             </article>
 
-                            <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                                 <div class="flex flex-wrap items-center justify-between gap-3">
                                     <h3 class="text-lg font-semibold sm:text-xl">{{ recovery_label }}</h3>
                                     <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recovery_remaining }}</span>
                                 </div>
-                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ recovery_hint }}</p>
-                                <div class="mt-4 rounded-[1rem] border border-[#ead7ae] bg-[#fffaf0] px-4 py-4 text-sm leading-7 text-ink/70">
+                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ recovery_hint }}</p>
+                                <div class="mt-3 rounded-[1rem] border border-[#ead7ae] bg-[#fffaf0] px-3.5 py-3.5 text-sm leading-6 text-ink/70">
                                     {{ i18n.login_recovery_notice_hint }}
                                 </div>
                             </article>
@@ -597,31 +661,31 @@
                     </section>
 
                     <section data-security-pane="passkeys" class="hidden">
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                 <div>
                                     <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ passkeys_label }}</p>
                                     <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
-                                    <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ passkeys_description }}</p>
+                                    <p class="mt-2 max-w-3xl text-sm leading-6 text-ink/68">{{ passkeys_description }}</p>
                                 </div>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
                             </div>
 
-                            <div id="passkey-feedback" class="mt-4 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
+                            <div id="passkey-feedback" class="mt-3 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
 
-                            <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
+                            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
                                 <div class="grid gap-3">
                                     <form
                                         data-passkey-register-form
                                         data-options-action="{{ passkey_register_options_action }}"
                                         data-finish-action="{{ passkey_register_finish_action }}"
-                                        class="grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4"
+                                        class="grid gap-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5"
                                     >
                                         <input type="hidden" name="lang" value="{{ lang }}">
                                         <label class="block">
-                                            <span class="mb-2 block text-sm font-medium">{{ passkey_name_label }}</span>
+                                            <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ passkey_name_label }}</span>
                                             <div class="flex flex-col gap-3 sm:flex-row">
-                                                <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
+                                                <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 outline-none transition focus:border-sage">
                                                 <button
                                                     type="submit"
                                                     data-passkey-register-button
@@ -633,13 +697,13 @@
                                                     data-unsupported="{{ passkey_unavailable_message }}"
                                                     data-missing-label="{{ i18n.passkey_label_required_message }}"
                                                     {% if not passkey_supported %}disabled{% endif %}
-                                                    class="shrink-0 rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
+                                                    class="shrink-0 rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
                                                 >
                                                     {{ passkey_add_label }}
                                                 </button>
                                             </div>
                                         </label>
-                                        <p class="text-sm leading-7 text-ink/62">
+                                        <p class="text-sm leading-6 text-ink/62">
                                             {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
                                         </p>
                                     </form>
@@ -662,7 +726,7 @@
                                         {{ passkey_empty_label }}
                                     </div>
                                     {% else %}
-                                    <div class="max-h-[24rem] overflow-y-auto rounded-[0.95rem] border border-line bg-white">
+                                    <div class="compact-scroll max-h-[20rem] overflow-y-auto rounded-[0.95rem] border border-line bg-white">
                                         <div class="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.2fr),minmax(8rem,0.8fr),minmax(8rem,0.8fr),auto] gap-3 border-b border-line bg-[#fbf7f0] px-4 py-3 text-xs uppercase tracking-[0.18em] text-ink/45 sm:grid">
                                             <p>{{ passkey_name_label }}</p>
                                             <p>{{ passkey_created_label }}</p>
@@ -708,71 +772,87 @@
                         <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
                     </div>
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.08fr),minmax(18rem,0.92fr)]">
-                        <form method="post" action="{{ bot_settings_action }}" class="grid gap-3 rounded-[1.45rem] border border-line bg-white/90 p-4">
+                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
+                        <button type="button" data-settings-segment-tab="notifications" data-settings-segment-target="settings" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ notifications_section_title }}</button>
+                        <button type="button" data-settings-segment-tab="notifications" data-settings-segment-target="reference" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.bot_placeholders_title }}</button>
+                    </div>
+
+                    <section data-settings-segment-panel="notifications" data-settings-segment-id="settings" class="hidden">
+                        <form method="post" action="{{ bot_settings_action }}" class="grid gap-3 rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <input type="hidden" name="lang" value="{{ lang }}">
                             <input type="hidden" name="return_to" value="settings">
                             <div class="grid gap-3 sm:grid-cols-3">
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_status_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ notification_status_value }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ notification_status_value }}</p>
                                 </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4 sm:col-span-2">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5 sm:col-span-2">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_destination_label }}</p>
-                                    <p class="mt-2 break-all font-mono text-sm leading-7 text-ink/72">{{ notification_destination_value }}</p>
+                                    <p class="mt-2 break-all font-mono text-sm leading-6 text-ink/72">{{ notification_destination_value }}</p>
                                 </div>
                             </div>
 
-                            <label class="rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                <span class="flex items-center justify-between gap-4">
-                                    <span>
-                                        <span class="block text-sm font-medium">{{ i18n.bot_enabled_label }}</span>
-                                        <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
-                                    </span>
-                                    <span class="relative inline-flex items-center">
-                                        <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
-                                        <span class="h-7 w-12 rounded-full bg-line transition peer-checked:bg-sage"></span>
-                                        <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
-                                    </span>
-                                </span>
-                            </label>
+                            <div class="grid gap-3 xl:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
+                                <div class="grid gap-3">
+                                    <label class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                        <span class="flex items-center justify-between gap-4">
+                                            <span>
+                                                <span class="block text-sm font-medium">{{ i18n.bot_enabled_label }}</span>
+                                                <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
+                                            </span>
+                                            <span class="relative inline-flex items-center">
+                                                <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
+                                                <span class="h-7 w-12 rounded-full bg-line transition peer-checked:bg-sage"></span>
+                                                <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+                                            </span>
+                                        </span>
+                                    </label>
 
-                            <label class="block rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                <span class="mb-2 block text-sm font-medium">{{ i18n.bot_token_label }}</span>
-                                <input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[1rem] border border-line bg-white px-3 py-3 text-sm outline-none transition focus:border-sage">
-                            </label>
+                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_token_label }}</span>
+                                        <input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">
+                                    </label>
 
-                            <label class="block rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                <span class="mb-2 block text-sm font-medium">{{ i18n.bot_chat_id_label }}</span>
-                                <input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[1rem] border border-line bg-white px-3 py-3 text-sm outline-none transition focus:border-sage">
-                            </label>
+                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_chat_id_label }}</span>
+                                        <input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">
+                                    </label>
+                                </div>
 
-                            <label class="block rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                <span class="mb-2 block text-sm font-medium">{{ i18n.bot_template_label }}</span>
-                                <textarea name="template" rows="8" class="w-full rounded-[1rem] border border-line bg-white px-3 py-3 font-mono text-sm outline-none transition focus:border-sage">{{ bot_settings.template }}</textarea>
-                            </label>
-
-                            <button type="submit" class="rounded-[1rem] bg-sage px-4 py-3 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ i18n.bot_save }}</button>
-                        </form>
-
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_template_preview_label }}</p>
-                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ notification_template_preview }}</p>
-                            </div>
-                            <div class="mt-3">
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.bot_placeholders_title }}</p>
-                                <div class="mt-3 grid gap-3">
-                                    {% for placeholder in bot_placeholders %}
-                                    <div class="rounded-[1rem] border border-line bg-paper px-4 py-3">
-                                        <p class="font-mono text-sm font-semibold">{{ placeholder.key }}</p>
-                                        <p class="mt-2 text-sm leading-7 text-ink/68">{{ placeholder.description }}</p>
+                                <div class="grid gap-3">
+                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_template_label }}</span>
+                                        <textarea name="template" rows="8" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-sage">{{ bot_settings.template }}</textarea>
+                                    </label>
+                                    <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_template_preview_label }}</p>
+                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ notification_template_preview }}</p>
                                     </div>
-                                    {% endfor %}
                                 </div>
+                            </div>
+
+                            <div class="flex justify-end">
+                                <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ i18n.bot_save }}</button>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section data-settings-segment-panel="notifications" data-settings-segment-id="reference" class="hidden">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
+                            <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
+                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_template_preview_label }}</p>
+                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ notification_template_preview }}</p>
+                            </div>
+                            <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                {% for placeholder in bot_placeholders %}
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3">
+                                    <p class="font-mono text-sm font-semibold">{{ placeholder.key }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ placeholder.description }}</p>
+                                </div>
+                                {% endfor %}
                             </div>
                         </article>
-                    </div>
+                    </section>
                 </section>
                 {% endif %}
 
@@ -791,24 +871,29 @@
                         {% endif %}
                     </div>
 
-                    <div class="grid gap-4 xl:grid-cols-[minmax(0,0.92fr),minmax(0,1.08fr)]">
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
+                        <button type="button" data-settings-segment-tab="access" data-settings-segment-target="idle" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ idle_form_title }}</button>
+                        <button type="button" data-settings-segment-tab="access" data-settings-segment-target="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ sessions_title }}</button>
+                    </div>
+
+                    <section data-settings-segment-panel="access" data-settings-segment-id="idle" class="hidden">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <div class="flex flex-wrap items-center gap-3">
                                 <h3 class="text-lg font-semibold sm:text-xl">{{ idle_form_title }}</h3>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ idle_effective_timeout }}</span>
                             </div>
-                            <p class="mt-2 text-sm leading-7 text-ink/68">{{ access_auto_logout_description }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ access_auto_logout_description }}</p>
 
-                            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ idle_timeout }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">{{ idle_timeout_hint }}</p>
+                                    <p class="mt-2 text-base font-semibold">{{ idle_timeout }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
                                 </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-4 py-4">
+                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
                                     <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_effective_label }}</p>
-                                    <p class="mt-2 text-lg font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-3 text-sm leading-7 text-ink/62">
+                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/62">
                                         {% if has_other_sessions %}
                                         {{ access_other_sessions_hint }}
                                         {% else %}
@@ -818,22 +903,24 @@
                                 </div>
                             </div>
 
-                            <form method="post" action="{{ idle_form_action }}" class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4">
+                            <form method="post" action="{{ idle_form_action }}" class="mt-3 grid gap-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
-                                    <span class="mb-2 block text-sm font-medium">{{ idle_input_label }}</span>
-                                    <input type="number" min="0" name="idle_timeout_minutes" value="{{ idle_timeout_field_value }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage focus:bg-white">
+                                    <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ idle_input_label }}</span>
+                                    <input type="number" min="0" name="idle_timeout_minutes" value="{{ idle_timeout_field_value }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 outline-none transition focus:border-sage focus:bg-white">
                                 </label>
-                                <button type="submit" class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ idle_submit_label }}</button>
+                                <button type="submit" class="rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ idle_submit_label }}</button>
                             </form>
                         </article>
+                    </section>
 
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
+                    <section data-settings-segment-panel="access" data-settings-segment-id="sessions" class="hidden">
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <div class="flex flex-wrap items-center gap-3">
                                 <h3 class="text-lg font-semibold sm:text-xl">{{ sessions_title }}</h3>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ active_session_count }}</span>
                             </div>
-                            <p class="mt-2 text-sm leading-7 text-ink/68">
+                            <p class="mt-2 text-sm leading-6 text-ink/68">
                                 {% if has_other_sessions %}
                                 {{ access_other_sessions_hint }}
                                 {% else %}
@@ -841,55 +928,46 @@
                                 {% endif %}
                             </p>
 
-                            <div class="mt-4 grid max-h-[60vh] gap-3 overflow-y-auto pr-1">
+                            <div class="compact-scroll mt-3 grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
                                 {% if sessions | length == 0 %}
-                                <div class="rounded-[1.1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">
+                                <div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">
                                     {{ session_empty_label }}
                                 </div>
                                 {% else %}
                                 {% for session in sessions %}
-                                <div class="rounded-[1.1rem] border {% if session.is_current %}border-sage/35 bg-mist{% else %}border-line bg-paper{% endif %} px-4 py-4">
-                                    <div class="grid gap-3 xl:grid-cols-[minmax(0,1.08fr),minmax(0,0.92fr),auto] xl:items-start">
-                                        <div class="min-w-0 rounded-[1rem] border border-line/70 bg-white/82 px-4 py-4">
+                                <article class="rounded-[1rem] border {% if session.is_current %}border-sage/35 bg-mist{% else %}border-line bg-paper/95{% endif %} px-3.5 py-3">
+                                    <div class="grid gap-3 lg:grid-cols-[minmax(0,1.24fr),minmax(0,0.98fr),auto] lg:items-center">
+                                        <div class="min-w-0">
                                             <div class="flex flex-wrap items-center gap-2">
-                                                <p class="text-sm font-semibold uppercase tracking-[0.18em] text-ink/52">{{ session_device_label }}</p>
+                                                <p class="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-ink/52">{{ session_device_label }}</p>
                                                 {% if session.is_current %}
-                                                <span class="rounded-full border border-sage/35 bg-white px-3 py-1 text-xs font-medium text-sageDeep">{{ current_session_label }}</span>
+                                                <span class="rounded-full border border-sage/35 bg-white px-2.5 py-1 text-xs font-medium text-sageDeep">{{ current_session_label }}</span>
                                                 {% endif %}
                                             </div>
-                                            <p class="mt-3 break-words text-sm leading-7 text-ink/70">{{ session.user_agent | default(value=unknown_user_agent_label) }}</p>
+                                            <p class="mt-2 break-words text-sm leading-6 text-ink/70">{{ session.user_agent | default(value=unknown_user_agent_label) }}</p>
                                         </div>
 
-                                        <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                                            <div class="rounded-[1rem] border border-line/70 bg-white/82 px-4 py-4">
-                                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ session_ip_label }}</p>
-                                                <p class="mt-2 break-all text-sm leading-7 text-ink/68">{{ session.ip_address | default(value='-') }}</p>
-                                            </div>
-                                            <div class="rounded-[1rem] border border-line/70 bg-white/82 px-4 py-4">
-                                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ session_issued_label }}</p>
-                                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ session.issued_at }}</p>
-                                            </div>
-                                            <div class="rounded-[1rem] border border-line/70 bg-white/82 px-4 py-4">
-                                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ session_expires_label }}</p>
-                                                <p class="mt-2 text-sm leading-7 text-ink/68">{{ session.expires_at }}</p>
-                                            </div>
+                                        <div class="grid gap-1.5 text-[0.78rem] leading-5 text-ink/62">
+                                            <p><span class="font-medium text-ink/74">{{ session_ip_label }}</span> {{ session.ip_address | default(value='-') }}</p>
+                                            <p><span class="font-medium text-ink/74">{{ session_issued_label }}</span> {{ session.issued_at }}</p>
+                                            <p><span class="font-medium text-ink/74">{{ session_expires_label }}</span> {{ session.expires_at }}</p>
                                         </div>
 
-                                        <div class="flex items-start xl:justify-end">
+                                        <div class="flex items-start lg:justify-end">
                                             {% if not session.is_current %}
-                                            <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke" class="w-full xl:w-auto">
+                                            <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke" class="w-full lg:w-auto">
                                                 <input type="hidden" name="session_id" value="{{ session.id }}">
-                                                <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] xl:w-auto">{{ revoke_label }}</button>
+                                                <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] lg:w-auto">{{ revoke_label }}</button>
                                             </form>
                                             {% endif %}
                                         </div>
                                     </div>
-                                </div>
+                                </article>
                                 {% endfor %}
                                 {% endif %}
                             </div>
                         </article>
-                    </div>
+                    </section>
                 </section>
                 {% endif %}
             </div>

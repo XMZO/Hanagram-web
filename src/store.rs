@@ -546,6 +546,25 @@ impl MetaStore {
         Ok(records)
     }
 
+    pub async fn list_all_auth_sessions(&self) -> Result<Vec<AuthSessionRecord>> {
+        let conn = self.connection()?;
+        let statement = conn
+            .prepare(
+                "SELECT id, user_id, token_hash, ip_address, user_agent, issued_at, expires_at, last_seen_at, idle_timeout_minutes, revoked_at
+                 FROM auth_sessions
+                 ORDER BY issued_at DESC, id DESC",
+            )
+            .await?;
+        let mut rows = statement.query(()).await?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next().await? {
+            records.push(decode_auth_session_row(&row)?);
+        }
+
+        Ok(records)
+    }
+
     pub async fn touch_auth_session(
         &self,
         session_id: &str,

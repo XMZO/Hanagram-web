@@ -14,6 +14,7 @@ use super::shared::*;
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin", get(admin_page_handler))
+        .route("/admin/users/list", get(admin_users_list_handler))
         .route("/admin/users/create", post(admin_create_user_handler))
         .route("/admin/users/{user_id}/ban", post(admin_ban_user_handler))
         .route(
@@ -78,6 +79,90 @@ fn pretty_audit_details(raw: &str) -> String {
         .unwrap_or_else(|| raw.to_owned())
 }
 
+const ADMIN_USERS_PAGE_SIZE: usize = 20;
+
+#[derive(Clone, Debug)]
+struct AdminUserSearchRecord {
+    id: String,
+    username: String,
+    role: String,
+    is_admin: bool,
+    locked: bool,
+    banned: bool,
+    ban_reason: Option<String>,
+    ban_until_unix: Option<i64>,
+    totp_enabled: bool,
+    password_ready: bool,
+    password_reset_required: bool,
+    active_sessions: usize,
+    passkey_count: usize,
+    last_login_ip: Option<String>,
+    last_auth_method: Option<String>,
+    last_auth_at_unix: Option<i64>,
+    last_auth_success: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AdminUsersQuery {
+    lang: Option<String>,
+    search: Option<String>,
+    page: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminUsersPageResponse {
+    items: Vec<AdminUserView>,
+    total_users: usize,
+    filtered_total: usize,
+    page: usize,
+    page_count: usize,
+    page_size: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminUsersUiConfig {
+    lang: String,
+    list_endpoint: String,
+    filtered_label: String,
+    loading_label: String,
+    no_matches_label: String,
+    select_user_label: String,
+    page_label: String,
+    previous_label: String,
+    next_label: String,
+    role_admin_label: String,
+    role_user_label: String,
+    locked_badge_label: String,
+    banned_badge_label: String,
+    totp_enabled_badge_label: String,
+    totp_missing_badge_label: String,
+    password_ready_badge_label: String,
+    password_reset_badge_label: String,
+    password_missing_badge_label: String,
+    user_active_sessions_label: String,
+    user_recovery_codes_label: String,
+    user_passkeys_label: String,
+    user_last_ip_label: String,
+    user_last_auth_label: String,
+    audit_success_label: String,
+    audit_failure_label: String,
+    unlock_label: String,
+    ban_label: String,
+    unban_label: String,
+    revoke_sessions_label: String,
+    reset_label: String,
+    delete_label: String,
+    delete_confirm_message: String,
+    ban_duration_value_label: String,
+    ban_duration_unit_label: String,
+    ban_reason_label: String,
+    ban_reason_placeholder: String,
+    ban_until_label: String,
+    ban_remaining_label: String,
+    ban_permanent_label: String,
+    ban_duration_options: Vec<SelectOption>,
+}
+
 fn audit_search_matches(log: &AuditLogView, search: &str) -> bool {
     let needle = search.trim().to_ascii_lowercase();
     if needle.is_empty() {
@@ -105,6 +190,258 @@ fn audit_search_matches(log: &AuditLogView, search: &str) -> bool {
 
 fn user_ban_remaining_label(language: Language, until_unix: i64, now: i64) -> String {
     format_duration_for_display(language, until_unix.saturating_sub(now))
+}
+
+fn latest_auth_by_user_id_from_audit_logs(
+    audit_logs: &[hanagram_web::store::AuditEntry],
+    language: Language,
+) -> HashMap<String, (Option<String>, i64, bool)> {
+    let mut latest_auth_by_user_id = HashMap::<String, (Option<String>, i64, bool)>::new();
+
+    for log in audit_logs {
+        if log.action_type != web_auth::AUTH_AUDIT_LOGIN_SUCCESS
+            && log.action_type != web_auth::AUTH_AUDIT_LOGIN_FAILURE
+        {
+            continue;
+        }
+
+        let Some(subject_user_id) = &log.subject_user_id else {
+            continue;
+        };
+        let parsed_details =
+            serde_json::from_str::<serde_json::Value>(&log.details_json).unwrap_or_default();
+        let login_method = audit_detail_field(&parsed_details, "login_method")
+            .as_deref()
+            .map(|method| admin_login_method_label(language, Some(method)));
+
+        latest_auth_by_user_id
+            .entry(subject_user_id.clone())
+            .or_insert((login_method, log.created_at_unix, log.success));
+    }
+
+    latest_auth_by_user_id
+}
+
+fn build_active_session_count_by_user_id(
+    auth_sessions: &[AuthSessionRecord],
+    now: i64,
+) -> (HashMap<String, usize>, usize) {
+    let mut counts = HashMap::<String, usize>::new();
+    let mut total_active_auth_sessions = 0_usize;
+
+    for auth_session in auth_sessions {
+        if !auth_session_is_active(auth_session, now) {
+            continue;
+        }
+        total_active_auth_sessions += 1;
+        *counts.entry(auth_session.user_id.clone()).or_default() += 1;
+    }
+
+    (counts, total_active_auth_sessions)
+}
+
+fn build_admin_user_search_records(
+    users: Vec<hanagram_web::store::UserRecord>,
+    active_sessions_by_user_id: &HashMap<String, usize>,
+    latest_auth_by_user_id: &HashMap<String, (Option<String>, i64, bool)>,
+    now: i64,
+) -> Vec<AdminUserSearchRecord> {
+    users
+        .into_iter()
+        .map(|user| {
+            let active_ban = web_auth::current_ban_status(&user, now);
+            let user_id = user.id.clone();
+            AdminUserSearchRecord {
+                id: user.id,
+                username: user.username,
+                role: match user.role {
+                    UserRole::Admin => String::from("admin"),
+                    UserRole::User => String::from("user"),
+                },
+                is_admin: user.role == UserRole::Admin,
+                locked: user.security.locked_until_unix.unwrap_or_default() > now,
+                banned: active_ban.is_some(),
+                ban_reason: active_ban.as_ref().and_then(|status| status.reason.clone()),
+                ban_until_unix: active_ban.as_ref().and_then(|status| status.until_unix),
+                totp_enabled: user.security.totp_enabled,
+                password_ready: user.security.password_hash.is_some(),
+                password_reset_required: user.security.password_needs_reset,
+                active_sessions: active_sessions_by_user_id
+                    .get(&user_id)
+                    .copied()
+                    .unwrap_or(0),
+                passkey_count: user.security.passkeys.len(),
+                last_login_ip: user.security.last_login_ip,
+                last_auth_method: latest_auth_by_user_id
+                    .get(&user_id)
+                    .and_then(|value| value.0.clone()),
+                last_auth_at_unix: latest_auth_by_user_id.get(&user_id).map(|value| value.1),
+                last_auth_success: latest_auth_by_user_id.get(&user_id).map(|value| value.2),
+            }
+        })
+        .collect()
+}
+
+fn admin_user_search_matches(record: &AdminUserSearchRecord, search: &str) -> bool {
+    let needle = search.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+
+    let role_terms = if record.is_admin {
+        "admin administrator 管理员"
+    } else {
+        "user 用户"
+    };
+    let mut status_terms = String::new();
+    if record.locked {
+        status_terms.push_str(" locked lock 锁定");
+    }
+    if record.banned {
+        status_terms.push_str(" banned ban 封禁");
+    }
+    if record.totp_enabled {
+        status_terms.push_str(" totp mfa 2fa 二步 二次验证 双重验证");
+    } else {
+        status_terms.push_str(" no-totp no-mfa 未启用totp");
+    }
+    if record.password_reset_required {
+        status_terms.push_str(" reset temporary 临时密码 重置");
+    }
+    if !record.password_ready {
+        status_terms.push_str(" passwordless no-password 无密码");
+    }
+
+    [
+        record.username.as_str(),
+        role_terms,
+        record.last_login_ip.as_deref().unwrap_or_default(),
+        record.last_auth_method.as_deref().unwrap_or_default(),
+        record.ban_reason.as_deref().unwrap_or_default(),
+        status_terms.as_str(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase()
+    .contains(&needle)
+}
+
+fn build_admin_user_view(
+    record: &AdminUserSearchRecord,
+    recovery_codes_remaining: i64,
+    language: Language,
+    now: i64,
+) -> AdminUserView {
+    AdminUserView {
+        id: record.id.clone(),
+        username: record.username.clone(),
+        role: record.role.clone(),
+        is_admin: record.is_admin,
+        locked: record.locked,
+        banned: record.banned,
+        ban_reason: record.ban_reason.clone(),
+        ban_until_unix: record.ban_until_unix,
+        ban_until_label: record.ban_until_unix.map(format_unix_timestamp),
+        ban_remaining_label: record
+            .ban_until_unix
+            .map(|until_unix| user_ban_remaining_label(language, until_unix, now)),
+        totp_enabled: record.totp_enabled,
+        password_ready: record.password_ready,
+        password_reset_required: record.password_reset_required,
+        active_sessions: record.active_sessions,
+        recovery_codes_remaining,
+        passkey_count: record.passkey_count,
+        last_login_ip: record.last_login_ip.clone(),
+        last_auth_method: record.last_auth_method.clone(),
+        last_auth_at_unix: record.last_auth_at_unix,
+        last_auth_success: record.last_auth_success,
+    }
+}
+
+async fn load_admin_users_page(
+    app_state: &AppState,
+    language: Language,
+    search: Option<&str>,
+    page: usize,
+) -> std::result::Result<AdminUsersPageResponse, StatusCode> {
+    let raw_users = app_state.meta_store.list_users().await.map_err(|error| {
+        warn!("failed loading users for admin users page: {}", error);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_logs = app_state
+        .meta_store
+        .list_audit_logs()
+        .await
+        .map_err(|error| {
+            warn!("failed loading audit logs for admin users page: {}", error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let auth_sessions = app_state
+        .meta_store
+        .list_all_auth_sessions()
+        .await
+        .map_err(|error| {
+            warn!(
+                "failed loading auth sessions for admin users page: {}",
+                error
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let now = Utc::now().timestamp();
+    let latest_auth_by_user_id = latest_auth_by_user_id_from_audit_logs(&audit_logs, language);
+    let (active_sessions_by_user_id, _) =
+        build_active_session_count_by_user_id(&auth_sessions, now);
+    let user_records = build_admin_user_search_records(
+        raw_users,
+        &active_sessions_by_user_id,
+        &latest_auth_by_user_id,
+        now,
+    );
+
+    let total_users = user_records.len();
+    let search = search.map(str::trim).filter(|value| !value.is_empty());
+    let filtered_records = user_records
+        .into_iter()
+        .filter(|record| match search {
+            Some(needle) => admin_user_search_matches(record, needle),
+            None => true,
+        })
+        .collect::<Vec<_>>();
+    let filtered_total = filtered_records.len();
+    let page_count = filtered_total.div_ceil(ADMIN_USERS_PAGE_SIZE).max(1);
+    let page = page.clamp(1, page_count);
+    let start = filtered_total.min((page - 1) * ADMIN_USERS_PAGE_SIZE);
+    let end = filtered_total.min(start + ADMIN_USERS_PAGE_SIZE);
+
+    let mut items = Vec::with_capacity(end.saturating_sub(start));
+    for record in &filtered_records[start..end] {
+        let recovery_codes_remaining = app_state
+            .meta_store
+            .count_active_recovery_codes(&record.id)
+            .await
+            .map_err(|error| {
+                warn!(
+                    "failed counting recovery codes for admin users page {}: {}",
+                    record.username, error
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        items.push(build_admin_user_view(
+            record,
+            recovery_codes_remaining,
+            language,
+            now,
+        ));
+    }
+
+    Ok(AdminUsersPageResponse {
+        items,
+        total_users,
+        filtered_total,
+        page,
+        page_count,
+        page_size: ADMIN_USERS_PAGE_SIZE,
+    })
 }
 
 pub(crate) async fn render_admin_page(
@@ -135,6 +472,14 @@ pub(crate) async fn render_admin_page(
         .await
         .map_err(|error| {
             warn!("failed loading audit rollups: {}", error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let all_auth_sessions = app_state
+        .meta_store
+        .list_all_auth_sessions()
+        .await
+        .map_err(|error| {
+            warn!("failed loading auth sessions for admin page: {}", error);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     let now = Utc::now().timestamp();
@@ -218,20 +563,6 @@ pub(crate) async fn render_admin_page(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_else(|| audit_log_views.clone());
-    let mut latest_auth_by_user_id = HashMap::<String, (Option<String>, i64, bool)>::new();
-    for log in &audit_log_views {
-        if log.action_type != web_auth::AUTH_AUDIT_LOGIN_SUCCESS
-            && log.action_type != web_auth::AUTH_AUDIT_LOGIN_FAILURE
-        {
-            continue;
-        }
-        let Some(subject_user_id) = &log.subject_user_id else {
-            continue;
-        };
-        latest_auth_by_user_id
-            .entry(subject_user_id.clone())
-            .or_insert((log.login_method.clone(), log.created_at_unix, log.success));
-    }
     let recent_auth_activity = audit_log_views
         .iter()
         .filter(|log| {
@@ -258,80 +589,17 @@ pub(crate) async fn render_admin_page(
             passkey_label: log.passkey_label.clone(),
         })
         .collect::<Vec<_>>();
-
-    let mut locked_users_count = 0_usize;
-    let mut total_active_auth_sessions = 0_usize;
-    let mut mfa_enabled_users = 0_usize;
-    let mut users = Vec::new();
-    for user in raw_users {
-        let locked = user.security.locked_until_unix.unwrap_or_default() > now;
-        let active_ban = web_auth::current_ban_status(&user, now);
-        let ban_until_unix = active_ban.as_ref().and_then(|status| status.until_unix);
-        let ban_reason = active_ban.as_ref().and_then(|status| status.reason.clone());
-        let auth_sessions = app_state
-            .meta_store
-            .list_auth_sessions_for_user(&user.id)
-            .await
-            .map_err(|error| {
-                warn!(
-                    "failed loading auth sessions for admin user card: {}",
-                    error
-                );
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-        let active_sessions = auth_sessions
-            .iter()
-            .filter(|session| auth_session_is_active(session, now))
-            .count();
-        let recovery_codes_remaining = app_state
-            .meta_store
-            .count_active_recovery_codes(&user.id)
-            .await
-            .map_err(|error| {
-                warn!(
-                    "failed counting recovery codes for admin user card: {}",
-                    error
-                );
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-        if locked {
-            locked_users_count += 1;
-        }
-        if user.security.totp_enabled {
-            mfa_enabled_users += 1;
-        }
-        total_active_auth_sessions += active_sessions;
-        let user_id = user.id.clone();
-        users.push(AdminUserView {
-            id: user.id,
-            username: user.username,
-            role: match user.role {
-                UserRole::Admin => String::from("admin"),
-                UserRole::User => String::from("user"),
-            },
-            is_admin: user.role == UserRole::Admin,
-            locked,
-            banned: active_ban.is_some(),
-            ban_reason,
-            ban_until_unix,
-            ban_until_label: ban_until_unix.map(format_unix_timestamp),
-            ban_remaining_label: ban_until_unix
-                .map(|until_unix| user_ban_remaining_label(language, until_unix, now)),
-            totp_enabled: user.security.totp_enabled,
-            password_ready: user.security.password_hash.is_some(),
-            password_reset_required: user.security.password_needs_reset,
-            active_sessions,
-            recovery_codes_remaining,
-            passkey_count: user.security.passkeys.len(),
-            last_login_ip: user.security.last_login_ip,
-            last_auth_method: latest_auth_by_user_id
-                .get(&user_id)
-                .and_then(|value| value.0.clone()),
-            last_auth_at_unix: latest_auth_by_user_id.get(&user_id).map(|value| value.1),
-            last_auth_success: latest_auth_by_user_id.get(&user_id).map(|value| value.2),
-        });
-    }
-    let total_users = users.len();
+    let total_users = raw_users.len();
+    let locked_users_count = raw_users
+        .iter()
+        .filter(|user| user.security.locked_until_unix.unwrap_or_default() > now)
+        .count();
+    let mfa_enabled_users = raw_users
+        .iter()
+        .filter(|user| user.security.totp_enabled)
+        .count();
+    let (_, total_active_auth_sessions) =
+        build_active_session_count_by_user_id(&all_auth_sessions, now);
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -470,6 +738,20 @@ pub(crate) async fn render_admin_page(
     context.insert(
         "users_no_matches_label",
         &translations.admin_users_no_matches_label,
+    );
+    context.insert(
+        "users_loading_label",
+        &translations.admin_users_loading_label,
+    );
+    context.insert("users_select_label", &translations.admin_users_select_label);
+    context.insert("users_page_label", &translations.admin_users_page_label);
+    context.insert(
+        "pagination_previous_label",
+        &translations.admin_pagination_previous_label,
+    );
+    context.insert(
+        "pagination_next_label",
+        &translations.admin_pagination_next_label,
     );
     context.insert("unlock_label", &translations.admin_unlock_label);
     context.insert("ban_label", &translations.admin_ban_label);
@@ -637,7 +919,6 @@ pub(crate) async fn render_admin_page(
     context.insert("mfa_enabled_users", &mfa_enabled_users);
     context.insert("audit_log_count", &audit_logs.len());
     context.insert("audit_filtered_count", &filtered_audit_logs.len());
-    context.insert("users", &users);
     context.insert("audit_logs", &filtered_audit_logs);
     context.insert("audit_rollups", &audit_rollups);
     context.insert("recent_auth_activity", &recent_auth_activity);
@@ -649,6 +930,53 @@ pub(crate) async fn render_admin_page(
         "delete_confirm_message",
         &translations.admin_delete_confirm_message,
     );
+    let admin_users_config_json = serde_json::to_string(&AdminUsersUiConfig {
+        lang: language.code().to_owned(),
+        list_endpoint: String::from("/admin/users/list"),
+        filtered_label: translations.admin_users_filtered_label.to_owned(),
+        loading_label: translations.admin_users_loading_label.to_owned(),
+        no_matches_label: translations.admin_users_no_matches_label.to_owned(),
+        select_user_label: translations.admin_users_select_label.to_owned(),
+        page_label: translations.admin_users_page_label.to_owned(),
+        previous_label: translations.admin_pagination_previous_label.to_owned(),
+        next_label: translations.admin_pagination_next_label.to_owned(),
+        role_admin_label: translations.admin_role_admin_label.to_owned(),
+        role_user_label: translations.admin_role_user_label.to_owned(),
+        locked_badge_label: translations.admin_locked_badge_label.to_owned(),
+        banned_badge_label: translations.admin_banned_badge_label.to_owned(),
+        totp_enabled_badge_label: translations.admin_totp_enabled_badge_label.to_owned(),
+        totp_missing_badge_label: translations.admin_totp_missing_badge_label.to_owned(),
+        password_ready_badge_label: translations.admin_password_ready_badge_label.to_owned(),
+        password_reset_badge_label: translations.admin_password_reset_badge_label.to_owned(),
+        password_missing_badge_label: translations.admin_password_missing_badge_label.to_owned(),
+        user_active_sessions_label: translations.admin_user_active_sessions_label.to_owned(),
+        user_recovery_codes_label: translations.admin_user_recovery_codes_label.to_owned(),
+        user_passkeys_label: translations.admin_user_passkeys_label.to_owned(),
+        user_last_ip_label: translations.admin_user_last_ip_label.to_owned(),
+        user_last_auth_label: translations.admin_user_last_auth_label.to_owned(),
+        audit_success_label: translations.admin_audit_success_label.to_owned(),
+        audit_failure_label: translations.admin_audit_failure_label.to_owned(),
+        unlock_label: translations.admin_unlock_label.to_owned(),
+        ban_label: translations.admin_ban_label.to_owned(),
+        unban_label: translations.admin_unban_label.to_owned(),
+        revoke_sessions_label: translations.admin_revoke_sessions_label.to_owned(),
+        reset_label: translations.admin_reset_label.to_owned(),
+        delete_label: translations.admin_delete_label.to_owned(),
+        delete_confirm_message: translations.admin_delete_confirm_message.to_owned(),
+        ban_duration_value_label: translations.admin_ban_duration_value_label.to_owned(),
+        ban_duration_unit_label: translations.admin_ban_duration_unit_label.to_owned(),
+        ban_reason_label: translations.admin_ban_reason_label.to_owned(),
+        ban_reason_placeholder: translations.admin_ban_reason_placeholder.to_owned(),
+        ban_until_label: translations.admin_ban_until_label.to_owned(),
+        ban_remaining_label: translations.admin_ban_remaining_label.to_owned(),
+        ban_permanent_label: translations.admin_ban_unit_permanent_label.to_owned(),
+        ban_duration_options: ban_duration_choices.clone(),
+    })
+    .map_err(|error| {
+        warn!("failed encoding admin users config json: {}", error);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    context.insert("admin_users_config_json", &admin_users_config_json);
     context.insert("system_settings", &system_settings);
     context.insert(
         "system_max_idle_timeout_minutes",
@@ -695,6 +1023,30 @@ async fn admin_page_handler(
     .await
     {
         Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    }
+}
+
+async fn admin_users_list_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<AdminUsersQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    if authenticated.user.role != UserRole::Admin {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    match load_admin_users_page(
+        &app_state,
+        language,
+        query.search.as_deref(),
+        query.page.unwrap_or(1),
+    )
+    .await
+    {
+        Ok(payload) => Json(payload).into_response(),
         Err(status) => status.into_response(),
     }
 }
