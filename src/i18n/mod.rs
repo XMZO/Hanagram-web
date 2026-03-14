@@ -513,6 +513,7 @@ pub struct TranslationSet {
     pub passkey_registration_not_allowed_message: &'static str,
     pub passkey_registration_incomplete_response_message: &'static str,
     pub passkey_registration_site_mismatch_message: &'static str,
+    pub passkey_direct_login_unavailable_message: &'static str,
     pub passkey_authentication_failed_message: &'static str,
     pub passkey_deleted_message: &'static str,
     pub passkey_not_found_message: &'static str,

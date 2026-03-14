@@ -30,6 +30,7 @@ pub fn clear_user_credentials(user: &mut UserRecord) {
     user.security.password_argon_version = 0;
     user.security.kek_salt_b64 = None;
     user.security.encrypted_master_key_json = None;
+    user.security.passkey_encrypted_master_key_json = None;
     user.security.totp_secret_json = None;
     user.security.totp_enabled = false;
     user.security.password_needs_reset = true;
@@ -67,6 +68,7 @@ fn assign_password_credentials(
         serde_json::to_string(&wrapped_master_key)
             .context("failed to encode wrapped master key payload")?,
     );
+    user.security.passkey_encrypted_master_key_json = None;
     user.updated_at_unix = Utc::now().timestamp();
     Ok(())
 }

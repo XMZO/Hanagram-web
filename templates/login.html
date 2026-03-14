@@ -87,8 +87,6 @@
             const recoveryBlock = document.querySelector("[data-recovery-block]");
             const recoveryToggle = document.querySelector("[data-recovery-toggle]");
             const recoveryBack = document.querySelector("[data-recovery-back]");
-            const usernameInput = document.querySelector('input[name="username"]');
-            const passwordInput = document.querySelector('input[name="password"]');
             const mfaInput = document.querySelector('input[name="mfa_code"]');
             const recoveryInput = document.querySelector('input[name="recovery_code"]');
             const passkeyButton = document.querySelector("[data-passkey-login]");
@@ -135,9 +133,6 @@
                     setFeedback(passkeyButton.dataset.unsupported, true);
                     return;
                 }
-                if (!usernameInput?.reportValidity() || !passwordInput?.reportValidity()) {
-                    return;
-                }
 
                 passkeyButton.disabled = true;
                 setFeedback(passkeyButton.dataset.starting, false);
@@ -150,8 +145,6 @@
                             "Accept": "application/json"
                         },
                         body: JSON.stringify({
-                            username: usernameInput.value,
-                            password: passwordInput.value,
                             lang: langInput?.value || null
                         })
                     });
@@ -289,7 +282,7 @@
                             <input
                                 type="text"
                                 name="username"
-                                autocomplete="username"
+                                autocomplete="username webauthn"
                                 required
                                 class="w-full rounded-[1.2rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
                             >

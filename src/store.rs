@@ -110,6 +110,7 @@ pub struct UserSecurityState {
     pub password_argon_version: i64,
     pub kek_salt_b64: Option<String>,
     pub encrypted_master_key_json: Option<String>,
+    pub passkey_encrypted_master_key_json: Option<String>,
     pub totp_secret_json: Option<String>,
     pub totp_enabled: bool,
     pub password_needs_reset: bool,

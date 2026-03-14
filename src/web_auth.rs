@@ -46,6 +46,7 @@ pub const AUTH_AUDIT_RECOVERY_CODES_ROTATED: &str = "recovery_codes_rotated";
 pub const LOGIN_METHOD_PASSWORD_ONLY: &str = "password_only";
 pub const LOGIN_METHOD_PASSWORD_TOTP: &str = "password_totp";
 pub const LOGIN_METHOD_PASSWORD_RECOVERY: &str = "password_recovery_code";
+pub const LOGIN_METHOD_PASSKEY: &str = "passkey";
 pub const LOGIN_METHOD_PASSWORD_PASSKEY: &str = "password_passkey";
 const AUTH_SESSION_UNLOCK_CONTEXT: &str = "hanagram-auth-session-unlock:v1";
 const AUTH_SESSION_UNLOCK_VERSION: u8 = 1;
@@ -79,13 +80,6 @@ pub struct TotpSetupMaterial {
     pub secret: SharedSensitiveString,
     pub otp_auth_uri: SharedSensitiveString,
     pub recovery_codes: Vec<SharedSensitiveString>,
-}
-
-pub struct PasskeyLoginChallenge {
-    pub user: UserRecord,
-    pub master_key: MasterKey,
-    pub requires_totp_setup: bool,
-    pub requires_password_reset: bool,
 }
 
 struct VerifiedPrimaryLogin {
@@ -585,6 +579,10 @@ pub(crate) fn user_handle_for(user: &UserRecord) -> Result<UserHandle<Vec<u8>>> 
     UserHandle::try_from(user.id.as_bytes().to_vec()).context("failed to construct user handle")
 }
 
+pub(crate) fn user_id_from_user_handle(user_handle: UserHandle<&[u8]>) -> Result<String> {
+    String::from_utf8(user_handle.as_ref().to_vec()).context("failed to parse user handle")
+}
+
 pub(crate) fn passkey_descriptors(
     user: &UserRecord,
 ) -> Result<Vec<PublicKeyCredentialDescriptor<Vec<u8>>>> {
@@ -934,50 +932,6 @@ pub async fn authenticate_user(
     .await
 }
 
-pub async fn begin_passkey_login(
-    store: &MetaStore,
-    settings: &SystemSettings,
-    username: &str,
-    password: &str,
-    ip_address: Option<&str>,
-    user_agent: Option<&str>,
-) -> Result<PasskeyLoginChallenge, LoginError> {
-    let verified = verify_primary_credentials(
-        store,
-        settings,
-        username,
-        password,
-        ip_address,
-        user_agent,
-        Some(LOGIN_METHOD_PASSWORD_PASSKEY),
-    )
-    .await?;
-    if passkey_descriptors(&verified.user)
-        .map_err(|_| LoginError::InvalidSecondFactor)?
-        .is_empty()
-    {
-        audit_login_failure(
-            store,
-            Some(&verified.user.id),
-            &verified.user.username,
-            ip_address,
-            user_agent,
-            "passkey_not_configured",
-            Some(LOGIN_METHOD_PASSWORD_PASSKEY),
-            None,
-        )
-        .await;
-        return Err(LoginError::MissingSecondFactor);
-    }
-
-    Ok(PasskeyLoginChallenge {
-        user: verified.user,
-        master_key: verified.master_key,
-        requires_totp_setup: verified.requires_totp_setup,
-        requires_password_reset: verified.requires_password_reset,
-    })
-}
-
 pub async fn authenticate_user_with_passkey(
     store: &MetaStore,
     settings: &SystemSettings,
@@ -989,6 +943,24 @@ pub async fn authenticate_user_with_passkey(
     user_agent: Option<&str>,
     passkey_label: Option<&str>,
 ) -> Result<LoginResult, LoginError> {
+    let now = Utc::now().timestamp();
+    if let Some(locked_until) = user.security.locked_until_unix {
+        if locked_until > now {
+            audit_login_failure(
+                store,
+                Some(&user.id),
+                &user.username,
+                ip_address,
+                user_agent,
+                "account_locked",
+                Some(LOGIN_METHOD_PASSKEY),
+                passkey_label,
+            )
+            .await;
+            return Err(LoginError::LockedUntil(locked_until));
+        }
+    }
+
     if let Some(active_ban) = refresh_user_ban_state(store, &mut user)
         .await
         .map_err(|_| LoginError::InvalidCredentials)?
@@ -1000,7 +972,7 @@ pub async fn authenticate_user_with_passkey(
             ip_address,
             user_agent,
             "account_banned",
-            Some(LOGIN_METHOD_PASSWORD_PASSKEY),
+            Some(LOGIN_METHOD_PASSKEY),
             passkey_label,
         )
         .await;
@@ -1021,7 +993,7 @@ pub async fn authenticate_user_with_passkey(
         },
         ip_address,
         user_agent,
-        LOGIN_METHOD_PASSWORD_PASSKEY,
+        LOGIN_METHOD_PASSKEY,
         passkey_label,
         false,
     )

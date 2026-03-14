@@ -32,6 +32,10 @@ pub(crate) async fn run() -> Result<()> {
             .sessions_dir
             .join(".hanagram")
             .join(META_DB_FILE_NAME),
+        passkey_login_key_path: config
+            .sessions_dir
+            .join(".hanagram")
+            .join("passkey-login-key.json"),
     };
 
     tokio::fs::create_dir_all(&runtime.sessions_dir)
@@ -62,6 +66,9 @@ pub(crate) async fn run() -> Result<()> {
     let meta_store = Arc::new(MetaStore::open(&runtime.meta_db_path).await?);
     let system_settings = Arc::new(RwLock::new(meta_store.load_system_settings().await?));
     let runtime_cache = Arc::new(RuntimeCache::open(runtime.runtime_cache_dir.clone()).await?);
+    let passkey_login_key = Arc::new(
+        platform_key::load_or_create_passkey_login_key(&runtime.passkey_login_key_path).await?,
+    );
 
     let app_state = AppState {
         shared_state: Arc::clone(&shared_state),
@@ -79,6 +86,7 @@ pub(crate) async fn run() -> Result<()> {
         recovery_notices,
         unlock_cache,
         user_keys,
+        passkey_login_key,
         http_client: HttpClient::new(),
     };
 

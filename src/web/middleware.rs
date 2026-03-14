@@ -67,15 +67,14 @@ pub(crate) async fn require_login(
     };
 
     if let Some(session_token) = find_cookie(request.headers(), AUTH_COOKIE_NAME) {
-        if ensure_auth_session_master_key(
+        let Some(master_key) = ensure_auth_session_master_key(
             &app_state,
             &authenticated.user.id,
             &authenticated.auth_session.id,
             session_token,
         )
         .await
-        .is_none()
-        {
+        else {
             return revoke_auth_session_and_redirect_to_login(
                 &app_state,
                 &settings,
@@ -84,7 +83,9 @@ pub(crate) async fn require_login(
                 LOGIN_REAUTH_UNLOCK_LOCATION,
             )
             .await;
-        }
+        };
+
+        ensure_user_passkey_login_material(&app_state, &authenticated.user, &master_key).await;
     }
 
     let recovery_notice_pending = app_state
@@ -104,6 +105,65 @@ pub(crate) async fn require_login(
 
     request.extensions_mut().insert(authenticated);
     next.run(request).await
+}
+
+async fn ensure_user_passkey_login_material(
+    app_state: &AppState,
+    user: &UserRecord,
+    master_key: &SharedMasterKey,
+) {
+    let current_payload = user.security.passkey_encrypted_master_key_json.as_deref();
+    let passkey_login_key = app_state.passkey_login_key.as_ref().as_slice();
+    let needs_refresh = current_payload.map_or(true, |payload| {
+        platform_key::decrypt_master_key_for_passkey_login(passkey_login_key, payload).is_err()
+    });
+    if !needs_refresh {
+        return;
+    }
+
+    let Some(mut fresh_user) = app_state
+        .meta_store
+        .get_user_by_id(&user.id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+
+    let needs_refresh = fresh_user
+        .security
+        .passkey_encrypted_master_key_json
+        .as_deref()
+        .map_or(true, |payload| {
+            platform_key::decrypt_master_key_for_passkey_login(passkey_login_key, payload).is_err()
+        });
+    if !needs_refresh {
+        return;
+    }
+
+    let wrapped_master_key = match platform_key::encrypt_master_key_for_passkey_login(
+        passkey_login_key,
+        master_key.as_ref().as_slice(),
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed wrapping passkey login material for {}: {}",
+                fresh_user.username, error
+            );
+            return;
+        }
+    };
+    fresh_user.security.passkey_encrypted_master_key_json = Some(wrapped_master_key);
+    fresh_user.updated_at_unix = Utc::now().timestamp();
+
+    if let Err(error) = app_state.meta_store.save_user(&fresh_user).await {
+        warn!(
+            "failed saving passkey login material for {}: {}",
+            fresh_user.username, error
+        );
+    }
 }
 
 pub(crate) async fn sync_active_session_idle_timeouts(
@@ -382,11 +442,6 @@ pub(crate) async fn clear_pending_flows_for_auth_session(
 pub(crate) async fn clear_pending_flows_for_user(app_state: &AppState, user_id: &str) {
     app_state
         .passkey_registrations
-        .write()
-        .await
-        .retain(|_, flow| flow.user_id != user_id);
-    app_state
-        .passkey_authentications
         .write()
         .await
         .retain(|_, flow| flow.user_id != user_id);

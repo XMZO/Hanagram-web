@@ -51,7 +51,7 @@ fn admin_login_method_label(language: Language, method: Option<&str>) -> String 
         web_auth::LOGIN_METHOD_PASSWORD_RECOVERY => {
             String::from(language.translations().login_method_password_recovery_label)
         }
-        web_auth::LOGIN_METHOD_PASSWORD_PASSKEY => {
+        web_auth::LOGIN_METHOD_PASSKEY | web_auth::LOGIN_METHOD_PASSWORD_PASSKEY => {
             String::from(language.translations().login_method_password_passkey_label)
         }
         _ => String::from(language.translations().login_method_unknown_label),

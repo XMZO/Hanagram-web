@@ -5,15 +5,13 @@ use crate::i18n::TranslationSet;
 use crate::web_auth;
 use webauthn_rp::AuthenticatedCredential;
 use webauthn_rp::request::auth::{
-    AllowedCredentials, AuthenticationVerificationOptions, PublicKeyCredentialRequestOptions,
+    AuthenticationVerificationOptions, PublicKeyCredentialRequestOptions,
 };
 use webauthn_rp::request::register::{
     PublicKeyCredentialCreationOptions, PublicKeyCredentialUserEntity,
     RegistrationVerificationOptions,
 };
-use webauthn_rp::request::{
-    AsciiDomain, Credentials, DomainOrigin, RpId, UserVerificationRequirement,
-};
+use webauthn_rp::request::{AsciiDomain, DomainOrigin, RpId};
 use webauthn_rp::response::auth::Authentication;
 use webauthn_rp::response::register::Registration;
 use webauthn_rp::response::register::error::RegCeremonyErr;
@@ -1157,50 +1155,12 @@ async fn login_passkey_options_handler(
         Ok(value) => value,
         Err(message) => return json_error_response(StatusCode::BAD_REQUEST, message),
     };
-    let settings = app_state.system_settings.read().await.clone();
-    let ip_address = extract_client_ip(&headers);
-    let user_agent = extract_user_agent(&headers);
-
-    let challenge = match web_auth::begin_passkey_login(
-        &app_state.meta_store,
-        &settings,
-        &request.username,
-        &request.password,
-        ip_address.as_deref(),
-        user_agent.as_deref(),
-    )
-    .await
-    {
-        Ok(challenge) => challenge,
-        Err(LoginError::LockedUntil(locked_until)) => {
-            return json_error_response(
-                StatusCode::TOO_MANY_REQUESTS,
-                login_locked_message(language, locked_until),
-            );
-        }
-        Err(LoginError::Banned { until_unix, reason }) => {
-            return json_error_response(
-                StatusCode::FORBIDDEN,
-                login_banned_message(language, until_unix, reason.as_deref()),
-            );
-        }
-        Err(LoginError::MissingSecondFactor) => {
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                translations.passkey_no_credentials_message,
-            );
-        }
-        Err(LoginError::InvalidSecondFactor | LoginError::InvalidCredentials) => {
-            return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
-        }
-    };
-
     let rp_id = match passkey_rp_id(&passkey_rp.rp_id) {
         Ok(value) => value,
         Err(error) => {
             warn!(
-                "failed parsing passkey rp id {} for {}: {}",
-                passkey_rp.rp_id, challenge.user.username, error
+                "failed parsing passkey rp id {} for discoverable passkey login: {}",
+                passkey_rp.rp_id, error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1208,50 +1168,13 @@ async fn login_passkey_options_handler(
             );
         }
     };
-    let descriptors = match web_auth::passkey_descriptors(&challenge.user) {
-        Ok(value) if value.is_empty() => {
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                translations.passkey_no_credentials_message,
-            );
-        }
-        Ok(value) => value,
-        Err(error) => {
-            warn!(
-                "failed loading passkey descriptors for {}: {}",
-                challenge.user.username, error
-            );
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                translations.passkey_authentication_failed_message,
-            );
-        }
-    };
-    let mut allowed_credentials = AllowedCredentials::with_capacity(descriptors.len());
-    for descriptor in descriptors {
-        allowed_credentials.push(descriptor.into());
-    }
-    let mut request_options =
-        match PublicKeyCredentialRequestOptions::second_factor(&rp_id, allowed_credentials) {
-            Ok(value) => value,
-            Err(error) => {
-                warn!(
-                    "failed configuring passkey authentication for {}: {}",
-                    challenge.user.username, error
-                );
-                return json_error_response(
-                    StatusCode::BAD_REQUEST,
-                    translations.passkey_authentication_failed_message,
-                );
-            }
-        };
-    request_options.user_verification = UserVerificationRequirement::Required;
+    let request_options = PublicKeyCredentialRequestOptions::passkey(&rp_id);
     let (state, client_state) = match request_options.start_ceremony() {
         Ok(values) => values,
         Err(error) => {
             warn!(
-                "failed starting passkey authentication for {}: {}",
-                challenge.user.username, error
+                "failed starting discoverable passkey authentication: {}",
+                error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1261,26 +1184,20 @@ async fn login_passkey_options_handler(
     };
 
     let request_id = Uuid::new_v4().to_string();
-    let challenge_username = challenge.user.username.clone();
     app_state.passkey_authentications.write().await.insert(
         request_id.clone(),
         PendingPasskeyAuthentication {
-            user_id: challenge.user.id,
-            username: challenge.user.username,
             rp_id: passkey_rp.rp_id,
             origin: passkey_rp.origin,
             state,
-            master_key: share_master_key(challenge.master_key),
-            requires_totp_setup: challenge.requires_totp_setup,
-            requires_password_reset: challenge.requires_password_reset,
         },
     );
     let options = match passkey_public_key_options(&client_state) {
         Ok(value) => value,
         Err(error) => {
             warn!(
-                "failed serializing passkey authentication options for {}: {}",
-                challenge_username, error
+                "failed serializing discoverable passkey authentication options: {}",
+                error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1318,8 +1235,8 @@ async fn login_passkey_finish_handler(
         Ok(value) => value,
         Err(error) => {
             warn!(
-                "failed rebuilding passkey rp {} for {}: {}",
-                pending.rp_id, pending.username, error
+                "failed rebuilding passkey rp {} for discoverable passkey login: {}",
+                pending.rp_id, error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1331,8 +1248,8 @@ async fn login_passkey_finish_handler(
         Ok(value) => value,
         Err(error) => {
             warn!(
-                "failed rebuilding passkey origin {} for {}: {}",
-                pending.origin, pending.username, error
+                "failed rebuilding passkey origin {} for discoverable passkey login: {}",
+                pending.origin, error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1344,8 +1261,8 @@ async fn login_passkey_finish_handler(
         Ok(value) => value,
         Err(error) => {
             warn!(
-                "failed decoding passkey authentication payload for {}: {}",
-                pending.username, error
+                "failed decoding discoverable passkey authentication payload: {}",
+                error
             );
             return json_error_response(
                 StatusCode::BAD_REQUEST,
@@ -1354,14 +1271,63 @@ async fn login_passkey_finish_handler(
         }
     };
     let credential_id = authentication.raw_id().into();
+    let Some(user_handle) = authentication.response().user_handle() else {
+        web_auth::record_login_failure(
+            &app_state.meta_store,
+            None,
+            "<passkey>",
+            extract_client_ip(&headers).as_deref(),
+            extract_user_agent(&headers).as_deref(),
+            "missing_user_handle",
+            Some(web_auth::LOGIN_METHOD_PASSKEY),
+            None,
+        )
+        .await;
+        return json_error_response(
+            StatusCode::UNAUTHORIZED,
+            translations.passkey_authentication_failed_message,
+        );
+    };
+    let user_id = match web_auth::user_id_from_user_handle(user_handle) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!("failed decoding passkey user handle: {}", error);
+            web_auth::record_login_failure(
+                &app_state.meta_store,
+                None,
+                "<passkey>",
+                extract_client_ip(&headers).as_deref(),
+                extract_user_agent(&headers).as_deref(),
+                "invalid_user_handle",
+                Some(web_auth::LOGIN_METHOD_PASSKEY),
+                None,
+            )
+            .await;
+            return json_error_response(
+                StatusCode::UNAUTHORIZED,
+                translations.passkey_authentication_failed_message,
+            );
+        }
+    };
 
     let Some(mut user) = app_state
         .meta_store
-        .get_user_by_id(&pending.user_id)
+        .get_user_by_id(&user_id)
         .await
         .ok()
         .flatten()
     else {
+        web_auth::record_login_failure(
+            &app_state.meta_store,
+            None,
+            user_id.as_str(),
+            extract_client_ip(&headers).as_deref(),
+            extract_user_agent(&headers).as_deref(),
+            "user_not_found",
+            Some(web_auth::LOGIN_METHOD_PASSKEY),
+            None,
+        )
+        .await;
         return json_error_response(StatusCode::UNAUTHORIZED, translations.login_error_invalid);
     };
     let passkey = match web_auth::passkey_authentication_material(&user, &credential_id) {
@@ -1374,7 +1340,7 @@ async fn login_passkey_finish_handler(
                 extract_client_ip(&headers).as_deref(),
                 extract_user_agent(&headers).as_deref(),
                 "passkey_not_found",
-                Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+                Some(web_auth::LOGIN_METHOD_PASSKEY),
                 None,
             )
             .await;
@@ -1394,22 +1360,9 @@ async fn login_passkey_finish_handler(
             );
         }
     };
-    let user_handle = match web_auth::user_handle_for(&user) {
-        Ok(value) => value,
-        Err(error) => {
-            warn!(
-                "failed constructing user handle for {}: {}",
-                user.username, error
-            );
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                translations.passkey_authentication_failed_message,
-            );
-        }
-    };
     let mut credential = match AuthenticatedCredential::new(
         (&passkey.credential_id).into(),
-        (&user_handle).into(),
+        user_handle,
         passkey.static_state,
         passkey.dynamic_state,
     ) {
@@ -1443,7 +1396,7 @@ async fn login_passkey_finish_handler(
     ) {
         warn!(
             "failed finishing passkey authentication for {}: {}",
-            pending.username, error
+            user.username, error
         );
         web_auth::record_login_failure(
             &app_state.meta_store,
@@ -1452,7 +1405,7 @@ async fn login_passkey_finish_handler(
             extract_client_ip(&headers).as_deref(),
             extract_user_agent(&headers).as_deref(),
             "passkey_verification_failed",
-            Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+            Some(web_auth::LOGIN_METHOD_PASSKEY),
             Some(passkey.label.as_str()),
         )
         .await;
@@ -1473,7 +1426,7 @@ async fn login_passkey_finish_handler(
                 extract_client_ip(&headers).as_deref(),
                 extract_user_agent(&headers).as_deref(),
                 "passkey_not_found",
-                Some(web_auth::LOGIN_METHOD_PASSWORD_PASSKEY),
+                Some(web_auth::LOGIN_METHOD_PASSKEY),
                 Some(passkey_label.as_str()),
             )
             .await;
@@ -1505,16 +1458,64 @@ async fn login_passkey_finish_handler(
         );
     }
 
-    let mut master_key_bytes = [0_u8; 32];
-    master_key_bytes.copy_from_slice(pending.master_key.as_ref().as_ref());
     let settings = app_state.system_settings.read().await.clone();
+    let requires_totp_setup = settings
+        .totp_policy
+        .applies_to(user.role == UserRole::Admin)
+        && !user.security.totp_enabled;
+    let requires_password_reset = user.security.password_needs_reset;
+    let Some(passkey_master_key_json) = user.security.passkey_encrypted_master_key_json.as_deref()
+    else {
+        web_auth::record_login_failure(
+            &app_state.meta_store,
+            Some(&user.id),
+            &user.username,
+            extract_client_ip(&headers).as_deref(),
+            extract_user_agent(&headers).as_deref(),
+            "passkey_login_not_activated",
+            Some(web_auth::LOGIN_METHOD_PASSKEY),
+            Some(passkey_label.as_str()),
+        )
+        .await;
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            translations.passkey_direct_login_unavailable_message,
+        );
+    };
+    let master_key = match platform_key::decrypt_master_key_for_passkey_login(
+        app_state.passkey_login_key.as_ref().as_slice(),
+        passkey_master_key_json,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                "failed restoring passkey login material for {}: {}",
+                user.username, error
+            );
+            web_auth::record_login_failure(
+                &app_state.meta_store,
+                Some(&user.id),
+                &user.username,
+                extract_client_ip(&headers).as_deref(),
+                extract_user_agent(&headers).as_deref(),
+                "passkey_login_material_invalid",
+                Some(web_auth::LOGIN_METHOD_PASSKEY),
+                Some(passkey_label.as_str()),
+            )
+            .await;
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                translations.passkey_direct_login_unavailable_message,
+            );
+        }
+    };
     let login_result = match web_auth::authenticate_user_with_passkey(
         &app_state.meta_store,
         &settings,
         user,
-        zeroize::Zeroizing::new(master_key_bytes),
-        pending.requires_totp_setup,
-        pending.requires_password_reset,
+        master_key,
+        requires_totp_setup,
+        requires_password_reset,
         extract_client_ip(&headers).as_deref(),
         extract_user_agent(&headers).as_deref(),
         Some(passkey_label.as_str()),
@@ -1855,25 +1856,22 @@ async fn start_passkey_registration_handler(
             );
         }
     };
-    let (state, client_state) = match PublicKeyCredentialCreationOptions::second_factor(
-        &rp_id,
-        user_entity,
-        exclude_credentials,
-    )
-    .start_ceremony()
-    {
-        Ok(values) => values,
-        Err(error) => {
-            warn!(
-                "failed starting passkey registration for {}: {}",
-                user.username, error
-            );
-            return json_error_response(
-                StatusCode::BAD_REQUEST,
-                translations.passkey_registration_failed_message,
-            );
-        }
-    };
+    let (state, client_state) =
+        match PublicKeyCredentialCreationOptions::passkey(&rp_id, user_entity, exclude_credentials)
+            .start_ceremony()
+        {
+            Ok(values) => values,
+            Err(error) => {
+                warn!(
+                    "failed starting passkey registration for {}: {}",
+                    user.username, error
+                );
+                return json_error_response(
+                    StatusCode::BAD_REQUEST,
+                    translations.passkey_registration_failed_message,
+                );
+            }
+        };
 
     let registration_id = Uuid::new_v4().to_string();
     app_state.passkey_registrations.write().await.insert(

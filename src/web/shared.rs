@@ -53,9 +53,10 @@ pub(crate) use hanagram_web::security::{
 };
 pub(crate) use hanagram_web::store::{
     AuthSessionRecord, BotNotificationSettings, MetaStore, NewAuditEntry, SessionRecord,
-    SystemSettings, TelegramApiSettings, UserRole,
+    SystemSettings, TelegramApiSettings, UserRecord, UserRole,
 };
 
+pub(crate) use super::platform_key;
 pub(crate) use super::runtime_cache::{RuntimeCache, RuntimeCacheHandle};
 pub(crate) use crate::i18n::{Language, language_options};
 pub(crate) use crate::session_handler::{
@@ -145,6 +146,7 @@ pub(crate) struct AppState {
     pub(crate) recovery_notices: PendingRecoveryNotices,
     pub(crate) unlock_cache: UnlockCache,
     pub(crate) user_keys: UserKeyCache,
+    pub(crate) passkey_login_key: SharedMasterKey,
     pub(crate) http_client: HttpClient,
 }
 
@@ -160,6 +162,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) app_data_dir: PathBuf,
     pub(crate) runtime_cache_dir: PathBuf,
     pub(crate) meta_db_path: PathBuf,
+    pub(crate) passkey_login_key_path: PathBuf,
 }
 
 pub(crate) struct PendingPhoneLogin {
@@ -206,14 +209,9 @@ pub(crate) struct PendingPasskeyRegistration {
 }
 
 pub(crate) struct PendingPasskeyAuthentication {
-    pub(crate) user_id: String,
-    pub(crate) username: String,
     pub(crate) rp_id: String,
     pub(crate) origin: String,
     pub(crate) state: AuthenticationServerState,
-    pub(crate) master_key: SharedMasterKey,
-    pub(crate) requires_totp_setup: bool,
-    pub(crate) requires_password_reset: bool,
 }
 
 #[derive(Clone)]
@@ -527,8 +525,6 @@ pub(crate) struct LoginForm {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct PasskeyStartLoginRequest {
-    pub(crate) username: String,
-    pub(crate) password: String,
     pub(crate) lang: Option<String>,
 }
 

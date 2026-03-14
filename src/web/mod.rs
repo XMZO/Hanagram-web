@@ -8,6 +8,7 @@ pub(crate) mod dashboard;
 pub(crate) mod maintenance;
 pub(crate) mod middleware;
 pub(crate) mod notifications;
+pub(crate) mod platform_key;
 pub(crate) mod runtime_cache;
 pub(crate) mod sessions;
 pub(crate) mod shared;
