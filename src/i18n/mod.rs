@@ -201,6 +201,7 @@ pub struct TranslationSet {
     pub login_recovery_toggle_label: &'static str,
     pub login_recovery_back_label: &'static str,
     pub login_recovery_notice_hint: &'static str,
+    pub login_password_tab_label: &'static str,
     pub login_passkey_label: &'static str,
     pub login_passkey_hint: &'static str,
     pub login_ready_label: &'static str,

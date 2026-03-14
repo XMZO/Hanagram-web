@@ -191,6 +191,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     login_recovery_toggle_label: "忘了验证器？改用恢复码",
     login_recovery_back_label: "返回 TOTP",
     login_recovery_notice_hint: "使用恢复码登录后，系统会立刻生成一整套新的恢复码，旧码全部失效，并要求你先确认保存。",
+    login_password_tab_label: "密码登录",
     login_passkey_label: "使用通行密钥",
     login_passkey_hint: "用已绑定的通行密钥直接登录，不需要先输入账号密码。若旧版通行密钥没有出现，请先正常登录后删除并重新添加一次。",
     login_ready_label: "就绪",

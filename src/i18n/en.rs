@@ -191,6 +191,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     login_recovery_toggle_label: "Forgot the authenticator? Use a recovery code",
     login_recovery_back_label: "Back to TOTP",
     login_recovery_notice_hint: "Signing in with a recovery code immediately rotates the entire set. All previous recovery codes become invalid and you will be asked to confirm the new set first.",
+    login_password_tab_label: "Password",
     login_passkey_label: "Use passkey",
     login_passkey_hint: "Sign in directly with a bound passkey. If an older passkey does not appear, sign in normally once and re-add it.",
     login_ready_label: "Ready",
