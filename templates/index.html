@@ -1010,10 +1010,10 @@
 
         {% for session in sessions %}
         <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.id }}" class="hidden fixed inset-0 z-50">
-            <div class="absolute inset-0 bg-[rgba(79,67,59,0.18)] backdrop-blur-[6px] sm:bg-[rgba(79,67,59,0.24)]" data-modal-close="session-modal-{{ loop.index }}"></div>
+            <div class="absolute inset-0 bg-[rgba(79,67,59,0.12)] sm:bg-[linear-gradient(90deg,rgba(79,67,59,0.02)_0%,rgba(79,67,59,0.04)_56%,rgba(79,67,59,0.08)_76%,rgba(79,67,59,0.12)_100%)]" data-modal-close="session-modal-{{ loop.index }}"></div>
 
-            <div class="relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-start sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
-                <section class="modal-panel relative flex max-h-[86vh] w-full flex-col overflow-hidden overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:max-h-[calc(100vh-2rem)] sm:w-[28rem] sm:rounded-[1.55rem] sm:p-4">
+            <div class="pointer-events-none relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-center sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
+                <section class="modal-panel pointer-events-auto relative flex max-h-[86vh] w-full flex-col overflow-hidden overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:max-h-[calc(100vh-2rem)] sm:w-[28rem] sm:rounded-[1.55rem] sm:p-4">
                     <div class="flex flex-col gap-3 border-b border-line pb-4">
                         <div class="min-w-0">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
