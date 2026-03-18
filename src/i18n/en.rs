@@ -447,6 +447,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     transport_warning_title: "Plain HTTP is in use",
     transport_warning_message: "Passwords, TOTP codes, recovery codes, bot tokens, Telegram API credentials, and session management requests can be intercepted or modified in transit. Only use plain HTTP for temporary local testing. For shared or public access, enable HTTPS directly or place Hanagram Web behind an HTTPS reverse proxy that forwards proto=https.",
     session_phone_unknown_label: "Unknown",
+    session_phone_reveal_label: "Show phone number",
+    session_phone_hide_label: "Hide phone number",
     session_worker_unlock_required_message: "Encrypted at rest. Sign in again to unlock this session.",
     session_worker_unlock_failed_message: "The encrypted session could not be unlocked.",
     session_worker_unauthorized_message: "This Telegram session is no longer authorized.",

@@ -326,6 +326,7 @@ pub(crate) struct DashboardSessionView {
     pub(crate) key: String,
     pub(crate) note: String,
     pub(crate) phone: String,
+    pub(crate) masked_phone: String,
     pub(crate) session_file: String,
     pub(crate) status: DashboardStatusView,
     pub(crate) latest_code: Option<String>,
@@ -1442,6 +1443,7 @@ mod tests {
             key: String::from("会话 🚀 España العربية"),
             note: String::from("用于测试复制卡片"),
             phone: String::from("+86 138 0000 0000"),
+            masked_phone: String::from("+86 138 **** 0000"),
             session_file: String::from("sessions/session-1.session"),
             status: DashboardStatusView {
                 kind: "connected",

@@ -27,6 +27,45 @@ fn localized_session_phone(phone: &str, translations: &crate::i18n::TranslationS
     }
 }
 
+fn mask_session_phone(phone: &str) -> String {
+    let digit_count = phone.chars().filter(|ch| ch.is_ascii_digit()).count();
+    if digit_count <= 4 {
+        return phone.to_owned();
+    }
+
+    let keep_start = if digit_count > 11 {
+        5
+    } else if digit_count > 7 {
+        4
+    } else {
+        2
+    };
+    let keep_end = if digit_count > 7 { 4 } else { 2 };
+    let mask_start = keep_start.min(digit_count.saturating_sub(keep_end));
+    let mask_end = digit_count.saturating_sub(keep_end);
+    if mask_start >= mask_end {
+        return phone.to_owned();
+    }
+
+    let mut digit_index = 0usize;
+    phone
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_digit() {
+                let current = digit_index;
+                digit_index += 1;
+                if current >= mask_start && current < mask_end {
+                    '*'
+                } else {
+                    ch
+                }
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
 fn build_dashboard_session_view(
     session: SessionInfo,
     translations: &crate::i18n::TranslationSet,
@@ -53,6 +92,7 @@ fn build_dashboard_session_view(
         })
         .collect();
     let phone = localized_session_phone(&session.phone, translations);
+    let masked_phone = mask_session_phone(&phone);
     let session_file = session.session_file.display().to_string();
     let status = DashboardStatusView {
         kind: session.status.kind(),
@@ -66,6 +106,7 @@ fn build_dashboard_session_view(
         key: session.key,
         note: session.note,
         phone,
+        masked_phone,
         session_file,
         status,
         latest_code,
@@ -156,7 +197,7 @@ pub(crate) async fn render_dashboard_page(
     let recent_activity_sessions = snapshot
         .sessions
         .iter()
-        .take(8)
+        .take(12)
         .cloned()
         .collect::<Vec<_>>();
     let settings_page_href = settings_href(language);
@@ -234,4 +275,16 @@ async fn dashboard_snapshot_handler(
 ) -> Json<DashboardSnapshot> {
     let language = detect_language(&headers, query.lang.as_deref());
     Json(build_dashboard_snapshot(&app_state, &authenticated, language).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_session_phone_hides_middle_digits_but_keeps_formatting() {
+        assert_eq!(mask_session_phone("+86 138 0000 0000"), "+86 138 **** 0000");
+        assert_eq!(mask_session_phone("+1 314 628 8470"), "+1 314 *** 8470");
+        assert_eq!(mask_session_phone("未知"), "未知");
+    }
 }

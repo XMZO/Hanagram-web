@@ -447,6 +447,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     transport_warning_title: "当前正在使用明文 HTTP",
     transport_warning_message: "密码、TOTP 动态码、恢复码、Bot Token、Telegram API 凭据以及会话管理请求都可能在传输过程中被窃听或篡改。明文 HTTP 只建议用于本机临时调试；如果要给局域网或公网使用，请启用 HTTPS，或者放在 HTTPS 反向代理后面并正确转发 proto=https。",
     session_phone_unknown_label: "未知",
+    session_phone_reveal_label: "显示手机号",
+    session_phone_hide_label: "隐藏手机号",
     session_worker_unlock_required_message: "该会话数据已静态加密，请重新登录后解锁。",
     session_worker_unlock_failed_message: "无法解锁这个加密会话。",
     session_worker_unauthorized_message: "这个 Telegram 会话已经失去授权。",

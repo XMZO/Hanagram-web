@@ -457,6 +457,8 @@ pub struct TranslationSet {
     pub transport_warning_title: &'static str,
     pub transport_warning_message: &'static str,
     pub session_phone_unknown_label: &'static str,
+    pub session_phone_reveal_label: &'static str,
+    pub session_phone_hide_label: &'static str,
     pub session_worker_unlock_required_message: &'static str,
     pub session_worker_unlock_failed_message: &'static str,
     pub session_worker_unauthorized_message: &'static str,
