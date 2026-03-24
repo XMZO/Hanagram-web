@@ -3,7 +3,7 @@
 
 use super::shared::*;
 use super::{
-    admin, auth, dashboard, maintenance, middleware as web_middleware, notifications, sessions,
+    admin, auth, dashboard, maintenance, middleware as web_middleware, notifications, platforms,
 };
 
 fn load_embedded_templates() -> Result<Tera> {
@@ -96,7 +96,7 @@ pub(crate) async fn run() -> Result<()> {
 
     let session_records = app_state.meta_store.list_all_session_records().await?;
     for session_record in session_records {
-        sessions::register_session_record(&app_state, session_record).await;
+        platforms::telegram::register_session_record(&app_state, session_record).await;
     }
 
     maintenance::spawn_background_maintenance(app_state.clone());
@@ -106,7 +106,7 @@ pub(crate) async fn run() -> Result<()> {
         .merge(auth::protected_routes())
         .merge(notifications::routes())
         .merge(admin::routes())
-        .merge(sessions::routes())
+        .merge(platforms::telegram::routes())
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             web_middleware::require_login,

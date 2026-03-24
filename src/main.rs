@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Hanagram-web contributors
 
 mod i18n;
+mod platforms;
 mod session_handler;
 mod state;
 mod web;

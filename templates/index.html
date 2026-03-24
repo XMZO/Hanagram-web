@@ -61,7 +61,7 @@
         const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
         const DASHBOARD_INCREMENTAL_REFRESH_MS = {{ dashboard_incremental_refresh_seconds }} * 1000;
         const DASHBOARD_FULL_REFRESH_MS = {{ dashboard_full_refresh_seconds }} * 1000;
-        const DASHBOARD_PANES = ["status", "sessions", "shortcuts"];
+        const DASHBOARD_PANES = ["status", "telegram", "shortcuts"];
         let dashboardSyncInFlight = false;
     </script>
     <style>
@@ -938,12 +938,12 @@
         <section class="paper-shadow mt-4 rounded-[1.45rem] border border-line/80 bg-paper/95 p-3.5 sm:p-4">
             <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
                 <a href="#status" data-dashboard-tab="status" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_status }}</a>
-                <a href="#sessions" data-dashboard-tab="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
+                <a href="#telegram" data-dashboard-tab="telegram" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
                 <a href="#shortcuts" data-dashboard-tab="shortcuts" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_shortcuts }}</a>
             </div>
 
             <div class="mt-4">
-                <section data-dashboard-pane="sessions" class="hidden space-y-4">
+                <section data-dashboard-pane="telegram" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_sessions }}</p>
@@ -1323,7 +1323,7 @@
                                     <p data-role="latest-update" class="mt-2 font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
                                     <div class="mt-4 grid grid-cols-2 gap-2.5">
                                         <button type="button" data-role="copy-code" data-code="{{ session.latest_code | default(value="") }}" data-label="{{ i18n.copy }}" data-copied="{{ i18n.copied }}" data-prompt-label="{{ i18n.copy_fallback }}" class="rounded-[0.95rem] border border-line bg-latte px-4 py-3 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] disabled:cursor-not-allowed disabled:opacity-45" onclick="copyCode(this)" {% if not session.latest_code %}disabled{% endif %}>{{ i18n.copy }}</button>
-                                        <form method="post" action="/sessions/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
+                                        <form method="post" action="/platforms/telegram/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
                                             <button type="submit" class="w-full rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ i18n.delete_session }}</button>
                                         </form>
                                     </div>
@@ -1340,8 +1340,8 @@
                                 <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.export_session_title }}</p>
                                     <div class="mt-3 grid grid-cols-2 gap-2.5">
-                                        <a href="/sessions/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] sm:px-4 sm:text-sm" download>{{ i18n.export_file }}</a>
-                                        <button type="button" data-label="{{ i18n.export_string }}" data-export-url="/sessions/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" class="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed] sm:px-4 sm:text-sm" onclick="fetchSessionString(this)">{{ i18n.export_string }}</button>
+                                        <a href="/platforms/telegram/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] sm:px-4 sm:text-sm" download>{{ i18n.export_file }}</a>
+                                        <button type="button" data-label="{{ i18n.export_string }}" data-export-url="/platforms/telegram/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" class="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed] sm:px-4 sm:text-sm" onclick="fetchSessionString(this)">{{ i18n.export_string }}</button>
                                     </div>
                                     <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="mt-3 hidden rounded-[1rem] border border-line/70 bg-[rgba(252,248,242,0.98)] p-3.5">
                                         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1354,7 +1354,7 @@
                                 </article>
 
                                 <div class="grid gap-3">
-                                    <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
+                                    <form method="post" action="/platforms/telegram/{{ session.id }}/note" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                         <input type="hidden" name="lang" value="{{ lang }}">
                                         <label class="block">
                                             <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.session_note_label }}</span>
@@ -1363,7 +1363,7 @@
                                         <button type="submit" class="mt-3 w-full rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">{{ i18n.save_note_label }}</button>
                                     </form>
 
-                                    <form method="post" action="/sessions/{{ session.id }}/rename" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
+                                    <form method="post" action="/platforms/telegram/{{ session.id }}/rename" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                         <input type="hidden" name="lang" value="{{ lang }}">
                                         <label class="block">
                                             <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.rename_session }}</span>

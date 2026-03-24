@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use super::sessions;
+use super::platforms;
 use super::shared::*;
 
 pub(crate) const LOGIN_REAUTH_UNLOCK_LOCATION: &str = "/login?reauth=unlock";
@@ -234,7 +234,7 @@ async fn cache_shared_user_master_key(
         .write()
         .await
         .insert(user_id.to_owned(), shared_master_key);
-    sessions::unlock_user_sessions(app_state, user_id).await;
+    platforms::telegram::unlock_user_sessions(app_state, user_id).await;
 }
 
 async fn persist_auth_session_master_key(
@@ -546,6 +546,7 @@ pub(crate) async fn clear_invalid_cookie_state(app_state: &AppState, headers: &H
 #[cfg(test)]
 mod tests {
     use super::enforced_redirect_target;
+    use crate::web::shared::TELEGRAM_WORKSPACE_PATH;
 
     #[test]
     fn password_reset_takes_precedence_over_totp_setup() {
@@ -562,7 +563,7 @@ mod tests {
             Some("/settings#security")
         );
         assert_eq!(
-            enforced_redirect_target("/sessions/new", true, false, true, 0),
+            enforced_redirect_target(TELEGRAM_WORKSPACE_PATH, true, false, true, 0),
             Some("/settings#security")
         );
     }
@@ -578,7 +579,7 @@ mod tests {
             Some("/settings#security")
         );
         assert_eq!(
-            enforced_redirect_target("/sessions/new", false, true, false, 5),
+            enforced_redirect_target(TELEGRAM_WORKSPACE_PATH, false, true, false, 5),
             Some("/settings#security")
         );
     }

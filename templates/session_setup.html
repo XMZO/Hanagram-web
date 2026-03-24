@@ -64,7 +64,7 @@
             <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                 <div class="max-w-3xl">
                     <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-4 py-2 text-[0.72rem] font-medium uppercase tracking-[0.28em] text-ink/60">
-                        {{ i18n.dashboard_add_session }}
+                        {{ i18n.dashboard_nav_sessions }}
                     </span>
                     <h1 class="mt-5 font-display text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{{ i18n.setup_title }}</h1>
                     <p class="mt-4 text-[15px] leading-8 text-ink/72">{{ i18n.setup_description }}</p>
@@ -112,7 +112,7 @@
                 <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_string_title }}</h2>
                 <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_string_description }}</p>
 
-                <form method="post" action="/sessions/import/string" class="mt-6 space-y-4">
+                <form method="post" action="{{ telegram_import_string_action }}" class="mt-6 space-y-4">
                     <input type="hidden" name="lang" value="{{ lang }}">
 
                     <label class="block">
@@ -148,7 +148,7 @@
                 <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_file_title }}</h2>
                 <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_file_description }}</p>
 
-                <form method="post" action="/sessions/import/upload" enctype="multipart/form-data" class="mt-6 space-y-4">
+                <form method="post" action="{{ telegram_import_upload_action }}" enctype="multipart/form-data" class="mt-6 space-y-4">
                     <input type="hidden" name="lang" value="{{ lang }}">
 
                     <label class="block">
@@ -184,7 +184,7 @@
                 <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_phone_title }}</h2>
                 <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_phone_description }}</p>
 
-                <form method="post" action="/sessions/login/phone" class="mt-6 space-y-4">
+                <form method="post" action="{{ telegram_phone_login_action }}" class="mt-6 space-y-4">
                     <input type="hidden" name="lang" value="{{ lang }}">
 
                     <label class="block">
@@ -220,7 +220,7 @@
                 <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_qr_title }}</h2>
                 <p class="mt-3 text-sm leading-7 text-ink/65">{{ i18n.setup_qr_description }}</p>
 
-                <form method="post" action="/sessions/login/qr" class="mt-6 space-y-4">
+                <form method="post" action="{{ telegram_qr_login_action }}" class="mt-6 space-y-4">
                     <input type="hidden" name="lang" value="{{ lang }}">
 
                     <label class="block">

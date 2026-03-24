@@ -152,6 +152,61 @@ fn telegram_retry_after_seconds_for_anyhow(error: &anyhow::Error) -> Option<u32>
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
+        .route(TELEGRAM_WORKSPACE_PATH, get(session_setup_page_handler))
+        .route(
+            TELEGRAM_IMPORT_STRING_PATH,
+            post(import_string_session_handler),
+        )
+        .route(
+            TELEGRAM_IMPORT_UPLOAD_PATH,
+            post(import_session_file_handler),
+        )
+        .route(
+            "/platforms/telegram/{session_id}/note",
+            post(update_session_note_handler),
+        )
+        .route(
+            "/platforms/telegram/{session_id}/delete",
+            post(delete_session_handler),
+        )
+        .route(
+            "/platforms/telegram/{session_id}/rename",
+            post(rename_session_handler),
+        )
+        .route(
+            "/platforms/telegram/{session_id}/export/file",
+            get(export_session_file_handler),
+        )
+        .route(
+            "/platforms/telegram/{session_id}/export/string",
+            get(export_string_session_handler),
+        )
+        .route(TELEGRAM_PHONE_LOGIN_PATH, post(start_phone_login_handler))
+        .route(TELEGRAM_QR_LOGIN_PATH, post(start_qr_login_handler))
+        .route(
+            "/platforms/telegram/phone/{flow_id}",
+            get(phone_flow_page_handler),
+        )
+        .route(
+            "/platforms/telegram/phone/{flow_id}/code",
+            post(verify_phone_code_handler),
+        )
+        .route(
+            "/platforms/telegram/phone/{flow_id}/password",
+            post(verify_phone_password_handler),
+        )
+        .route(
+            "/platforms/telegram/phone/{flow_id}/cancel",
+            post(cancel_phone_flow_handler),
+        )
+        .route(
+            "/platforms/telegram/qr/{flow_id}",
+            get(qr_flow_page_handler),
+        )
+        .route(
+            "/platforms/telegram/qr/{flow_id}/cancel",
+            post(cancel_qr_flow_handler),
+        )
         .route("/sessions/new", get(session_setup_page_handler))
         .route(
             "/sessions/import/string",
@@ -274,7 +329,7 @@ async fn render_setup_page(
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
-    let languages = language_options(language, "/sessions/new");
+    let languages = language_options(language, TELEGRAM_WORKSPACE_PATH);
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -282,13 +337,17 @@ async fn render_setup_page(
     context.insert("languages", &languages);
     context.insert("banner", &banner);
     context.insert("dashboard_href", &dashboard_href(language));
+    context.insert("telegram_import_string_action", TELEGRAM_IMPORT_STRING_PATH);
+    context.insert("telegram_import_upload_action", TELEGRAM_IMPORT_UPLOAD_PATH);
+    context.insert("telegram_phone_login_action", TELEGRAM_PHONE_LOGIN_PATH);
+    context.insert("telegram_qr_login_action", TELEGRAM_QR_LOGIN_PATH);
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "session_setup.html", &context)
 }
 
 fn phone_flow_href(flow_id: &str) -> String {
-    format!("/sessions/phone/{flow_id}")
+    format!("/platforms/telegram/phone/{flow_id}")
 }
 
 fn phone_flow_error_href(flow_id: &str, error: &str) -> String {
@@ -303,11 +362,11 @@ fn phone_flow_retry_after_href(flow_id: &str, wait_seconds: u32) -> String {
 }
 
 fn phone_flow_cancel_href(flow_id: &str) -> String {
-    format!("/sessions/phone/{flow_id}/cancel")
+    format!("/platforms/telegram/phone/{flow_id}/cancel")
 }
 
 fn qr_flow_href(flow_id: &str) -> String {
-    format!("/sessions/qr/{flow_id}")
+    format!("/platforms/telegram/qr/{flow_id}")
 }
 
 fn qr_flow_error_href(flow_id: &str, error: &str) -> String {
@@ -322,15 +381,15 @@ fn qr_flow_retry_after_href(flow_id: &str, wait_seconds: u32) -> String {
 }
 
 fn qr_flow_cancel_href(flow_id: &str) -> String {
-    format!("/sessions/qr/{flow_id}/cancel")
+    format!("/platforms/telegram/qr/{flow_id}/cancel")
 }
 
 fn build_phone_flow_view(flow_id: &str, flow: &PendingPhoneLogin) -> PhoneFlowView {
     let awaiting_password = matches!(flow.stage, PhoneLoginStage::AwaitingPassword { .. });
     let submit_action = if awaiting_password {
-        format!("/sessions/phone/{flow_id}/password")
+        format!("/platforms/telegram/phone/{flow_id}/password")
     } else {
-        format!("/sessions/phone/{flow_id}/code")
+        format!("/platforms/telegram/phone/{flow_id}/code")
     };
     let password_hint = match &flow.stage {
         PhoneLoginStage::AwaitingPassword { token } => token.hint().map(str::to_owned),
@@ -356,7 +415,7 @@ async fn render_phone_flow_page(
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
-    let languages = language_options(language, &format!("/sessions/phone/{flow_id}"));
+    let languages = language_options(language, &phone_flow_href(flow_id));
     let flow_view = build_phone_flow_view(flow_id, flow);
 
     let mut context = Context::new();
@@ -383,7 +442,7 @@ async fn render_qr_flow_page(
     auto_refresh_seconds: u64,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
-    let languages = language_options(language, &format!("/sessions/qr/{flow_id}"));
+    let languages = language_options(language, &qr_flow_href(flow_id));
     let flow_view = QrFlowView {
         session_name: flow.session_name.clone(),
         qr_link: pending.qr_link,

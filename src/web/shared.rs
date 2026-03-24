@@ -60,7 +60,7 @@ pub(crate) use hanagram_web::store::{
 pub(crate) use super::platform_key;
 pub(crate) use super::runtime_cache::{RuntimeCache, RuntimeCacheHandle};
 pub(crate) use crate::i18n::{Language, language_options};
-pub(crate) use crate::session_handler::{
+pub(crate) use crate::platforms::telegram::{
     LoadedSession, export_sqlite_session_bytes, export_telethon_string_session, load_session,
     load_telethon_string_session, serialize_session,
 };
@@ -80,6 +80,11 @@ pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
 pub(crate) const DASHBOARD_INCREMENTAL_SYNC_SECONDS: u64 = 3;
 pub(crate) const DASHBOARD_FULL_SYNC_SECONDS: u64 = 30;
 pub(crate) const DASHBOARD_OTP_VISIBILITY_SECONDS: i64 = 600;
+pub(crate) const TELEGRAM_WORKSPACE_PATH: &str = "/platforms/telegram";
+pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
+pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
+pub(crate) const TELEGRAM_PHONE_LOGIN_PATH: &str = "/platforms/telegram/login/phone";
+pub(crate) const TELEGRAM_QR_LOGIN_PATH: &str = "/platforms/telegram/login/qr";
 pub(crate) const META_DB_FILE_NAME: &str = "app.db";
 pub(crate) const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 pub(crate) const SESSION_KEY_PREFIX: &str = "hanagram-session-key:v1:";
@@ -758,7 +763,7 @@ pub(crate) fn dashboard_href(language: Language) -> String {
 
 pub(crate) fn setup_href(language: Language) -> String {
     let _ = language;
-    String::from("/sessions/new")
+    String::from(TELEGRAM_WORKSPACE_PATH)
 }
 
 pub(crate) fn settings_href(language: Language) -> String {
@@ -1467,7 +1472,7 @@ mod tests {
         context.insert("current_username", "alice");
         context.insert("show_admin", &false);
         context.insert("logout_action", "/logout");
-        context.insert("setup_href", "/sessions/new");
+        context.insert("setup_href", TELEGRAM_WORKSPACE_PATH);
         context.insert("settings_href", "/settings");
         context.insert("admin_href", "/admin");
         context.insert("settings_label", &translations.nav_settings_label);
