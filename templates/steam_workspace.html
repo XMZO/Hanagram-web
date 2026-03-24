@@ -109,6 +109,12 @@
         .steam-disclosure[open] [data-role='steam-disclosure-icon'] {
             transform: rotate(90deg);
         }
+        .steam-manage-card[open],
+        .steam-confirmation-card[open] {
+            border-color: rgba(31, 79, 114, 0.30);
+            background: rgba(255, 255, 255, 0.98);
+            box-shadow: 0 18px 40px rgba(31, 56, 79, 0.10);
+        }
         [data-tab-panel] { display: none; }
         [data-tab-panel].tab-active { display: block; }
     </style>
@@ -222,10 +228,17 @@
         }
 
         function renderSteamIssueCard(issue) {
-            return `<article class="rounded-[1.05rem] border border-peach/35 bg-[#fbefec] px-4 py-3.5">
-                <p class="text-xs uppercase tracking-[0.22em] text-[#98675f]/72">${escapeHtml(I18N.fileLabel)}</p>
-                <p class="mt-1.5 break-all font-mono text-[0.72rem] text-[#98675f]">${escapeHtml(issue.storage_file)}</p>
-                <p class="mt-3 text-sm leading-6 text-[#98675f]">${escapeHtml(issue.error)}</p>
+            return `<article class="rounded-[1rem] border border-peach/35 bg-[#fbefec] p-3.5">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[0.62rem] uppercase tracking-[0.2em] text-[#98675f]/72">${escapeHtml(I18N.fileLabel)}</p>
+                        <p class="mt-1 truncate font-mono text-[0.72rem] text-[#98675f]">${escapeHtml(issue.storage_file)}</p>
+                    </div>
+                    <span class="shrink-0 rounded-full border border-peach/30 bg-white/55 px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.16em] text-[#98675f]">${escapeHtml(I18N.issueTitle)}</span>
+                </div>
+                <div class="mt-3 max-h-[8.5rem] overflow-auto rounded-[0.85rem] border border-peach/20 bg-white/45 px-3 py-2.5">
+                    <p class="text-sm leading-6 text-[#98675f]">${escapeHtml(issue.error)}</p>
+                </div>
             </article>`;
         }
 
@@ -292,7 +305,7 @@
             if (issuesRoot) {
                 issuesRoot.innerHTML = snapshot.issues.length > 0
                     ? snapshot.issues.map(renderSteamIssueCard).join("")
-                    : `<div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52">${escapeHtml(I18N.issueEmpty)}</div>`;
+                    : `<div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52 md:col-span-2 xl:col-span-3">${escapeHtml(I18N.issueEmpty)}</div>`;
             }
 
             refreshSteamCountdowns();
@@ -361,8 +374,7 @@
                 : `<div class="flex h-10 w-10 items-center justify-center rounded-[0.9rem] border border-line/70 bg-paper text-xs uppercase tracking-[0.18em] text-ink/45">${escapeHtml((confirmation.type_name || "?").slice(0, 2))}</div>`;
 
             return `<article class="rounded-[0.95rem] border border-line/80 bg-white/94 p-3">
-                <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr),auto] sm:items-start">
-                    <div class="flex items-start gap-3">
+                <div class="flex items-start gap-3">
                     ${icon}
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
@@ -370,40 +382,30 @@
                             <span class="rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.64rem] uppercase tracking-[0.18em] text-ink/55">${escapeHtml(confirmation.type_name || I18N.confirmationType)}</span>
                         </div>
                         ${summary}
-                        <div class="mt-3 grid gap-2 text-[0.72rem] text-ink/58 sm:grid-cols-3">
-                            <div class="rounded-[0.85rem] border border-line/70 bg-paper px-2.5 py-2">
-                                <p class="uppercase tracking-[0.18em] text-ink/42">${escapeHtml(I18N.confirmationCreatedAt)}</p>
-                                <p class="mt-1.5 font-mono text-[0.7rem] text-ink/62">${escapeHtml(confirmation.created_at || "-")}</p>
-                            </div>
-                            <div class="rounded-[0.85rem] border border-line/70 bg-paper px-2.5 py-2">
-                                <p class="uppercase tracking-[0.18em] text-ink/42">${escapeHtml(I18N.confirmationCreatorId)}</p>
-                                <p class="mt-1.5 break-all font-mono text-[0.7rem] text-ink/62">${escapeHtml(confirmation.creator_id || "-")}</p>
-                            </div>
-                            <div class="rounded-[0.85rem] border border-line/70 bg-paper px-2.5 py-2">
-                                <p class="uppercase tracking-[0.18em] text-ink/42">${escapeHtml(I18N.confirmationType)}</p>
-                                <p class="mt-1.5 text-sm text-ink/72">${escapeHtml(confirmation.type_name || "-")}</p>
-                            </div>
+                        <div class="mt-3 flex flex-wrap gap-2 text-[0.72rem] text-ink/58">
+                            <span class="inline-flex rounded-full border border-line/70 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/62">${escapeHtml(I18N.confirmationCreatedAt)} · ${escapeHtml(confirmation.created_at || "-")}</span>
+                            <span class="inline-flex rounded-full border border-line/70 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/62">${escapeHtml(I18N.confirmationCreatorId)} · ${escapeHtml(confirmation.creator_id || "-")}</span>
+                            <span class="inline-flex rounded-full border border-line/70 bg-paper px-2.5 py-1 text-[0.68rem] text-ink/62">${escapeHtml(I18N.confirmationType)} · ${escapeHtml(confirmation.type_name || "-")}</span>
                         </div>
                     </div>
-                    </div>
-                    <div class="flex flex-wrap gap-2 sm:w-[12rem] sm:justify-end">
-                        <button
-                            type="button"
-                            data-action="${escapeHtml(confirmation.accept_action)}"
-                            data-nonce="${escapeHtml(confirmation.nonce)}"
-                            data-confirmation-action-kind="accept"
-                            onclick="submitConfirmationAction(this)"
-                            class="flex-1 rounded-[0.95rem] border border-sage/35 bg-mint px-3 py-2 text-sm font-medium text-sageDeep transition hover:bg-[#e3efe3] sm:flex-none"
-                        >${escapeHtml(I18N.confirmationAccept)}</button>
-                        <button
-                            type="button"
-                            data-action="${escapeHtml(confirmation.deny_action)}"
-                            data-nonce="${escapeHtml(confirmation.nonce)}"
-                            data-confirmation-action-kind="deny"
-                            onclick="submitConfirmationAction(this)"
-                            class="flex-1 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df] sm:flex-none"
-                        >${escapeHtml(I18N.confirmationDeny)}</button>
-                    </div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        data-action="${escapeHtml(confirmation.accept_action)}"
+                        data-nonce="${escapeHtml(confirmation.nonce)}"
+                        data-confirmation-action-kind="accept"
+                        onclick="submitConfirmationAction(this)"
+                        class="flex-1 rounded-[0.95rem] border border-sage/35 bg-mint px-3 py-2 text-sm font-medium text-sageDeep transition hover:bg-[#e3efe3]"
+                    >${escapeHtml(I18N.confirmationAccept)}</button>
+                    <button
+                        type="button"
+                        data-action="${escapeHtml(confirmation.deny_action)}"
+                        data-nonce="${escapeHtml(confirmation.nonce)}"
+                        data-confirmation-action-kind="deny"
+                        onclick="submitConfirmationAction(this)"
+                        class="flex-1 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]"
+                    >${escapeHtml(I18N.confirmationDeny)}</button>
                 </div>
             </article>`;
         }
@@ -416,25 +418,28 @@
                 </div>`
                 : "";
             const confirmationList = account.confirmations.length > 0
-                ? `<div class="mt-3 space-y-3">${account.confirmations.map((confirmation) => renderConfirmationEntry(account, confirmation)).join("")}</div>`
+                ? `<div class="mt-3 max-h-[24rem] space-y-2 overflow-auto pr-1">${account.confirmations.map((confirmation) => renderConfirmationEntry(account, confirmation)).join("")}</div>`
                 : (!account.error
                     ? `<div class="mt-3 rounded-[1rem] border border-dashed border-line bg-white/78 px-3.5 py-5 text-sm text-ink/54">${escapeHtml(I18N.confirmationsNoneForAccount)}</div>`
                     : "");
 
-            return `<details class="steam-disclosure rounded-[1rem] border border-line/80 bg-white/90">
+            return `<details data-confirmation-account class="steam-disclosure steam-confirmation-card rounded-[1rem] border border-line/80 bg-white/90 transition">
                 <summary class="cursor-pointer px-3.5 py-3">
-                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex min-w-0 flex-wrap items-center gap-2">
                                 <span class="inline-flex h-2.5 w-2.5 rounded-full ${account.error ? "bg-peach" : "bg-steam"}"></span>
-                                <h2 class="truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</h2>
+                                <h2 class="min-w-0 truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</h2>
                             </div>
                             <div class="mt-2 flex flex-wrap gap-2">
                                 <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
                                 <span class="inline-flex rounded-full border ${account.error ? "border-peach/35 bg-[#fbefec] text-[#98675f]" : "border-steam/20 bg-steamMist text-steam"} px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em]">${escapeHtml(String(account.confirmation_count || 0))}</span>
+                                ${account.error
+                                    ? `<span class="inline-flex rounded-full border border-peach/35 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-[#98675f]">${escapeHtml(I18N.confirmationsAccountError)}</span>`
+                                    : ""}
                             </div>
                         </div>
-                        <div class="inline-flex items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
+                        <div class="inline-flex shrink-0 items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
                             <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
                             <span>${escapeHtml(I18N.openDetails)}</span>
                         </div>
@@ -462,15 +467,25 @@
             if (!root) { return; }
 
             if (!Array.isArray(snapshot.accounts) || snapshot.accounts.length === 0) {
-                root.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56">${escapeHtml(I18N.confirmationsUnavailable)}</div>`;
+                root.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2 2xl:col-span-3">${escapeHtml(I18N.confirmationsUnavailable)}</div>`;
                 return;
             }
 
             const allClear = snapshot.confirmation_count === 0 && snapshot.accounts.every((account) => !account.error);
             const intro = allClear
-                ? `<div class="rounded-[1rem] border border-sage/30 bg-mint px-4 py-3 text-sm leading-6 text-sageDeep">${escapeHtml(I18N.confirmationsEmpty)}</div>`
+                ? `<div class="rounded-[1rem] border border-sage/30 bg-mint px-4 py-3 text-sm leading-6 text-sageDeep md:col-span-2 2xl:col-span-3">${escapeHtml(I18N.confirmationsEmpty)}</div>`
                 : "";
             root.innerHTML = intro + snapshot.accounts.map(renderConfirmationAccount).join("");
+            root.querySelectorAll("[data-confirmation-account]").forEach((card) => {
+                card.addEventListener("toggle", () => {
+                    if (!card.open) { return; }
+                    root.querySelectorAll("[data-confirmation-account]").forEach((other) => {
+                        if (other !== card && other.open) {
+                            other.open = false;
+                        }
+                    });
+                });
+            });
         }
 
         async function syncSteamConfirmations(force = false, announceLoading = true) {
@@ -648,6 +663,17 @@
                     if (!window.confirm(form.dataset.confirmSubmit || "")) {
                         event.preventDefault();
                     }
+                });
+            });
+
+            document.querySelectorAll("[data-manage-account]").forEach((card) => {
+                card.addEventListener("toggle", () => {
+                    if (!card.open) { return; }
+                    document.querySelectorAll("[data-manage-account]").forEach((other) => {
+                        if (other !== card && other.open) {
+                            other.open = false;
+                        }
+                    });
                 });
             });
 
@@ -941,55 +967,67 @@
                         </div>
                         <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_managed_list_description }}</p>
 
-                        <div class="mt-4 max-h-[38rem] space-y-2.5 overflow-auto pr-1">
+                        <div class="mt-4 max-h-[38rem] overflow-auto pr-1">
                             {% if total_accounts > 0 %}
+                            <div class="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                             {% for account in snapshot.accounts %}
                             <details
                                 data-manage-account
                                 data-search="{{ account.account_name }} {{ account.steam_id | default(value='') }} {{ account.storage_file }} {{ account.imported_from | default(value='') }}"
-                                class="steam-disclosure rounded-[1rem] border border-line/80 bg-white/92"
+                                class="steam-disclosure steam-manage-card overflow-hidden rounded-[1.05rem] border border-line/80 bg-white/92 transition"
                             >
-                                <summary class="cursor-pointer px-3.5 py-3.5">
-                                    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                        <div class="min-w-0">
-                                            <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                <summary class="cursor-pointer p-3.5">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="flex min-w-0 items-center gap-2">
                                                 <span class="inline-flex h-2.5 w-2.5 rounded-full {% if account.current_code %}bg-steam{% else %}bg-peach{% endif %}"></span>
-                                                <h3 class="truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</h3>
-                                                <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                                <h3 class="min-w-0 truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</h3>
                                             </div>
-                                            <div class="mt-2 flex flex-wrap gap-2">
-                                                <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
-                                                    {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
-                                                </span>
-                                                <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                                    {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
-                                                </span>
-                                                <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
-                                                    {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
-                                                </span>
-                                            </div>
+                                            <p class="mt-1 truncate font-mono text-[0.72rem] text-ink/52">{{ account.steam_id | default(value="-") }}</p>
+                                            {% if account.updated_at %}
+                                            <p class="mt-2 truncate text-[0.72rem] text-ink/46">{{ i18n.admin_audit_updated_label }} · {{ account.updated_at }}</p>
+                                            {% elif account.imported_from %}
+                                            <p class="mt-2 truncate text-[0.72rem] text-ink/46">{{ i18n.steam_imported_from_label }} · {{ account.imported_from }}</p>
+                                            {% else %}
+                                            <p class="mt-2 truncate text-[0.72rem] text-ink/40">{{ account.storage_file }}</p>
+                                            {% endif %}
                                         </div>
 
-                                        <div class="flex items-center justify-between gap-3 lg:justify-end">
-                                            <div class="text-right">
-                                                {% if account.updated_at %}
-                                                <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.admin_audit_updated_label }}</p>
-                                                <p class="mt-1 font-mono text-[0.72rem] text-ink/58">{{ account.updated_at }}</p>
-                                                {% elif account.imported_from %}
-                                                <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_imported_from_label }}</p>
-                                                <p class="mt-1 max-w-[12rem] truncate text-[0.76rem] text-ink/58">{{ account.imported_from }}</p>
-                                                {% endif %}
-                                            </div>
-                                            <div class="inline-flex items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
-                                                <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
-                                                <span>{{ i18n.open_details }}</span>
-                                            </div>
+                                        <div class="inline-flex shrink-0 items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
+                                            <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                            <span class="hidden sm:inline">{{ i18n.open_details }}</span>
                                         </div>
+                                    </div>
+
+                                    <div class="mt-3 flex flex-wrap gap-2">
+                                        <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                        <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
+                                            {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
+                                        </span>
+                                        <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+                                            {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
+                                        </span>
+                                        <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
+                                            {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
+                                        </span>
+                                    </div>
+
+                                    <div class="mt-3 grid gap-2">
+                                        <div class="rounded-[0.9rem] border border-line/75 bg-paper/85 px-3 py-2.5">
+                                            <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_file_label }}</p>
+                                            <p class="mt-1 truncate font-mono text-[0.72rem] text-ink/58">{{ account.storage_file }}</p>
+                                        </div>
+                                        {% if account.imported_from and account.updated_at %}
+                                        <div class="rounded-[0.9rem] border border-line/75 bg-paper/72 px-3 py-2.5">
+                                            <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_imported_from_label }}</p>
+                                            <p class="mt-1 truncate text-[0.74rem] text-ink/60">{{ account.imported_from }}</p>
+                                        </div>
+                                        {% endif %}
                                     </div>
                                 </summary>
 
                                 <div class="border-t border-line/70 px-3.5 py-3.5">
-                                    <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                                    <div class="grid gap-2 sm:grid-cols-2">
                                         <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_file_label }}</p>
                                             <p class="mt-1.5 break-all font-mono text-[0.72rem] text-ink/62">{{ account.storage_file }}</p>
@@ -1022,11 +1060,16 @@
 
                                     {% if account.can_manage %}
                                     <div class="mt-3 space-y-3">
-                                        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]">
-                                            <form method="post" action="{{ account.rename_action }}" class="flex flex-col gap-2 sm:flex-row">
+                                        <div class="grid gap-3">
+                                            <form method="post" action="{{ account.rename_action }}" class="grid gap-2">
                                                 <input type="hidden" name="lang" value="{{ lang }}">
-                                                <input name="account_name" type="text" maxlength="96" value="{{ account.account_name }}" class="min-w-0 flex-1 rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                                <button type="submit" class="rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_rename_button }}</button>
+                                                <label class="block">
+                                                    <span class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_rename_button }}</span>
+                                                    <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+                                                        <input name="account_name" type="text" maxlength="96" value="{{ account.account_name }}" class="min-w-0 flex-1 rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                        <button type="submit" class="rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_rename_button }}</button>
+                                                    </div>
+                                                </label>
                                             </form>
 
                                             <form method="post" action="{{ account.delete_action }}" data-confirm-submit="{{ i18n.steam_delete_confirm_message }}">
@@ -1076,7 +1119,8 @@
                                 </div>
                             </details>
                             {% endfor %}
-                            <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52"></div>
+                            <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52 md:col-span-2 2xl:col-span-3"></div>
+                            </div>
                             {% else %}
                             <div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52">{{ i18n.steam_manage_empty_label }}</div>
                             {% endif %}
@@ -1108,8 +1152,8 @@
                     <p class="mt-2 text-xs uppercase tracking-[0.22em] text-ink/42">{{ i18n.stat_updated }} · <span data-role="steam-confirmations-updated-at" class="font-mono">-</span></p>
 
                     <div data-role="steam-confirmations-status" class="hidden"></div>
-                    <div data-role="steam-confirmations-list" class="mt-4 space-y-3">
-                        <div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56">{{ i18n.steam_confirmations_loading_message }}</div>
+                    <div data-role="steam-confirmations-list" class="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                        <div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2 2xl:col-span-3">{{ i18n.steam_confirmations_loading_message }}</div>
                     </div>
                 </article>
             </section>
@@ -1123,17 +1167,24 @@
                         </div>
                         <p class="max-w-3xl text-sm leading-6 text-ink/68">{{ i18n.steam_issue_description }}</p>
                     </div>
-                    <div class="mt-4 grid gap-3" data-role="steam-issues-list">
+                    <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-role="steam-issues-list">
                         {% if snapshot.issues | length > 0 %}
                         {% for issue in snapshot.issues %}
-                        <article class="rounded-[1.05rem] border border-peach/35 bg-[#fbefec] px-4 py-3.5">
-                            <p class="text-xs uppercase tracking-[0.22em] text-[#98675f]/72">{{ i18n.steam_file_label }}</p>
-                            <p class="mt-1.5 break-all font-mono text-[0.72rem] text-[#98675f]">{{ issue.storage_file }}</p>
-                            <p class="mt-3 text-sm leading-6 text-[#98675f]">{{ issue.error }}</p>
+                        <article class="rounded-[1rem] border border-peach/35 bg-[#fbefec] p-3.5">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-[0.62rem] uppercase tracking-[0.2em] text-[#98675f]/72">{{ i18n.steam_file_label }}</p>
+                                    <p class="mt-1 truncate font-mono text-[0.72rem] text-[#98675f]">{{ issue.storage_file }}</p>
+                                </div>
+                                <span class="shrink-0 rounded-full border border-peach/30 bg-white/55 px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.16em] text-[#98675f]">{{ i18n.steam_issue_title }}</span>
+                            </div>
+                            <div class="mt-3 max-h-[8.5rem] overflow-auto rounded-[0.85rem] border border-peach/20 bg-white/45 px-3 py-2.5">
+                                <p class="text-sm leading-6 text-[#98675f]">{{ issue.error }}</p>
+                            </div>
                         </article>
                         {% endfor %}
                         {% else %}
-                        <div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52">{{ i18n.steam_issue_empty }}</div>
+                        <div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52 md:col-span-2 xl:col-span-3">{{ i18n.steam_issue_empty }}</div>
                         {% endif %}
                     </div>
                 </article>
