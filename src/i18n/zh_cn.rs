@@ -109,6 +109,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     empty_state_description_suffix: "文件、粘贴 Telethon 字符串，或直接在线登录即可。",
     latest_otp: "最新验证码",
     otp_placeholder: "------",
+    otp_hide_countdown_label: "{countdown} 后隐藏",
+    otp_hidden_label: "已自动隐藏",
     copy: "复制",
     copied: "已复制",
     copy_fallback: "复制验证码",

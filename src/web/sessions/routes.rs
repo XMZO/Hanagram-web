@@ -1585,8 +1585,12 @@ async fn qr_flow_page_handler(
         remaining_login_throttle_seconds(&app_state, &poll_throttle_key).await
     {
         if let Some(pending) = flow.pending_state.clone() {
-            let banner =
-                banner.or_else(|| Some(PageBanner::error(qr_retry_after_message(language, wait_seconds))));
+            let banner = banner.or_else(|| {
+                Some(PageBanner::error(qr_retry_after_message(
+                    language,
+                    wait_seconds,
+                )))
+            });
             return match render_qr_flow_page(
                 &app_state,
                 language,
@@ -1675,7 +1679,10 @@ async fn qr_flow_page_handler(
                         &flow_id,
                         &flow,
                         pending,
-                        Some(PageBanner::error(qr_retry_after_message(language, wait_seconds))),
+                        Some(PageBanner::error(qr_retry_after_message(
+                            language,
+                            wait_seconds,
+                        ))),
                         &headers,
                         u64::from(wait_seconds).max(QR_AUTO_REFRESH_SECONDS),
                     )

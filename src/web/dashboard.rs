@@ -75,9 +75,24 @@ fn build_dashboard_session_view(
             .format("%Y-%m-%d %H:%M:%S UTC")
             .to_string()
     });
-    let latest_code_at_unix = session
-        .latest_code_message()
-        .map(|message| message.received_at.timestamp());
+    let now_unix = Utc::now().timestamp();
+    let (latest_code, latest_code_at_unix, latest_code_expires_at_unix) =
+        match session.latest_code_message() {
+            Some(message) => {
+                let latest_code_at_unix = message.received_at.timestamp();
+                let latest_code_expires_at_unix =
+                    latest_code_at_unix.saturating_add(DASHBOARD_OTP_VISIBILITY_SECONDS);
+                let latest_code = (latest_code_expires_at_unix > now_unix)
+                    .then(|| message.code.clone())
+                    .flatten();
+                (
+                    latest_code,
+                    Some(latest_code_at_unix),
+                    Some(latest_code_expires_at_unix),
+                )
+            }
+            None => (None, None, None),
+        };
     let recent_messages = session
         .recent_messages()
         .into_iter()
@@ -98,7 +113,6 @@ fn build_dashboard_session_view(
         connected: session.status.is_connected(),
         error: localized_session_error(session.status.error_kind().copied(), translations),
     };
-    let latest_code = session.latest_code().map(str::to_owned);
 
     DashboardSessionView {
         id: session.id,
@@ -111,6 +125,7 @@ fn build_dashboard_session_view(
         latest_code,
         latest_message_at,
         latest_code_at_unix,
+        latest_code_expires_at_unix,
         recent_messages,
     }
 }
@@ -285,5 +300,64 @@ mod tests {
         assert_eq!(mask_session_phone("+86 138 0000 0000"), "+86 138 **** 0000");
         assert_eq!(mask_session_phone("+1 314 628 8470"), "+1 314 *** 8470");
         assert_eq!(mask_session_phone("未知"), "未知");
+    }
+
+    #[test]
+    fn build_dashboard_session_view_sets_visibility_expiry_for_fresh_codes() {
+        let received_at = Utc::now() - TimeDelta::seconds(15);
+        let view = build_dashboard_session_view(
+            SessionInfo {
+                id: String::from("session-1"),
+                user_id: String::from("user-1"),
+                key: String::from("alpha"),
+                note: String::new(),
+                phone: String::from("+86 138 0000 0000"),
+                session_file: PathBuf::from("sessions/alpha.session"),
+                status: SessionStatus::Connected,
+                messages: VecDeque::from([OtpMessage {
+                    received_at,
+                    text: String::from("Telegram code: 123456"),
+                    code: Some(String::from("123456")),
+                }]),
+            },
+            Language::ZhCn.translations(),
+        );
+
+        assert_eq!(view.latest_code.as_deref(), Some("123456"));
+        assert_eq!(view.latest_code_at_unix, Some(received_at.timestamp()));
+        assert_eq!(
+            view.latest_code_expires_at_unix,
+            Some(received_at.timestamp() + DASHBOARD_OTP_VISIBILITY_SECONDS)
+        );
+    }
+
+    #[test]
+    fn build_dashboard_session_view_hides_expired_code_but_keeps_history() {
+        let received_at = Utc::now() - TimeDelta::seconds(DASHBOARD_OTP_VISIBILITY_SECONDS + 5);
+        let view = build_dashboard_session_view(
+            SessionInfo {
+                id: String::from("session-1"),
+                user_id: String::from("user-1"),
+                key: String::from("alpha"),
+                note: String::new(),
+                phone: String::from("+86 138 0000 0000"),
+                session_file: PathBuf::from("sessions/alpha.session"),
+                status: SessionStatus::Connected,
+                messages: VecDeque::from([OtpMessage {
+                    received_at,
+                    text: String::from("Telegram code: 123456"),
+                    code: Some(String::from("123456")),
+                }]),
+            },
+            Language::ZhCn.translations(),
+        );
+
+        assert_eq!(view.latest_code, None);
+        assert_eq!(view.latest_code_at_unix, Some(received_at.timestamp()));
+        assert_eq!(
+            view.latest_code_expires_at_unix,
+            Some(received_at.timestamp() + DASHBOARD_OTP_VISIBILITY_SECONDS)
+        );
+        assert_eq!(view.recent_messages[0].code.as_deref(), Some("123456"));
     }
 }

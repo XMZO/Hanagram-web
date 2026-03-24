@@ -109,6 +109,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     empty_state_description_suffix: "file, paste a Telethon string session, or sign in directly.",
     latest_otp: "Latest OTP",
     otp_placeholder: "------",
+    otp_hide_countdown_label: "Hides in {countdown}",
+    otp_hidden_label: "Auto-hidden",
     copy: "Copy",
     copied: "Copied",
     copy_fallback: "Copy OTP",

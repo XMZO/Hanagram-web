@@ -119,6 +119,8 @@ pub struct TranslationSet {
     pub empty_state_description_suffix: &'static str,
     pub latest_otp: &'static str,
     pub otp_placeholder: &'static str,
+    pub otp_hide_countdown_label: &'static str,
+    pub otp_hidden_label: &'static str,
     pub copy: &'static str,
     pub copied: &'static str,
     pub copy_fallback: &'static str,

@@ -79,6 +79,7 @@ pub(crate) use crate::web_auth::{
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
 pub(crate) const DASHBOARD_INCREMENTAL_SYNC_SECONDS: u64 = 3;
 pub(crate) const DASHBOARD_FULL_SYNC_SECONDS: u64 = 30;
+pub(crate) const DASHBOARD_OTP_VISIBILITY_SECONDS: i64 = 600;
 pub(crate) const META_DB_FILE_NAME: &str = "app.db";
 pub(crate) const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 pub(crate) const SESSION_KEY_PREFIX: &str = "hanagram-session-key:v1:";
@@ -372,6 +373,7 @@ pub(crate) struct DashboardSessionView {
     pub(crate) latest_code: Option<String>,
     pub(crate) latest_message_at: Option<String>,
     pub(crate) latest_code_at_unix: Option<i64>,
+    pub(crate) latest_code_expires_at_unix: Option<i64>,
     pub(crate) recent_messages: Vec<DashboardMessageView>,
 }
 
@@ -1450,6 +1452,7 @@ mod tests {
             latest_code: Some(String::from("123456")),
             latest_message_at: Some(String::from("2026-03-14 09:00:00 UTC")),
             latest_code_at_unix: Some(1_773_486_000),
+            latest_code_expires_at_unix: Some(1_773_486_120),
             recent_messages: vec![DashboardMessageView {
                 received_at: String::from("2026-03-14 09:00:00 UTC"),
                 text: String::from("Telegram code: 123456"),
