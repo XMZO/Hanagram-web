@@ -15,6 +15,7 @@ use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens};
 use steamguard::transport::WebApiTransport;
 use tokio::fs;
 use tokio::task::spawn_blocking;
+use tracing::warn;
 use uuid::Uuid;
 
 use hanagram_web::security::{EncryptedBlob, decrypt_bytes, encrypt_bytes};
@@ -510,6 +511,35 @@ pub(crate) async fn update_managed_account_materials(
 }
 
 pub(crate) async fn query_steam_server_time(http_client: &reqwest::Client) -> Result<i64> {
+    match query_steam_server_time_via_client(http_client).await {
+        Ok(server_time) => Ok(server_time),
+        Err(primary_error) => {
+            warn!(
+                error = %primary_error,
+                "Steam server time query failed on shared client; retrying with a dedicated client"
+            );
+
+            let dedicated_client = reqwest::Client::builder()
+                .user_agent(STEAM_CONFIRMATION_USER_AGENT)
+                .build()
+                .context("failed building dedicated Steam server time client")?;
+            match query_steam_server_time_via_client(&dedicated_client).await {
+                Ok(server_time) => Ok(server_time),
+                Err(secondary_error) => {
+                    let fallback_time = Utc::now().timestamp().max(0);
+                    warn!(
+                        error = %secondary_error,
+                        fallback_time,
+                        "Steam server time query failed again; falling back to local unix time"
+                    );
+                    Ok(fallback_time)
+                }
+            }
+        }
+    }
+}
+
+async fn query_steam_server_time_via_client(http_client: &reqwest::Client) -> Result<i64> {
     let response = http_client
         .post("https://api.steampowered.com/ITwoFactorService/QueryTime/v0001/?format=json")
         .header(reqwest::header::USER_AGENT, STEAM_CONFIRMATION_USER_AGENT)
