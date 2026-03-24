@@ -498,13 +498,6 @@ pub(crate) async fn render_admin_page(
         &password_policy_options,
         enforcement_mode_value(system_settings.password_strength_rules.mode),
     );
-    let bot_settings = normalized_bot_settings(
-        authenticated
-            .user
-            .security
-            .bot_notification_settings
-            .clone(),
-    );
     let usernames_by_id = raw_users
         .iter()
         .map(|user| (user.id.clone(), user.username.clone()))
@@ -610,6 +603,7 @@ pub(crate) async fn render_admin_page(
     context.insert("admin_nav_audit", &translations.admin_nav_audit);
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("settings_href", &settings_href(language));
+    context.insert("notifications_href", &notifications_href(language));
     context.insert("dashboard_label", &translations.nav_dashboard_label);
     context.insert("settings_label", &translations.nav_settings_label);
     context.insert("create_user_title", &translations.admin_create_user_title);
@@ -617,13 +611,18 @@ pub(crate) async fn render_admin_page(
     context.insert("password_label", &translations.login_password);
     context.insert("create_user_label", &translations.admin_create_user_label);
     context.insert("policy_title", &translations.admin_policy_title);
-    context.insert("personal_bot_title", &translations.admin_personal_bot_title);
     context.insert(
-        "personal_bot_description",
-        &translations.admin_personal_bot_description,
+        "notifications_notice_title",
+        &translations.admin_notifications_notice_title,
     );
-    context.insert("bot_settings", &build_bot_settings_view(&bot_settings));
-    context.insert("bot_settings_action", "/settings/bot");
+    context.insert(
+        "notifications_notice_description",
+        &translations.admin_notifications_notice_description,
+    );
+    context.insert(
+        "notifications_notice_action",
+        &translations.admin_notifications_notice_action,
+    );
     context.insert("registration_label", &translations.admin_registration_label);
     context.insert("registration_options", &registration_options);
     context.insert(
@@ -973,10 +972,6 @@ pub(crate) async fn render_admin_page(
     );
     context.insert("argon_iterations", &system_settings.argon_policy.iterations);
     context.insert("argon_lanes", &system_settings.argon_policy.lanes);
-    context.insert(
-        "bot_placeholders",
-        &build_bot_placeholder_hints(language).to_vec(),
-    );
     context.insert("banner", &banner);
     context.insert("current_admin_username", &authenticated.user.username);
     insert_transport_security_warning(&mut context, language, headers);

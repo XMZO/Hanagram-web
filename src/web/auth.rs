@@ -30,6 +30,11 @@ struct LoginPageQuery {
     reauth: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct LanguageSelectionQuery {
+    return_to: Option<String>,
+}
+
 pub(crate) fn public_routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -80,30 +85,31 @@ fn security_settings_target() -> String {
     String::from("/settings#security")
 }
 
-fn sanitized_language_return_path(headers: &HeaderMap) -> String {
-    let fallback = String::from("/login");
-    let Some(raw_referer) = headers
-        .get(header::REFERER)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return fallback;
-    };
+fn sanitize_language_target(raw_target: &str) -> Option<String> {
+    let trimmed = raw_target.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
 
-    let (path, query) = if raw_referer.starts_with('/') {
-        let (path, query) = raw_referer.split_once('?').unwrap_or((raw_referer, ""));
-        (path.to_owned(), query.to_owned())
+    let (path, query, fragment) = if trimmed.starts_with('/') {
+        let (path_and_query, fragment) = trimmed.split_once('#').unwrap_or((trimmed, ""));
+        let (path, query) = path_and_query
+            .split_once('?')
+            .unwrap_or((path_and_query, ""));
+        (path.to_owned(), query.to_owned(), fragment.to_owned())
     } else {
-        let Ok(url) = reqwest::Url::parse(raw_referer) else {
-            return fallback;
+        let Ok(url) = reqwest::Url::parse(trimmed) else {
+            return None;
         };
         (
             url.path().to_owned(),
             url.query().unwrap_or_default().to_owned(),
+            url.fragment().unwrap_or_default().to_owned(),
         )
     };
 
     if path.is_empty() || path.starts_with("/language/") {
-        return fallback;
+        return None;
     }
 
     let filtered_query = query
@@ -111,11 +117,35 @@ fn sanitized_language_return_path(headers: &HeaderMap) -> String {
         .filter(|pair| !pair.is_empty() && !pair.starts_with("lang="))
         .collect::<Vec<_>>();
 
-    if filtered_query.is_empty() {
+    let mut target = if filtered_query.is_empty() {
         path
     } else {
         format!("{path}?{}", filtered_query.join("&"))
+    };
+
+    let sanitized_fragment = fragment
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':' | '.'))
+        .collect::<String>();
+    if !sanitized_fragment.is_empty() {
+        target.push('#');
+        target.push_str(&sanitized_fragment);
     }
+
+    Some(target)
+}
+
+fn sanitized_language_return_path(headers: &HeaderMap, explicit_return_to: Option<&str>) -> String {
+    let fallback = String::from("/login");
+    if let Some(target) = explicit_return_to.and_then(sanitize_language_target) {
+        return target;
+    }
+
+    headers
+        .get(header::REFERER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(sanitize_language_target)
+        .unwrap_or(fallback)
 }
 
 struct PasskeyRelyingParty {
@@ -925,14 +955,16 @@ async fn render_totp_setup_page(
 async fn select_language_handler(
     State(app_state): State<AppState>,
     AxumPath(language_code): AxumPath<String>,
+    Query(query): Query<LanguageSelectionQuery>,
     headers: HeaderMap,
 ) -> Response {
+    let return_target = sanitized_language_return_path(&headers, query.return_to.as_deref());
     let Some(language) = Language::parse(&language_code) else {
-        return Redirect::to(&sanitized_language_return_path(&headers)).into_response();
+        return Redirect::to(&return_target).into_response();
     };
 
     let settings = app_state.system_settings.read().await.clone();
-    let mut response = Redirect::to(&sanitized_language_return_path(&headers)).into_response();
+    let mut response = Redirect::to(&return_target).into_response();
     let cookie_secure = effective_auth_cookie_secure(&settings, &headers);
 
     match set_cookie_header(&build_language_cookie(language, cookie_secure)) {

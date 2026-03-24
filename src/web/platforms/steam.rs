@@ -125,9 +125,75 @@ struct SteamConfirmationActionForm {
 
 const STEAM_CODES_TAB_ID: &str = "codes";
 const STEAM_MANAGE_TAB_ID: &str = "manage";
+const STEAM_CONFIRMATIONS_TAB_ID: &str = "confirmations";
+const STEAM_ISSUES_TAB_ID: &str = "issues";
+const STEAM_ABOUT_TAB_ID: &str = "about";
+const STEAM_FLASH_COOKIE_NAME: &str = "hanagram_steam_flash";
+const STEAM_FLASH_COOKIE_MAX_AGE_SECONDS: i64 = 15;
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SteamFlashCookie {
+    kind: String,
+    message: String,
+    default_tab: String,
+}
 
 fn steam_accounts_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
     runtime.users_dir.join(user_id).join("steam")
+}
+
+fn normalize_workspace_tab(tab: Option<&str>) -> &'static str {
+    match tab {
+        Some(STEAM_MANAGE_TAB_ID) => STEAM_MANAGE_TAB_ID,
+        Some(STEAM_CONFIRMATIONS_TAB_ID) => STEAM_CONFIRMATIONS_TAB_ID,
+        Some(STEAM_ISSUES_TAB_ID) => STEAM_ISSUES_TAB_ID,
+        Some(STEAM_ABOUT_TAB_ID) => STEAM_ABOUT_TAB_ID,
+        _ => STEAM_CODES_TAB_ID,
+    }
+}
+
+fn workspace_redirect_target(tab: Option<&str>) -> String {
+    let tab = normalize_workspace_tab(tab);
+    if tab == STEAM_CODES_TAB_ID {
+        String::from(STEAM_WORKSPACE_PATH)
+    } else {
+        format!("{STEAM_WORKSPACE_PATH}#{tab}")
+    }
+}
+
+fn build_flash_cookie_value(
+    banner: &PageBanner,
+    default_tab: Option<&str>,
+    secure: bool,
+) -> String {
+    let payload = SteamFlashCookie {
+        kind: banner.kind.to_owned(),
+        message: banner.message.clone(),
+        default_tab: normalize_workspace_tab(default_tab).to_owned(),
+    };
+    let encoded = serde_json::to_vec(&payload)
+        .ok()
+        .map(|value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value))
+        .unwrap_or_default();
+    let secure_fragment = if secure { "; Secure" } else { "" };
+    format!(
+        "{STEAM_FLASH_COOKIE_NAME}={encoded}; Path={STEAM_WORKSPACE_PATH}; HttpOnly; SameSite=Lax; Max-Age={STEAM_FLASH_COOKIE_MAX_AGE_SECONDS}{secure_fragment}"
+    )
+}
+
+fn clear_flash_cookie_value(secure: bool) -> String {
+    let secure_fragment = if secure { "; Secure" } else { "" };
+    format!(
+        "{STEAM_FLASH_COOKIE_NAME}=; Path={STEAM_WORKSPACE_PATH}; HttpOnly; SameSite=Lax; Max-Age=0{secure_fragment}"
+    )
+}
+
+fn read_flash_cookie(headers: &HeaderMap) -> Option<SteamFlashCookie> {
+    let raw = find_cookie(headers, STEAM_FLASH_COOKIE_NAME)?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .ok()?;
+    serde_json::from_slice::<SteamFlashCookie>(&decoded).ok()
 }
 
 fn display_storage_path(base_dir: &Path, path: &Path) -> String {
@@ -452,7 +518,7 @@ pub(crate) async fn render_workspace_page(
         &format!("{}#users", admin_href(language)),
     );
     context.insert("banner", &banner);
-    context.insert("default_tab", &default_tab.unwrap_or(STEAM_CODES_TAB_ID));
+    context.insert("default_tab", &normalize_workspace_tab(default_tab));
     context.insert("now", &snapshot.generated_at);
     context.insert("snapshot_api", &steam_snapshot_api_href(language));
     context.insert("confirmations_api", &steam_confirmations_api_href(language));
@@ -486,9 +552,45 @@ async fn workspace_handler(
     Extension(authenticated): Extension<AuthenticatedSession>,
     Query(query): Query<LangQuery>,
     headers: HeaderMap,
-) -> std::result::Result<Html<String>, StatusCode> {
+) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
-    render_workspace_page(&app_state, &authenticated, language, None, None, &headers).await
+    let flash = read_flash_cookie(&headers);
+    let banner = flash.as_ref().map(|flash| {
+        if flash.kind == "error" {
+            PageBanner::error(flash.message.clone())
+        } else {
+            PageBanner::success(flash.message.clone())
+        }
+    });
+    let default_tab = flash
+        .as_ref()
+        .map(|flash| flash.default_tab.as_str())
+        .or(Some(STEAM_CODES_TAB_ID));
+
+    let mut response = match render_workspace_page(
+        &app_state,
+        &authenticated,
+        language,
+        banner,
+        default_tab,
+        &headers,
+    )
+    .await
+    {
+        Ok(html) => html.into_response(),
+        Err(status) => status.into_response(),
+    };
+
+    if flash.is_some() {
+        let settings = app_state.system_settings.read().await.clone();
+        if let Ok(cookie) = set_cookie_header(&clear_flash_cookie_value(
+            effective_auth_cookie_secure(&settings, &headers),
+        )) {
+            response.headers_mut().append(header::SET_COOKIE, cookie);
+        }
+    }
+
+    response
 }
 
 async fn workspace_snapshot_handler(
@@ -527,6 +629,21 @@ async fn confirmations_snapshot_handler(
     }
 }
 
+async fn redirect_with_workspace_banner(
+    app_state: &AppState,
+    headers: &HeaderMap,
+    banner: PageBanner,
+    default_tab: Option<&str>,
+) -> Response {
+    let settings = app_state.system_settings.read().await.clone();
+    let secure = effective_auth_cookie_secure(&settings, headers);
+    let mut response = Redirect::to(&workspace_redirect_target(default_tab)).into_response();
+    if let Ok(cookie) = set_cookie_header(&build_flash_cookie_value(&banner, default_tab, secure)) {
+        response.headers_mut().append(header::SET_COOKIE, cookie);
+    }
+    response
+}
+
 async fn import_mafile_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
@@ -559,16 +676,13 @@ async fn import_mafile_handler(
                             Ok(bytes) => Some(bytes.to_vec()),
                             Err(error) => {
                                 warn!("failed reading uploaded Steam account file: {}", error);
-                                return render_workspace_status(
+                                return redirect_with_workspace_banner(
                                     &app_state,
-                                    &authenticated,
-                                    language,
-                                    Some(PageBanner::error(
-                                        language.translations().steam_upload_read_error_message,
-                                    )),
-                                    Some(STEAM_MANAGE_TAB_ID),
                                     &headers,
-                                    StatusCode::BAD_REQUEST,
+                                    PageBanner::error(
+                                        language.translations().steam_upload_read_error_message,
+                                    ),
+                                    Some(STEAM_MANAGE_TAB_ID),
                                 )
                                 .await;
                             }
@@ -580,16 +694,11 @@ async fn import_mafile_handler(
             Ok(None) => break,
             Err(error) => {
                 warn!("failed reading Steam multipart upload: {}", error);
-                return render_workspace_status(
+                return redirect_with_workspace_banner(
                     &app_state,
-                    &authenticated,
-                    language,
-                    Some(PageBanner::error(
-                        language.translations().steam_upload_read_error_message,
-                    )),
-                    Some(STEAM_MANAGE_TAB_ID),
                     &headers,
-                    StatusCode::BAD_REQUEST,
+                    PageBanner::error(language.translations().steam_upload_read_error_message),
+                    Some(STEAM_MANAGE_TAB_ID),
                 )
                 .await;
             }
@@ -597,32 +706,22 @@ async fn import_mafile_handler(
     }
 
     let Some(file_bytes) = upload_bytes.filter(|value| !value.is_empty()) else {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                language.translations().steam_upload_missing_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(language.translations().steam_upload_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     };
 
     let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
     else {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                language.translations().session_data_locked_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(language.translations().session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     };
@@ -638,31 +737,21 @@ async fn import_mafile_handler(
     .await
     {
         Ok(_) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::success(
-                    language.translations().steam_upload_saved_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::OK,
+                PageBanner::success(language.translations().steam_upload_saved_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Err(error) => {
             warn!("failed importing uploaded Steam account: {}", error);
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    language.translations().steam_upload_write_error_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(language.translations().steam_upload_write_error_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -681,76 +770,53 @@ async fn create_manual_account_handler(
     let steam_id = match form.steam_id.trim().parse::<u64>() {
         Ok(value) => value,
         Err(_) => {
-            return render_workspace_status(
+            return redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_invalid_steam_id_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(translations.steam_invalid_steam_id_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await;
         }
     };
 
     if form.shared_secret.trim().is_empty() {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_missing_shared_secret_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_missing_shared_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
     if steam_platform::validate_shared_secret(&form.shared_secret).is_err() {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_invalid_shared_secret_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_invalid_shared_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
     if !form.identity_secret.trim().is_empty()
         && steam_platform::validate_identity_secret(&form.identity_secret).is_err()
     {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_invalid_identity_secret_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_invalid_identity_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
 
     let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
     else {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(translations.session_data_locked_message)),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     };
@@ -783,29 +849,21 @@ async fn create_manual_account_handler(
     .await
     {
         Ok(_) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::success(translations.steam_manual_saved_message)),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::OK,
+                PageBanner::success(translations.steam_manual_saved_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Err(error) => {
             warn!("failed storing manual Steam account: {}", error);
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_manual_save_failed_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(translations.steam_manual_save_failed_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -823,16 +881,11 @@ async fn update_account_materials_handler(
     let translations = language.translations();
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_account_missing_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::NOT_FOUND,
+            PageBanner::error(translations.steam_account_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
@@ -842,62 +895,44 @@ async fn update_account_materials_handler(
         && form.device_id.trim().is_empty()
         && form.steam_login_secure.trim().is_empty()
     {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_materials_empty_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_materials_empty_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
     if !form.shared_secret.trim().is_empty()
         && steam_platform::validate_shared_secret(&form.shared_secret).is_err()
     {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_invalid_shared_secret_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_invalid_shared_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
     if !form.identity_secret.trim().is_empty()
         && steam_platform::validate_identity_secret(&form.identity_secret).is_err()
     {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_invalid_identity_secret_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_invalid_identity_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
 
     let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
     else {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(translations.session_data_locked_message)),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     };
@@ -917,30 +952,20 @@ async fn update_account_materials_handler(
     .await
     {
         Ok(true) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::success(
-                    translations.steam_materials_updated_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::OK,
+                PageBanner::success(translations.steam_materials_updated_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Ok(false) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_account_missing_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::NOT_FOUND,
+                PageBanner::error(translations.steam_account_missing_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -949,16 +974,11 @@ async fn update_account_materials_handler(
                 "failed updating Steam materials for account {}: {}",
                 account_id, error
             );
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_materials_update_failed_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(translations.steam_materials_update_failed_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -976,42 +996,31 @@ async fn rename_account_handler(
     let translations = language.translations();
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_account_missing_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::NOT_FOUND,
+            PageBanner::error(translations.steam_account_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
     if form.account_name.trim().is_empty() {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(translations.steam_rename_missing_message)),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.steam_rename_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
 
     let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
     else {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(translations.session_data_locked_message)),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::BAD_REQUEST,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     };
@@ -1026,41 +1035,30 @@ async fn rename_account_handler(
     .await
     {
         Ok(true) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::success(translations.steam_renamed_message)),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::OK,
+                PageBanner::success(translations.steam_renamed_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Ok(false) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_account_missing_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::NOT_FOUND,
+                PageBanner::error(translations.steam_account_missing_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Err(error) => {
             warn!("failed renaming Steam account {}: {}", account_id, error);
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(translations.steam_rename_failed_message)),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(translations.steam_rename_failed_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -1078,16 +1076,11 @@ async fn delete_account_handler(
     let translations = language.translations();
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
-        return render_workspace_status(
+        return redirect_with_workspace_banner(
             &app_state,
-            &authenticated,
-            language,
-            Some(PageBanner::error(
-                translations.steam_account_missing_message,
-            )),
-            Some(STEAM_MANAGE_TAB_ID),
             &headers,
-            StatusCode::NOT_FOUND,
+            PageBanner::error(translations.steam_account_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
         )
         .await;
     }
@@ -1095,41 +1088,30 @@ async fn delete_account_handler(
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
     match steam_platform::delete_managed_account(&steam_root, &account_id).await {
         Ok(true) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::success(translations.steam_deleted_message)),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::OK,
+                PageBanner::success(translations.steam_deleted_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Ok(false) => {
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(
-                    translations.steam_account_missing_message,
-                )),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::NOT_FOUND,
+                PageBanner::error(translations.steam_account_missing_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
         Err(error) => {
             warn!("failed deleting Steam account {}: {}", account_id, error);
-            render_workspace_status(
+            redirect_with_workspace_banner(
                 &app_state,
-                &authenticated,
-                language,
-                Some(PageBanner::error(translations.steam_delete_failed_message)),
-                Some(STEAM_MANAGE_TAB_ID),
                 &headers,
-                StatusCode::BAD_REQUEST,
+                PageBanner::error(translations.steam_delete_failed_message),
+                Some(STEAM_MANAGE_TAB_ID),
             )
             .await
         }
@@ -1296,29 +1278,5 @@ async fn confirmation_action_handler(
             )
                 .into_response()
         }
-    }
-}
-
-async fn render_workspace_status(
-    app_state: &AppState,
-    authenticated: &AuthenticatedSession,
-    language: Language,
-    banner: Option<PageBanner>,
-    default_tab: Option<&str>,
-    headers: &HeaderMap,
-    status: StatusCode,
-) -> Response {
-    match render_workspace_page(
-        app_state,
-        authenticated,
-        language,
-        banner,
-        default_tab,
-        headers,
-    )
-    .await
-    {
-        Ok(html) => (status, html).into_response(),
-        Err(status) => status.into_response(),
     }
 }

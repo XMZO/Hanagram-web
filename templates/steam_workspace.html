@@ -20,18 +20,18 @@
                         mono: ["JetBrains Mono", "monospace"]
                     },
                     colors: {
-                        oat: "#f6f1e8",
-                        paper: "#fffaf2",
-                        latte: "#efe3d3",
-                        line: "#ddd0c1",
-                        ink: "#4f433b",
-                        sage: "#91a792",
-                        sageDeep: "#69806b",
-                        peach: "#d8a79b",
-                        butter: "#e7d5ae",
-                        mint: "#eef5ee",
-                        steam: "#35536a",
-                        steamMist: "#e7eef3"
+                        oat: "#e9f0f6",
+                        paper: "#f7fbff",
+                        latte: "#dde8f1",
+                        line: "#c9d7e3",
+                        ink: "#243645",
+                        sage: "#5f978d",
+                        sageDeep: "#416c66",
+                        peach: "#cb8f7a",
+                        butter: "#e0cc92",
+                        mint: "#edf8f4",
+                        steam: "#1f4f72",
+                        steamMist: "#e6f0f7"
                     }
                 }
             }
@@ -81,16 +81,16 @@
         :root { color-scheme: light; }
         body {
             background:
-                radial-gradient(circle at 14% 18%, rgba(53, 83, 106, 0.15), transparent 24%),
-                radial-gradient(circle at 83% 16%, rgba(145, 167, 146, 0.14), transparent 21%),
-                radial-gradient(circle at 80% 84%, rgba(231, 213, 174, 0.16), transparent 24%),
-                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f2ece2 100%);
+                radial-gradient(circle at 11% 15%, rgba(31, 79, 114, 0.18), transparent 24%),
+                radial-gradient(circle at 86% 12%, rgba(89, 129, 164, 0.16), transparent 22%),
+                radial-gradient(circle at 82% 82%, rgba(224, 204, 146, 0.12), transparent 22%),
+                linear-gradient(180deg, #f6fbff 0%, #edf4fa 48%, #e9eff5 100%);
         }
-        .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
+        .paper-shadow { box-shadow: 0 26px 64px rgba(31, 56, 79, 0.10); }
         .paper-grid {
             background-image:
-                linear-gradient(rgba(221, 208, 193, 0.35) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(221, 208, 193, 0.35) 1px, transparent 1px);
+                linear-gradient(rgba(201, 215, 227, 0.34) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(201, 215, 227, 0.34) 1px, transparent 1px);
             background-size: 28px 28px;
             mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 92%);
         }
@@ -98,6 +98,15 @@
             border-color: rgba(53, 83, 106, 0.58) !important;
             background: #dfeaf2 !important;
             box-shadow: 0 0 0 5px rgba(53, 83, 106, 0.08);
+        }
+        .steam-disclosure summary {
+            list-style: none;
+        }
+        .steam-disclosure summary::-webkit-details-marker {
+            display: none;
+        }
+        .steam-disclosure[open] [data-role='steam-disclosure-icon'] {
+            transform: rotate(90deg);
         }
         [data-tab-panel] { display: none; }
         [data-tab-panel].tab-active { display: block; }
@@ -175,38 +184,36 @@
                     ? I18N.sourceUpload
                     : I18N.sourceLegacy;
             return `<article
-                class="rounded-[1.15rem] border border-line/80 bg-white/90 p-4"
+                class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3"
                 data-steam-account
                 data-account-id="${escapeHtml(account.id)}"
                 data-code-expires-at="${escapeHtml(account.code_expires_at_unix || 0)}"
             >
-                <div class="flex items-start justify-between gap-3">
+                <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto] lg:items-center">
                     <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                            <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.14)]"></span>
-                            <p class="truncate text-[1rem] font-semibold text-ink">${escapeHtml(account.account_name)}</p>
-                        </div>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
+                        <div class="flex min-w-0 flex-wrap items-center gap-2">
+                            <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.12)]"></span>
+                            <p class="truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</p>
                             <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(sourceBadge)}</span>
                         </div>
-                    </div>
-                    <span class="rounded-full border border-steam/20 bg-steamMist px-3 py-1 text-xs uppercase tracking-[0.18em] text-steam">${escapeHtml(I18N.copy)}</span>
-                </div>
-
-                <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
-                    <div class="min-w-0">
-                        <p class="text-xs uppercase tracking-[0.22em] text-ink/45">${escapeHtml(I18N.fileLabel)}</p>
-                        <p class="mt-1.5 break-all font-mono text-[0.72rem] text-ink/55">${escapeHtml(account.storage_file)}</p>
+                        <div class="mt-2 flex flex-wrap items-center gap-2">
+                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
+                            <p class="min-w-0 truncate text-[0.76rem] text-ink/48 lg:max-w-[26rem]">${escapeHtml(account.storage_file)}</p>
+                        </div>
                     </div>
                     <button
                         type="button"
                         data-code="${escapeHtml(account.current_code || "")}"
                         onclick="copySteamCode(this)"
-                        class="w-full rounded-[1rem] border border-line/80 bg-white/92 px-3 py-2.5 text-left transition hover:border-steam hover:bg-[#f3f7fa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-steam/30 sm:min-w-[9rem]"
+                        class="w-full rounded-[0.95rem] border border-line/80 bg-white px-3 py-2.5 text-left transition hover:border-steam hover:bg-[#f3f7fa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-steam/30 lg:min-w-[11rem]"
                     >
-                        <p data-role="steam-code-label" class="text-[0.65rem] uppercase tracking-[0.2em] text-ink/45">${escapeHtml(I18N.currentCodeLabel)}</p>
-                        <p class="mt-1.5 font-mono text-[1.42rem] font-semibold tracking-[0.18em] text-ink">${escapeHtml(account.current_code || "")}</p>
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <p data-role="steam-code-label" class="text-[0.62rem] uppercase tracking-[0.2em] text-ink/45">${escapeHtml(I18N.currentCodeLabel)}</p>
+                                <p class="mt-1 font-mono text-[1.34rem] font-semibold tracking-[0.18em] text-ink">${escapeHtml(account.current_code || "")}</p>
+                            </div>
+                            <span class="rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.64rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(I18N.copy)}</span>
+                        </div>
                         <p data-role="steam-refresh-label" class="mt-1.5 min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
                     </button>
                 </div>
@@ -594,14 +601,30 @@
             }
         }
 
+        function syncLanguageSwitchTargets() {
+            const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+            document.querySelectorAll("[data-role='language-link']").forEach((link) => {
+                const baseHref = link.dataset.baseHref || link.getAttribute("href") || "";
+                if (!baseHref) { return; }
+                link.dataset.baseHref = baseHref;
+                const url = new URL(baseHref, window.location.origin);
+                url.searchParams.set("return_to", returnTo);
+                link.setAttribute("href", `${url.pathname}${url.search}`);
+            });
+        }
+
         window.addEventListener("DOMContentLoaded", () => {
             document.querySelectorAll("[data-tab-button]").forEach((button) => {
                 button.addEventListener("click", () => {
                     window.location.hash = button.dataset.tabButton || "codes";
                 });
             });
-            window.addEventListener("hashchange", syncSteamTabFromHash);
+            window.addEventListener("hashchange", () => {
+                syncSteamTabFromHash();
+                syncLanguageSwitchTargets();
+            });
             syncSteamTabFromHash();
+            syncLanguageSwitchTargets();
 
             document.querySelectorAll("[data-confirmation-refresh]").forEach((button) => {
                 button.addEventListener("click", () => {
@@ -642,22 +665,23 @@
     data-default-tab="{{ default_tab }}"
 >
     <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
-    <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-        <section class="paper-shadow overflow-hidden rounded-[1.55rem] border border-line/80 bg-paper/95">
-            <div class="grid gap-4 px-4 py-4 xl:grid-cols-[minmax(0,1fr),minmax(22rem,24rem)] xl:px-5 xl:py-5">
+    <main class="mx-auto max-w-[1380px] px-4 py-5 sm:px-6 lg:px-8">
+        <section class="paper-shadow overflow-hidden rounded-[1.65rem] border border-line/90 bg-[linear-gradient(135deg,rgba(255,255,255,.97),rgba(234,243,250,.95))]">
+            <div class="h-1.5 bg-gradient-to-r from-[#153246] via-[#2b587a] to-[#7ea6c4]"></div>
+            <div class="grid gap-5 px-4 py-4 xl:grid-cols-[minmax(0,1.25fr),minmax(22rem,24rem)] xl:px-5 xl:py-5">
                 <div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <span class="inline-flex items-center rounded-full border border-steam/20 bg-steamMist px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-steam">
+                        <span class="inline-flex items-center rounded-full border border-[#244963]/10 bg-[#173145] px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-white">
                             {{ i18n.steam_workspace_reserved_badge }}
                         </span>
-                        <span class="inline-flex items-center rounded-full border border-line bg-white/90 px-3 py-1.5 text-sm text-ink/72">
+                        <span class="inline-flex items-center rounded-full border border-white/70 bg-white/76 px-3 py-1.5 text-sm text-ink/76 backdrop-blur">
                             {{ current_username }}
                         </span>
                     </div>
-                    <h1 class="mt-3 font-display text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.35rem]">{{ i18n.steam_workspace_title }}</h1>
-                    <p class="mt-2 max-w-3xl text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_description }}</p>
+                    <h1 class="mt-3 font-display text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.45rem]">{{ i18n.steam_workspace_title }}</h1>
+                    <p class="mt-2 max-w-3xl text-[0.95rem] leading-7 text-ink/72">{{ i18n.steam_workspace_description }}</p>
 
-                    <div class="mt-4 inline-flex flex-wrap rounded-[1rem] border border-line bg-white/86 p-1.5">
+                    <div class="mt-5 inline-flex flex-wrap rounded-[1.1rem] border border-white/70 bg-white/72 p-1.5 shadow-[0_10px_30px_rgba(31,79,114,0.08)] backdrop-blur">
                         <button type="button" data-tab-button="codes" class="rounded-[0.9rem] px-3.5 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_codes_tab_label }}</button>
                         <button type="button" data-tab-button="manage" class="rounded-[0.9rem] px-3.5 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_manage_tab_label }}</button>
                         <button type="button" data-tab-button="confirmations" class="rounded-[0.9rem] px-3.5 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_confirmations_tab_label }}</button>
@@ -667,7 +691,7 @@
                 </div>
 
                 <div class="grid gap-3">
-                    <div class="rounded-[1.15rem] border border-line/80 bg-white/86 p-3.5">
+                    <div class="rounded-[1.2rem] border border-white/75 bg-white/72 p-3.5 shadow-[0_16px_40px_rgba(31,79,114,0.08)] backdrop-blur">
                         <div class="flex flex-col gap-3">
                             <div class="flex flex-wrap items-center justify-between gap-3">
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
@@ -679,6 +703,7 @@
                                     {% for option in languages %}
                                     <a
                                         href="{{ option.href }}"
+                                        data-role="language-link"
                                         hreflang="{{ option.code }}"
                                         class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
                                     >
@@ -710,7 +735,7 @@
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                        <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
+                        <div class="rounded-[1.05rem] border border-line/85 bg-white/80 px-4 py-3 backdrop-blur-sm">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_accounts }}</p>
                             <p data-role="steam-total-count" class="mt-1.5 text-lg font-semibold text-ink">{{ total_accounts }}</p>
                         </div>
@@ -718,11 +743,11 @@
                             <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/72">{{ i18n.steam_codes_title }}</p>
                             <p data-role="steam-ready-count" class="mt-1.5 text-lg font-semibold text-sageDeep">{{ ready_accounts }}</p>
                         </div>
-                        <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
+                        <div class="rounded-[1.05rem] border border-line/85 bg-white/80 px-4 py-3 backdrop-blur-sm">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_managed_accounts_label }}</p>
                             <p data-role="steam-managed-count" class="mt-1.5 text-lg font-semibold text-ink">{{ managed_accounts }}</p>
                         </div>
-                        <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
+                        <div class="rounded-[1.05rem] border border-line/85 bg-white/80 px-4 py-3 backdrop-blur-sm">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_encrypted_storage_label }}</p>
                             <p data-role="steam-encrypted-count" class="mt-1.5 text-lg font-semibold text-ink">{{ encrypted_accounts }}</p>
                         </div>
@@ -754,7 +779,7 @@
 
         <div class="mt-4 space-y-4">
             <section data-tab-panel="codes" class="tab-active">
-                <article id="codes" class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                <article id="codes" class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_codes_tab_label }}</p>
@@ -763,45 +788,43 @@
                         <p class="max-w-3xl text-sm leading-6 text-ink/68">{{ i18n.steam_codes_description }}</p>
                     </div>
 
-                    <div class="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3" data-role="steam-codes-list">
+                    <div class="mt-4 space-y-2.5" data-role="steam-codes-list">
                         {% if ready_accounts > 0 %}
                         {% for account in snapshot.accounts %}
                         {% if account.current_code %}
                         <article
-                            class="rounded-[1.15rem] border border-line/80 bg-white/90 p-4"
+                            class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3"
                             data-steam-account
                             data-account-id="{{ account.id }}"
                             data-code-expires-at="{{ account.code_expires_at_unix }}"
                         >
-                            <div class="flex items-start justify-between gap-3">
+                            <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto] lg:items-center">
                                 <div class="min-w-0">
-                                    <div class="flex items-center gap-2">
-                                        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.14)]"></span>
-                                        <p class="truncate text-[1rem] font-semibold text-ink">{{ account.account_name }}</p>
-                                    </div>
-                                    <div class="mt-2 flex flex-wrap gap-2">
-                                        <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.12)]"></span>
+                                        <p class="truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</p>
                                         <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">
                                             {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
                                         </span>
                                     </div>
-                                </div>
-                                <span class="rounded-full border border-steam/20 bg-steamMist px-3 py-1 text-xs uppercase tracking-[0.18em] text-steam">{{ i18n.copy }}</span>
-                            </div>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
-                                <div class="min-w-0">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_file_label }}</p>
-                                    <p class="mt-1.5 break-all font-mono text-[0.72rem] text-ink/55">{{ account.storage_file }}</p>
+                                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                                        <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                        <p class="min-w-0 truncate text-[0.76rem] text-ink/48 lg:max-w-[26rem]">{{ account.storage_file }}</p>
+                                    </div>
                                 </div>
                                 <button
                                     type="button"
                                     data-code="{{ account.current_code }}"
                                     onclick="copySteamCode(this)"
-                                    class="w-full rounded-[1rem] border border-line/80 bg-white/92 px-3 py-2.5 text-left transition hover:border-steam hover:bg-[#f3f7fa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-steam/30 sm:min-w-[9rem]"
+                                    class="w-full rounded-[0.95rem] border border-line/80 bg-white px-3 py-2.5 text-left transition hover:border-steam hover:bg-[#f3f7fa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-steam/30 lg:min-w-[11rem]"
                                 >
-                                    <p data-role="steam-code-label" class="text-[0.65rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.steam_current_code_label }}</p>
-                                    <p class="mt-1.5 font-mono text-[1.42rem] font-semibold tracking-[0.18em] text-ink">{{ account.current_code }}</p>
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div>
+                                            <p data-role="steam-code-label" class="text-[0.62rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.steam_current_code_label }}</p>
+                                            <p class="mt-1 font-mono text-[1.34rem] font-semibold tracking-[0.18em] text-ink">{{ account.current_code }}</p>
+                                        </div>
+                                        <span class="rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.64rem] uppercase tracking-[0.16em] text-steam">{{ i18n.copy }}</span>
+                                    </div>
                                     <p data-role="steam-refresh-label" class="mt-1.5 min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
                                 </button>
                             </div>
@@ -809,7 +832,7 @@
                         {% endif %}
                         {% endfor %}
                         {% else %}
-                        <article class="rounded-[1.2rem] border border-dashed border-line bg-white/78 px-5 py-8 text-center lg:col-span-2 xl:col-span-3">
+                        <article class="rounded-[1.2rem] border border-dashed border-line bg-white/78 px-5 py-8 text-center">
                             <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.steam_empty_title }}</p>
                             <p class="mx-auto mt-3 max-w-xl text-base leading-7 text-ink/70">{{ i18n.steam_empty_description }}</p>
                             <div class="mx-auto mt-4 max-w-3xl rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-left">
@@ -825,7 +848,7 @@
             <section data-tab-panel="manage">
                 <div class="grid gap-4 xl:grid-cols-[minmax(0,24rem),minmax(0,1fr)]">
                     <div class="space-y-4">
-                        <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                        <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_upload_title }}</p>
                                 <h2 class="mt-1.5 font-display text-xl font-semibold">{{ i18n.steam_upload_title }}</h2>
@@ -845,7 +868,7 @@
                             </form>
                         </article>
 
-                        <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                        <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_manual_title }}</p>
                                 <h2 class="mt-1.5 font-display text-xl font-semibold">{{ i18n.steam_manual_title }}</h2>
@@ -888,7 +911,7 @@
                         </article>
                     </div>
 
-                    <article id="manage" class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <article id="manage" class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                         <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_manage_tab_label }}</p>
@@ -903,40 +926,60 @@
                         </div>
                         <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_managed_list_description }}</p>
 
-                        <div class="mt-4 grid max-h-[44rem] gap-3 overflow-auto pr-1 xl:grid-cols-2">
+                        <div class="mt-4 max-h-[44rem] space-y-2.5 overflow-auto pr-1">
                             {% if total_accounts > 0 %}
                             {% for account in snapshot.accounts %}
-                            <article
+                            <details
                                 data-manage-account
                                 data-search="{{ account.account_name }} {{ account.steam_id | default(value='') }} {{ account.storage_file }} {{ account.imported_from | default(value='') }}"
-                                class="rounded-[1.15rem] border border-line/80 bg-white/90 p-4"
+                                class="steam-disclosure rounded-[1rem] border border-line/80 bg-white/92"
                             >
-                                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                    <div class="min-w-0">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <span class="inline-flex h-2.5 w-2.5 rounded-full {% if account.current_code %}bg-steam{% else %}bg-peach{% endif %}"></span>
-                                            <h3 class="truncate text-[1rem] font-semibold text-ink">{{ account.account_name }}</h3>
+                                <summary class="cursor-pointer px-3.5 py-3.5">
+                                    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                        <div class="min-w-0">
+                                            <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                                <span class="inline-flex h-2.5 w-2.5 rounded-full {% if account.current_code %}bg-steam{% else %}bg-peach{% endif %}"></span>
+                                                <h3 class="truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</h3>
+                                                <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                            </div>
+                                            <div class="mt-2 flex flex-wrap gap-2">
+                                                <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
+                                                    {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
+                                                </span>
+                                                <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+                                                    {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
+                                                </span>
+                                                <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
+                                                    {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div class="mt-2 flex flex-wrap gap-2">
-                                            <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
-                                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
-                                                {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
-                                            </span>
-                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                                {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
-                                            </span>
-                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
-                                                {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
-                                            </span>
+
+                                        <div class="flex items-center justify-between gap-3 lg:justify-end">
+                                            <div class="text-right">
+                                                {% if account.updated_at %}
+                                                <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.admin_audit_updated_label }}</p>
+                                                <p class="mt-1 font-mono text-[0.72rem] text-ink/58">{{ account.updated_at }}</p>
+                                                {% elif account.imported_from %}
+                                                <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_imported_from_label }}</p>
+                                                <p class="mt-1 max-w-[12rem] truncate text-[0.76rem] text-ink/58">{{ account.imported_from }}</p>
+                                                {% endif %}
+                                            </div>
+                                            <div class="inline-flex items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
+                                                <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                <span>{{ i18n.open_details }}</span>
+                                            </div>
                                         </div>
                                     </div>
+                                </summary>
 
-                                    <div class="grid gap-2 sm:grid-cols-2 lg:max-w-[30rem]">
-                                        <div class="rounded-[0.95rem] border border-line/80 bg-paper px-3 py-2.5">
+                                <div class="border-t border-line/70 px-3.5 py-3.5">
+                                    <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                                        <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_file_label }}</p>
                                             <p class="mt-1.5 break-all font-mono text-[0.72rem] text-ink/62">{{ account.storage_file }}</p>
                                         </div>
-                                        <div class="rounded-[0.95rem] border border-line/80 bg-paper px-3 py-2.5">
+                                        <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_confirmation_title }}</p>
                                             <p class="mt-1.5 text-sm text-ink/72">
                                                 {% if account.confirmation_ready %}
@@ -949,69 +992,74 @@
                                             </p>
                                         </div>
                                         {% if account.imported_from %}
-                                        <div class="rounded-[0.95rem] border border-line/80 bg-paper px-3 py-2.5">
+                                        <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_imported_from_label }}</p>
                                             <p class="mt-1.5 break-all text-sm text-ink/72">{{ account.imported_from }}</p>
                                         </div>
                                         {% endif %}
                                         {% if account.updated_at %}
-                                        <div class="rounded-[0.95rem] border border-line/80 bg-paper px-3 py-2.5">
+                                        <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.admin_audit_updated_label }}</p>
                                             <p class="mt-1.5 font-mono text-[0.72rem] text-ink/62">{{ account.updated_at }}</p>
                                         </div>
                                         {% endif %}
                                     </div>
-                                </div>
 
-                                {% if account.can_manage %}
-                                <div class="mt-3 space-y-3">
-                                    <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]">
-                                        <form method="post" action="{{ account.rename_action }}" class="flex flex-col gap-2 sm:flex-row">
-                                            <input type="hidden" name="lang" value="{{ lang }}">
-                                            <input name="account_name" type="text" maxlength="96" value="{{ account.account_name }}" class="min-w-0 flex-1 rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                            <button type="submit" class="rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_rename_button }}</button>
-                                        </form>
+                                    {% if account.can_manage %}
+                                    <div class="mt-3 space-y-3">
+                                        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]">
+                                            <form method="post" action="{{ account.rename_action }}" class="flex flex-col gap-2 sm:flex-row">
+                                                <input type="hidden" name="lang" value="{{ lang }}">
+                                                <input name="account_name" type="text" maxlength="96" value="{{ account.account_name }}" class="min-w-0 flex-1 rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                <button type="submit" class="rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_rename_button }}</button>
+                                            </form>
 
-                                        <form method="post" action="{{ account.delete_action }}" data-confirm-submit="{{ i18n.steam_delete_confirm_message }}">
-                                            <input type="hidden" name="lang" value="{{ lang }}">
-                                            <button type="submit" class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_delete_button }}</button>
-                                        </form>
+                                            <form method="post" action="{{ account.delete_action }}" data-confirm-submit="{{ i18n.steam_delete_confirm_message }}">
+                                                <input type="hidden" name="lang" value="{{ lang }}">
+                                                <button type="submit" class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_delete_button }}</button>
+                                            </form>
+                                        </div>
+
+                                        <details class="steam-disclosure rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3">
+                                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_materials_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_materials_description }}</p>
+                                            <form method="post" action="{{ account.update_material_action }}" class="mt-3 grid gap-3">
+                                                <input type="hidden" name="lang" value="{{ lang }}">
+                                                <div class="grid gap-3 sm:grid-cols-2">
+                                                    <label class="block">
+                                                        <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_shared_secret_label }}</span>
+                                                        <input name="shared_secret" type="text" placeholder="{{ i18n.steam_shared_secret_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    </label>
+                                                    <label class="block">
+                                                        <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_identity_secret_label }}</span>
+                                                        <input name="identity_secret" type="text" placeholder="{{ i18n.steam_identity_secret_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    </label>
+                                                    <label class="block">
+                                                        <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_device_id_label }}</span>
+                                                        <input name="device_id" type="text" placeholder="{{ i18n.steam_device_id_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    </label>
+                                                    <label class="block">
+                                                        <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_steam_login_secure_label }}</span>
+                                                        <input name="steam_login_secure" type="text" placeholder="{{ i18n.steam_steam_login_secure_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    </label>
+                                                </div>
+                                                <p class="text-xs leading-6 text-ink/58">{{ i18n.steam_materials_keep_hint }}</p>
+                                                <button type="submit" class="rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_materials_save_button }}</button>
+                                            </form>
+                                        </details>
                                     </div>
-
-                                    <details class="rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3">
-                                        <summary class="cursor-pointer text-sm font-medium text-ink">{{ i18n.steam_materials_title }}</summary>
-                                        <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_materials_description }}</p>
-                                        <form method="post" action="{{ account.update_material_action }}" class="mt-3 grid gap-3">
-                                            <input type="hidden" name="lang" value="{{ lang }}">
-                                            <div class="grid gap-3 sm:grid-cols-2">
-                                                <label class="block">
-                                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_shared_secret_label }}</span>
-                                                    <input name="shared_secret" type="text" placeholder="{{ i18n.steam_shared_secret_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                                </label>
-                                                <label class="block">
-                                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_identity_secret_label }}</span>
-                                                    <input name="identity_secret" type="text" placeholder="{{ i18n.steam_identity_secret_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                                </label>
-                                                <label class="block">
-                                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_device_id_label }}</span>
-                                                    <input name="device_id" type="text" placeholder="{{ i18n.steam_device_id_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                                </label>
-                                                <label class="block">
-                                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_steam_login_secure_label }}</span>
-                                                    <input name="steam_login_secure" type="text" placeholder="{{ i18n.steam_steam_login_secure_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                                </label>
-                                            </div>
-                                            <p class="text-xs leading-6 text-ink/58">{{ i18n.steam_materials_keep_hint }}</p>
-                                            <button type="submit" class="rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_materials_save_button }}</button>
-                                        </form>
-                                    </details>
+                                    {% else %}
+                                    <div class="mt-3 rounded-[1rem] border border-dashed border-line bg-paper/80 px-3.5 py-3 text-sm leading-6 text-ink/58">
+                                        {{ i18n.steam_manage_legacy_hint }}
+                                    </div>
+                                    {% endif %}
                                 </div>
-                                {% else %}
-                                <div class="mt-3 rounded-[1rem] border border-dashed border-line bg-paper/80 px-3.5 py-3 text-sm leading-6 text-ink/58">
-                                    {{ i18n.steam_manage_legacy_hint }}
-                                </div>
-                                {% endif %}
-                            </article>
+                            </details>
                             {% endfor %}
                             <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52"></div>
                             {% else %}
@@ -1023,7 +1071,7 @@
             </section>
 
             <section data-tab-panel="confirmations">
-                <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_confirmations_tab_label }}</p>
@@ -1052,7 +1100,7 @@
             </section>
 
             <section data-tab-panel="issues">
-                <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_issues_tab_label }}</p>
@@ -1078,31 +1126,31 @@
 
             <section data-tab-panel="about">
                 <div class="grid gap-4 xl:grid-cols-2">
-                    <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_scan_path_label }}</p>
                         <div class="mt-4 rounded-[1.05rem] border border-line/80 bg-paper px-4 py-3">
                             <p class="break-all font-mono text-[0.78rem] leading-6 text-ink/62">{{ steam_accounts_dir }}</p>
                         </div>
                     </article>
 
-                    <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_managed_storage_path_label }}</p>
                         <div class="mt-4 rounded-[1.05rem] border border-line/80 bg-paper px-4 py-3">
                             <p class="break-all font-mono text-[0.78rem] leading-6 text-ink/62">{{ steam_managed_dir }}</p>
                         </div>
                     </article>
 
-                    <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_time_source_title }}</p>
                         <p class="mt-3 text-sm leading-7 text-ink/72">{{ i18n.steam_time_source_description }}</p>
                     </article>
 
-                    <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_storage_summary_title }}</p>
                         <p class="mt-3 text-sm leading-7 text-ink/72">{{ i18n.steam_storage_summary_description }}</p>
                     </article>
 
-                    <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4 xl:col-span-2">
+                    <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm xl:col-span-2">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_confirmation_title }}</p>
                         <p class="mt-3 text-sm leading-7 text-ink/72">{{ i18n.steam_confirmation_help_text }}</p>
                     </article>

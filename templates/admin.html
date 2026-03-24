@@ -704,8 +704,18 @@
                         <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="security" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ totp_policy_label }} / {{ password_policy_label }}</button>
                         <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ session_ttl_label }} / {{ lockout_threshold_label }}</button>
                         <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="system" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ argon_memory_label }} / {{ audit_title }}</button>
-                        <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="bot" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ personal_bot_title }}</button>
                     </div>
+
+                    <section class="rounded-[1.35rem] border border-sage/20 bg-mist/80 p-3.5 sm:p-4">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/75">{{ settings_nav_notifications }}</p>
+                                <h3 class="mt-2 text-lg font-semibold text-ink">{{ notifications_notice_title }}</h3>
+                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ notifications_notice_description }}</p>
+                            </div>
+                            <a href="{{ notifications_href }}" class="inline-flex shrink-0 items-center justify-center rounded-full border border-sage/30 bg-white px-4 py-2 text-sm font-medium text-sageDeep transition hover:border-sage hover:bg-mist/70">{{ notifications_notice_action }}</a>
+                        </div>
+                    </section>
 
                     <form method="post" action="/admin/settings" class="space-y-4">
                         <input type="hidden" name="lang" value="{{ lang }}">
@@ -809,62 +819,6 @@
                             </div>
                         </section>
                     </form>
-
-                    <section data-admin-segment-panel="policy" data-admin-segment-id="bot" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ personal_bot_title }}</p>
-                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ personal_bot_description }}</p>
-                            </div>
-                            <span class="rounded-full border {% if bot_settings.enabled %}border-sage/35 bg-mist text-sageDeep{% else %}border-line bg-paper text-ink/72{% endif %} px-3 py-1 text-sm font-medium">
-                                {% if bot_settings.enabled %}{{ i18n.bot_status_enabled }}{% else %}{{ i18n.bot_status_disabled }}{% endif %}
-                            </span>
-                        </div>
-
-                        <div class="tab-strip mt-3 flex gap-2 overflow-x-auto pb-1">
-                            <button type="button" data-admin-segment-tab="policy-bot" data-admin-segment-target="settings" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ personal_bot_title }}</button>
-                            <button type="button" data-admin-segment-tab="policy-bot" data-admin-segment-target="placeholders" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.bot_placeholders_title }}</button>
-                        </div>
-
-                        <section data-admin-segment-panel="policy-bot" data-admin-segment-id="settings" class="hidden mt-3">
-                            <form method="post" action="{{ bot_settings_action }}" class="grid gap-3">
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <input type="hidden" name="return_to" value="admin">
-                                <div class="grid gap-3 xl:grid-cols-[minmax(0,1.08fr),minmax(0,0.92fr)]">
-                                    <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3">
-                                            <input type="checkbox" name="enabled" value="1" class="mt-1 h-4 w-4" {% if bot_settings.enabled %}checked{% endif %}>
-                                            <span>
-                                                <span class="block text-sm font-medium text-ink">{{ i18n.bot_enabled_label }}</span>
-                                                <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
-                                            </span>
-                                        </label>
-                                        <div class="mt-3 grid gap-3">
-                                            <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_token_label }}</span><input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                            <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_chat_id_label }}</span><input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        </div>
-                                    </article>
-                                    <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_template_label }}</span><textarea name="template" rows="9" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-sage">{{ bot_settings.template }}</textarea></label>
-                                    </article>
-                                </div>
-                                <div class="flex justify-end">
-                                    <button type="submit" class="rounded-full bg-sage px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ i18n.bot_save }}</button>
-                                </div>
-                            </form>
-                        </section>
-
-                        <section data-admin-segment-panel="policy-bot" data-admin-segment-id="placeholders" class="hidden mt-3">
-                            <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                {% for placeholder in bot_placeholders %}
-                                <article class="rounded-[1rem] border border-line bg-paper/90 px-3.5 py-3">
-                                    <p class="font-mono text-sm font-semibold text-ink">{{ placeholder.key }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ placeholder.description }}</p>
-                                </article>
-                                {% endfor %}
-                            </div>
-                        </section>
-                    </section>
                 </section>
                 <section data-admin-pane="audit" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
