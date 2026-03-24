@@ -9,6 +9,7 @@ COPY Cargo.toml ./
 COPY Cargo.lock ./
 COPY src ./src
 COPY templates ./templates
+COPY vendor ./vendor
 
 RUN cargo build --release --locked --bin hanagram-web --bin reset_admin
 

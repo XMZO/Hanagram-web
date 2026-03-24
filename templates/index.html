@@ -1175,73 +1175,73 @@
         <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.id }}" class="hidden fixed inset-0 z-50">
             <div class="absolute inset-0 bg-[rgba(79,67,59,0.12)] sm:bg-[linear-gradient(90deg,rgba(79,67,59,0.02)_0%,rgba(79,67,59,0.04)_56%,rgba(79,67,59,0.08)_76%,rgba(79,67,59,0.12)_100%)]" data-modal-close="session-modal-{{ loop.index }}"></div>
 
-            <div class="pointer-events-none relative flex min-h-screen items-end justify-center px-0 pt-10 sm:items-center sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
-                <section class="modal-panel pointer-events-auto relative flex max-h-[86vh] w-full flex-col overflow-hidden overscroll-contain rounded-t-[1.9rem] border border-line/80 p-4 sm:max-h-[calc(100vh-2rem)] sm:w-[28rem] sm:rounded-[1.55rem] sm:p-4">
-                    <div class="flex flex-col gap-3 border-b border-line pb-4">
+            <div class="pointer-events-none relative flex min-h-screen items-end justify-center px-2 pb-2 pt-8 sm:items-center sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
+                <section class="modal-panel pointer-events-auto relative flex max-h-[min(82vh,44rem)] w-full max-w-[26rem] flex-col overflow-hidden overscroll-contain rounded-[1.45rem] border border-line/80 p-3.5 sm:max-h-[calc(100vh-2rem)] sm:w-[28rem] sm:rounded-[1.55rem] sm:p-4">
+                    <div class="flex flex-col gap-2.5 border-b border-line pb-3.5 sm:pb-4">
                         <div class="min-w-0">
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.session_details }}</p>
-                            <h2 data-role="session-name" class="mt-2 font-display text-[1.7rem] font-semibold leading-tight text-ink sm:text-[1.95rem]">{{ session.key }}</h2>
-                            <p data-role="session-phone" class="mt-3 inline-flex rounded-full border border-line bg-white px-3 py-1 font-mono text-[0.78rem] text-ink/58">{{ session.phone }}</p>
+                            <h2 data-role="session-name" class="mt-1.5 break-words font-display text-[1.28rem] font-semibold leading-tight text-ink sm:mt-2 sm:text-[1.95rem]">{{ session.key }}</h2>
+                            <p data-role="session-phone" class="mt-2 inline-flex max-w-full break-all rounded-full border border-line bg-white px-3 py-1 font-mono text-[0.72rem] text-ink/58 sm:mt-3 sm:text-[0.78rem]">{{ session.phone }}</p>
                         </div>
 
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-sm {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
+                            <span data-role="status-badge" class="rounded-full border px-3 py-1.5 text-xs sm:text-sm {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
                                 {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
                             </span>
-                            <button type="button" class="rounded-full border border-line bg-white px-4 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink" data-modal-close="session-modal-{{ loop.index }}">
+                            <button type="button" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-xs text-ink/75 transition hover:border-sage hover:text-ink sm:px-4 sm:text-sm" data-modal-close="session-modal-{{ loop.index }}">
                                 {{ i18n.close }}
                             </button>
                         </div>
                     </div>
 
-                    <div class="tab-strip mt-4 flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-session-pane-tab data-session-pane-target="overview" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.session_modal_overview_tab }}</button>
-                        <button type="button" data-session-pane-tab data-session-pane-target="tools" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.session_modal_tools_tab }}</button>
-                        <button type="button" data-session-pane-tab data-session-pane-target="messages" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.session_modal_messages_tab }}</button>
+                    <div class="tab-strip mt-3.5 flex gap-2 overflow-x-auto pb-1 sm:mt-4">
+                        <button type="button" data-session-pane-tab data-session-pane-target="overview" class="whitespace-nowrap rounded-full border bg-white px-3 py-1.5 text-xs font-medium text-ink/74 transition hover:border-sage sm:px-4 sm:py-2 sm:text-sm">{{ i18n.session_modal_overview_tab }}</button>
+                        <button type="button" data-session-pane-tab data-session-pane-target="tools" class="whitespace-nowrap rounded-full border bg-white px-3 py-1.5 text-xs font-medium text-ink/74 transition hover:border-sage sm:px-4 sm:py-2 sm:text-sm">{{ i18n.session_modal_tools_tab }}</button>
+                        <button type="button" data-session-pane-tab data-session-pane-target="messages" class="whitespace-nowrap rounded-full border bg-white px-3 py-1.5 text-xs font-medium text-ink/74 transition hover:border-sage sm:px-4 sm:py-2 sm:text-sm">{{ i18n.session_modal_messages_tab }}</button>
                     </div>
 
-                    <p data-role="session-error" class="mt-4 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
+                    <p data-role="session-error" class="mt-3.5 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3.5 py-3 text-sm leading-6 text-[#98675f] sm:mt-4 sm:px-4 {% if not session.status.error %}hidden{% endif %}">
                         {{ session.status.error | default(value="") }}
                     </p>
 
-                    <div class="mt-4 min-h-0 flex-1">
-                        <section data-session-pane="overview" class="modal-pane-scroll hidden h-full overflow-y-auto pr-1">
+                    <div class="mt-3.5 min-h-0 flex-1 sm:mt-4">
+                        <section data-session-pane="overview" class="modal-pane-scroll hidden h-full overflow-y-auto sm:pr-1">
                             <div class="grid gap-3">
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-4 py-4">
+                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-3.5 py-3.5 sm:px-4 sm:py-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.latest_otp }}</p>
-                                    <p data-role="latest-code" class="mt-3 font-mono text-[1.85rem] font-semibold tracking-[0.16em] text-ink sm:text-[2.2rem]">
+                                    <p data-role="latest-code" class="mt-2.5 break-all font-mono text-[1.45rem] font-semibold tracking-[0.12em] text-ink sm:mt-3 sm:text-[2.2rem] sm:tracking-[0.16em]">
                                         {{ session.latest_code | default(value=i18n.otp_placeholder) }}
                                     </p>
-                                    <p class="mt-4 text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.latest_update_label }}</p>
+                                    <p class="mt-3.5 text-xs uppercase tracking-[0.22em] text-ink/45 sm:mt-4">{{ i18n.latest_update_label }}</p>
                                     <p data-role="latest-update" class="mt-2 font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
                                 </article>
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-4 py-4">
+                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-3.5 py-3.5 sm:px-4 sm:py-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.session_note_label }}</p>
-                                    <p data-role="session-note" class="mt-3 text-sm leading-7 text-ink/68">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
+                                    <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/68 sm:mt-3 sm:leading-7">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
                                 </article>
                             </div>
                         </section>
 
-                        <section data-session-pane="tools" class="modal-pane-scroll hidden h-full overflow-y-auto pr-1">
+                        <section data-session-pane="tools" class="modal-pane-scroll hidden h-full overflow-y-auto sm:pr-1">
                             <div class="grid gap-3">
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
+                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                     <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.export_session_title }}</p>
                                     <div class="mt-3 flex flex-wrap gap-2.5">
-                                        <a href="/sessions/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]" download>{{ i18n.export_file }}</a>
-                                        <button type="button" data-label="{{ i18n.export_string }}" data-export-url="/sessions/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed]" onclick="fetchSessionString(this)">{{ i18n.export_string }}</button>
+                                        <a href="/sessions/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] sm:px-4 sm:text-sm" download>{{ i18n.export_file }}</a>
+                                        <button type="button" data-label="{{ i18n.export_string }}" data-export-url="/sessions/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" class="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed] sm:px-4 sm:text-sm" onclick="fetchSessionString(this)">{{ i18n.export_string }}</button>
                                     </div>
                                     <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="mt-3 hidden rounded-[1rem] border border-line/70 bg-[rgba(252,248,242,0.98)] p-3.5">
                                         <div class="flex flex-wrap items-center justify-between gap-3">
                                             <p data-role="export-title" class="text-sm font-medium text-ink">{{ i18n.export_string_ready }}</p>
-                                            <button type="button" data-role="copy-string" data-label="{{ i18n.export_string_copy }}" data-copied="{{ i18n.copied }}" class="rounded-full border border-line bg-white px-3 py-1.5 text-sm text-ink transition hover:border-sage hover:bg-paper disabled:cursor-not-allowed disabled:opacity-45" onclick="copyExportString(this)" disabled>{{ i18n.export_string_copy }}</button>
+                                            <button type="button" data-role="copy-string" data-label="{{ i18n.export_string_copy }}" data-copied="{{ i18n.copied }}" class="rounded-full border border-line bg-white px-3 py-1.5 text-xs text-ink transition hover:border-sage hover:bg-paper disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm" onclick="copyExportString(this)" disabled>{{ i18n.export_string_copy }}</button>
                                         </div>
-                                        <textarea rows="6" readonly class="mt-3 w-full rounded-[0.95rem] border border-line bg-paper px-3 py-3 font-mono text-sm leading-6 text-ink outline-none"></textarea>
+                                        <textarea rows="5" readonly class="mt-3 w-full rounded-[0.95rem] border border-line bg-paper px-3 py-3 font-mono text-sm leading-6 text-ink outline-none sm:rows-6"></textarea>
                                         <p data-role="export-error" class="mt-3 hidden text-sm leading-6 text-[#98675f]"></p>
                                     </div>
                                 </article>
 
                                 <div class="grid gap-3">
-                                    <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
+                                    <form method="post" action="/sessions/{{ session.id }}/note" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                         <input type="hidden" name="lang" value="{{ lang }}">
                                         <label class="block">
                                             <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.session_note_label }}</span>
@@ -1250,7 +1250,7 @@
                                         <button type="submit" class="mt-3 w-full rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">{{ i18n.save_note_label }}</button>
                                     </form>
 
-                                    <form method="post" action="/sessions/{{ session.id }}/rename" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
+                                    <form method="post" action="/sessions/{{ session.id }}/rename" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                         <input type="hidden" name="lang" value="{{ lang }}">
                                         <label class="block">
                                             <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.rename_session }}</span>
@@ -1260,7 +1260,7 @@
                                     </form>
                                 </div>
 
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-4">
+                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
                                     <div class="grid gap-3 sm:grid-cols-2">
                                         <button type="button" data-role="copy-code" data-code="{{ session.latest_code | default(value="") }}" data-label="{{ i18n.copy }}" data-copied="{{ i18n.copied }}" data-prompt-label="{{ i18n.copy_fallback }}" class="rounded-[0.95rem] border border-line bg-latte px-4 py-3 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] disabled:cursor-not-allowed disabled:opacity-45" onclick="copyCode(this)" {% if not session.latest_code %}disabled{% endif %}>{{ i18n.copy }}</button>
                                         <form method="post" action="/sessions/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
@@ -1271,8 +1271,8 @@
                             </div>
                         </section>
 
-                        <section data-session-pane="messages" class="modal-pane-scroll hidden h-full overflow-y-auto pr-1">
-                            <div class="rounded-[1.2rem] border border-line/80 bg-[rgba(253,248,241,0.99)] p-4">
+                        <section data-session-pane="messages" class="modal-pane-scroll hidden h-full overflow-y-auto sm:pr-1">
+                            <div class="rounded-[1.2rem] border border-line/80 bg-[rgba(253,248,241,0.99)] p-3.5 sm:p-4">
                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                     <h3 class="text-sm font-semibold uppercase tracking-[0.25em] text-ink/48">{{ i18n.recent_messages }}</h3>
                                     <span class="text-xs text-ink/42">{{ i18n.newest_first }}</span>

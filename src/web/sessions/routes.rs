@@ -11,6 +11,145 @@ use super::storage::{
     remove_file_if_exists, save_new_session_record, session_storage_path,
 };
 
+const PHONE_START_SUCCESS_COOLDOWN_SECONDS: u32 = 20;
+const PHONE_START_FAILURE_COOLDOWN_SECONDS: u32 = 8;
+const PHONE_VERIFY_FAILURE_COOLDOWN_SECONDS: u32 = 5;
+const QR_START_COOLDOWN_SECONDS: u32 = 8;
+const QR_POLL_COOLDOWN_SECONDS: u32 = QR_AUTO_REFRESH_SECONDS as u32;
+const TELEGRAM_DEFAULT_RETRY_AFTER_SECONDS: u32 = 30;
+const TELEGRAM_PHONE_FLOOD_RETRY_AFTER_SECONDS: u32 = 300;
+const TELEGRAM_LOGIN_THROTTLE_PRUNE_THRESHOLD: usize = 512;
+
+fn login_throttle_key(scope: &str, value: &str) -> String {
+    format!("login-throttle:{scope}:{value}")
+}
+
+fn phone_start_throttle_key(user_id: &str, phone: &str) -> String {
+    login_throttle_key("phone-start", &format!("{user_id}:{phone}"))
+}
+
+fn phone_code_throttle_key(flow_id: &str) -> String {
+    login_throttle_key("phone-code", flow_id)
+}
+
+fn phone_password_throttle_key(flow_id: &str) -> String {
+    login_throttle_key("phone-password", flow_id)
+}
+
+fn qr_start_throttle_key(user_id: &str) -> String {
+    login_throttle_key("qr-start", user_id)
+}
+
+fn qr_poll_throttle_key(flow_id: &str) -> String {
+    login_throttle_key("qr-poll", flow_id)
+}
+
+async fn remaining_login_throttle_seconds(app_state: &AppState, key: &str) -> Option<u32> {
+    let now = Utc::now().timestamp();
+    let mut throttles = app_state.session_login_throttle.lock().await;
+
+    if throttles.len() > TELEGRAM_LOGIN_THROTTLE_PRUNE_THRESHOLD {
+        throttles.retain(|_, not_before| *not_before > now);
+    }
+
+    match throttles.get(key).copied() {
+        Some(not_before) if not_before > now => {
+            let remaining = not_before.saturating_sub(now);
+            Some(remaining.min(i64::from(u32::MAX)) as u32)
+        }
+        Some(_) => {
+            throttles.remove(key);
+            None
+        }
+        None => None,
+    }
+}
+
+async fn set_login_throttle_seconds(app_state: &AppState, key: &str, wait_seconds: u32) {
+    let now = Utc::now().timestamp();
+    let mut throttles = app_state.session_login_throttle.lock().await;
+
+    if throttles.len() > TELEGRAM_LOGIN_THROTTLE_PRUNE_THRESHOLD {
+        throttles.retain(|_, not_before| *not_before > now);
+    }
+
+    throttles.insert(
+        key.to_owned(),
+        now.saturating_add(i64::from(wait_seconds.max(1))),
+    );
+}
+
+fn format_retry_after_message(language: Language, template: &str, wait_seconds: u32) -> String {
+    template.replace(
+        "{duration}",
+        &format_duration_for_display(language, i64::from(wait_seconds)),
+    )
+}
+
+fn setup_retry_after_message(language: Language, wait_seconds: u32) -> String {
+    format_retry_after_message(
+        language,
+        language.translations().setup_error_retry_after,
+        wait_seconds,
+    )
+}
+
+fn phone_retry_after_message(language: Language, wait_seconds: u32) -> String {
+    format_retry_after_message(
+        language,
+        language.translations().phone_error_retry_after,
+        wait_seconds,
+    )
+}
+
+fn qr_retry_after_message(language: Language, wait_seconds: u32) -> String {
+    format_retry_after_message(
+        language,
+        language.translations().qr_error_retry_after,
+        wait_seconds,
+    )
+}
+
+fn telegram_retry_after_seconds_for_rpc_error(
+    rpc_error: &grammers_client::sender::RpcError,
+) -> Option<u32> {
+    let wait_like_error = rpc_error.code == 420
+        || rpc_error.name.contains("FLOOD")
+        || rpc_error.name.ends_with("_WAIT");
+    if !wait_like_error {
+        return None;
+    }
+
+    let fallback = match rpc_error.name.as_str() {
+        "PHONE_NUMBER_FLOOD" => TELEGRAM_PHONE_FLOOD_RETRY_AFTER_SECONDS,
+        "PHONE_CODE_FLOOD" | "PHONE_PASSWORD_FLOOD" => TELEGRAM_DEFAULT_RETRY_AFTER_SECONDS * 2,
+        _ => TELEGRAM_DEFAULT_RETRY_AFTER_SECONDS,
+    };
+
+    Some(rpc_error.value.unwrap_or(fallback).saturating_add(2))
+}
+
+fn telegram_retry_after_seconds_for_invocation_error(error: &InvocationError) -> Option<u32> {
+    match error {
+        InvocationError::Rpc(rpc_error) => telegram_retry_after_seconds_for_rpc_error(rpc_error),
+        _ => None,
+    }
+}
+
+fn telegram_retry_after_seconds_for_anyhow(error: &anyhow::Error) -> Option<u32> {
+    for cause in error.chain() {
+        if let Some(invocation_error) = cause.downcast_ref::<InvocationError>() {
+            if let Some(wait_seconds) =
+                telegram_retry_after_seconds_for_invocation_error(invocation_error)
+            {
+                return Some(wait_seconds);
+            }
+        }
+    }
+
+    None
+}
+
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/sessions/new", get(session_setup_page_handler))
@@ -156,6 +295,13 @@ fn phone_flow_error_href(flow_id: &str, error: &str) -> String {
     format!("{}?error={error}", phone_flow_href(flow_id))
 }
 
+fn phone_flow_retry_after_href(flow_id: &str, wait_seconds: u32) -> String {
+    format!(
+        "{}?error=retry_after&wait_seconds={wait_seconds}",
+        phone_flow_href(flow_id)
+    )
+}
+
 fn phone_flow_cancel_href(flow_id: &str) -> String {
     format!("/sessions/phone/{flow_id}/cancel")
 }
@@ -166,6 +312,13 @@ fn qr_flow_href(flow_id: &str) -> String {
 
 fn qr_flow_error_href(flow_id: &str, error: &str) -> String {
     format!("{}?error={error}", qr_flow_href(flow_id))
+}
+
+fn qr_flow_retry_after_href(flow_id: &str, wait_seconds: u32) -> String {
+    format!(
+        "{}?error=retry_after&wait_seconds={wait_seconds}",
+        qr_flow_href(flow_id)
+    )
 }
 
 fn qr_flow_cancel_href(flow_id: &str) -> String {
@@ -227,6 +380,7 @@ async fn render_qr_flow_page(
     pending: QrPendingState,
     banner: Option<PageBanner>,
     headers: &HeaderMap,
+    auto_refresh_seconds: u64,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, &format!("/sessions/qr/{flow_id}"));
@@ -246,7 +400,7 @@ async fn render_qr_flow_page(
     context.insert("dashboard_href", &dashboard_href(language));
     context.insert("setup_href", &setup_href(language));
     context.insert("flow", &flow_view);
-    context.insert("auto_refresh_seconds", &QR_AUTO_REFRESH_SECONDS);
+    context.insert("auto_refresh_seconds", &auto_refresh_seconds);
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "qr_login.html", &context)
@@ -770,6 +924,19 @@ async fn start_phone_login_handler(
         .await;
     }
 
+    let start_throttle_key = phone_start_throttle_key(&authenticated.user.id, &login_phone);
+    if let Some(wait_seconds) =
+        remaining_login_throttle_seconds(&app_state, &start_throttle_key).await
+    {
+        return render_setup_error_response(
+            &app_state,
+            language,
+            &setup_retry_after_message(language, wait_seconds),
+            &headers,
+        )
+        .await;
+    }
+
     let flow_id = Uuid::new_v4().to_string();
     let session_id = Uuid::new_v4().to_string();
     let session_name = sanitize_session_name(&form.session_name);
@@ -796,6 +963,12 @@ async fn start_phone_login_handler(
 
     match result {
         Ok(token) => {
+            set_login_throttle_seconds(
+                &app_state,
+                &start_throttle_key,
+                PHONE_START_SUCCESS_COOLDOWN_SECONDS,
+            )
+            .await;
             let session_data = match session_data {
                 Ok(data) => data,
                 Err(error) => {
@@ -829,6 +1002,22 @@ async fn start_phone_login_handler(
         }
         Err(error) => {
             warn!("failed requesting login code: {}", error);
+            if let Some(wait_seconds) = telegram_retry_after_seconds_for_invocation_error(&error) {
+                set_login_throttle_seconds(&app_state, &start_throttle_key, wait_seconds).await;
+                return render_setup_error_response(
+                    &app_state,
+                    language,
+                    &setup_retry_after_message(language, wait_seconds),
+                    &headers,
+                )
+                .await;
+            }
+            set_login_throttle_seconds(
+                &app_state,
+                &start_throttle_key,
+                PHONE_START_FAILURE_COOLDOWN_SECONDS,
+            )
+            .await;
             render_setup_error_response(
                 &app_state,
                 language,
@@ -848,6 +1037,19 @@ async fn start_qr_login_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+    let start_throttle_key = qr_start_throttle_key(&authenticated.user.id);
+    if let Some(wait_seconds) =
+        remaining_login_throttle_seconds(&app_state, &start_throttle_key).await
+    {
+        return render_setup_error_response(
+            &app_state,
+            language,
+            &setup_retry_after_message(language, wait_seconds),
+            &headers,
+        )
+        .await;
+    }
+
     let flow_id = Uuid::new_v4().to_string();
     let session_id = Uuid::new_v4().to_string();
     let session_name = sanitize_session_name(&form.session_name);
@@ -888,8 +1090,10 @@ async fn start_qr_login_handler(
             session_id,
             final_path,
             session_data: share_sensitive_bytes(session_data),
+            pending_state: None,
         },
     );
+    set_login_throttle_seconds(&app_state, &start_throttle_key, QR_START_COOLDOWN_SECONDS).await;
 
     Redirect::to(&qr_flow_href(&flow_id)).into_response()
 }
@@ -920,7 +1124,7 @@ async fn phone_flow_page_handler(
             .await;
         }
     };
-    let banner = phone_flow_error_banner(language, query.error.as_deref());
+    let banner = phone_flow_error_banner(language, query.error.as_deref(), query.wait_seconds);
 
     match render_phone_flow_page(&app_state, language, &flow_id, flow, banner, &headers).await {
         Ok(html) => html.into_response(),
@@ -951,6 +1155,13 @@ async fn verify_phone_code_handler(
         .unwrap_or(false);
     if !owner_matches {
         return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let verify_throttle_key = phone_code_throttle_key(&flow_id);
+    if let Some(wait_seconds) =
+        remaining_login_throttle_seconds(&app_state, &verify_throttle_key).await
+    {
+        return Redirect::to(&phone_flow_retry_after_href(&flow_id, wait_seconds)).into_response();
     }
 
     let mut flows = app_state.phone_flows.write().await;
@@ -1060,6 +1271,12 @@ async fn verify_phone_code_handler(
             Redirect::to(&phone_flow_href(&flow_id)).into_response()
         }
         Err(SignInError::InvalidCode) => {
+            set_login_throttle_seconds(
+                &app_state,
+                &verify_throttle_key,
+                PHONE_VERIFY_FAILURE_COOLDOWN_SECONDS,
+            )
+            .await;
             flow.stage = PhoneLoginStage::AwaitingCode { token };
             flow.session_data = share_sensitive_bytes(session_data);
             app_state
@@ -1080,6 +1297,24 @@ async fn verify_phone_code_handler(
         }
         Err(SignInError::Other(error)) => {
             warn!("failed finishing phone login: {}", error);
+            if let Some(wait_seconds) = telegram_retry_after_seconds_for_invocation_error(&error) {
+                set_login_throttle_seconds(&app_state, &verify_throttle_key, wait_seconds).await;
+                flow.stage = PhoneLoginStage::AwaitingCode { token };
+                flow.session_data = share_sensitive_bytes(session_data);
+                app_state
+                    .phone_flows
+                    .write()
+                    .await
+                    .insert(flow_id.clone(), flow);
+                return Redirect::to(&phone_flow_retry_after_href(&flow_id, wait_seconds))
+                    .into_response();
+            }
+            set_login_throttle_seconds(
+                &app_state,
+                &verify_throttle_key,
+                PHONE_VERIFY_FAILURE_COOLDOWN_SECONDS,
+            )
+            .await;
             flow.stage = PhoneLoginStage::AwaitingCode { token };
             app_state
                 .phone_flows
@@ -1117,6 +1352,13 @@ async fn verify_phone_password_handler(
         .unwrap_or(false);
     if !owner_matches {
         return Redirect::to(&dashboard_href(language)).into_response();
+    }
+
+    let verify_throttle_key = phone_password_throttle_key(&flow_id);
+    if let Some(wait_seconds) =
+        remaining_login_throttle_seconds(&app_state, &verify_throttle_key).await
+    {
+        return Redirect::to(&phone_flow_retry_after_href(&flow_id, wait_seconds)).into_response();
     }
 
     let mut flows = app_state.phone_flows.write().await;
@@ -1213,6 +1455,12 @@ async fn verify_phone_password_handler(
             Redirect::to(&dashboard_href(language)).into_response()
         }
         Err(SignInError::InvalidPassword(password_token)) => {
+            set_login_throttle_seconds(
+                &app_state,
+                &verify_throttle_key,
+                PHONE_VERIFY_FAILURE_COOLDOWN_SECONDS,
+            )
+            .await;
             flow.stage = PhoneLoginStage::AwaitingPassword {
                 token: password_token,
             };
@@ -1226,6 +1474,22 @@ async fn verify_phone_password_handler(
         }
         Err(SignInError::Other(error)) => {
             warn!("failed verifying 2fa password: {}", error);
+            if let Some(wait_seconds) = telegram_retry_after_seconds_for_invocation_error(&error) {
+                set_login_throttle_seconds(&app_state, &verify_throttle_key, wait_seconds).await;
+                return render_setup_error_response(
+                    &app_state,
+                    language,
+                    &setup_retry_after_message(language, wait_seconds),
+                    &headers,
+                )
+                .await;
+            }
+            set_login_throttle_seconds(
+                &app_state,
+                &verify_throttle_key,
+                PHONE_VERIFY_FAILURE_COOLDOWN_SECONDS,
+            )
+            .await;
             render_setup_error_response(
                 &app_state,
                 language,
@@ -1315,15 +1579,58 @@ async fn qr_flow_page_handler(
         }
     };
 
-    let banner = qr_flow_error_banner(language, query.error.as_deref());
+    let banner = qr_flow_error_banner(language, query.error.as_deref(), query.wait_seconds);
+    let poll_throttle_key = qr_poll_throttle_key(&flow_id);
+    if let Some(wait_seconds) =
+        remaining_login_throttle_seconds(&app_state, &poll_throttle_key).await
+    {
+        if let Some(pending) = flow.pending_state.clone() {
+            let banner =
+                banner.or_else(|| Some(PageBanner::error(qr_retry_after_message(language, wait_seconds))));
+            return match render_qr_flow_page(
+                &app_state,
+                language,
+                &flow_id,
+                &flow,
+                pending,
+                banner,
+                &headers,
+                u64::from(wait_seconds).max(QR_AUTO_REFRESH_SECONDS),
+            )
+            .await
+            {
+                Ok(html) => html.into_response(),
+                Err(status) => status.into_response(),
+            };
+        }
+
+        return render_setup_error_response(
+            &app_state,
+            language,
+            &setup_retry_after_message(language, wait_seconds),
+            &headers,
+        )
+        .await;
+    }
+
     let telegram_profile = configured_telegram_client_profile();
     match poll_qr_flow(&telegram_profile, &flow).await {
         Ok((QrStatus::Pending(pending), session_data)) => {
+            set_login_throttle_seconds(&app_state, &poll_throttle_key, QR_POLL_COOLDOWN_SECONDS)
+                .await;
             if let Some(active_flow) = app_state.qr_flows.write().await.get_mut(&flow_id) {
                 active_flow.session_data = share_sensitive_bytes(session_data);
+                active_flow.pending_state = Some(pending.clone());
             }
             match render_qr_flow_page(
-                &app_state, language, &flow_id, &flow, pending, banner, &headers,
+                &app_state,
+                language,
+                &flow_id,
+                &flow,
+                pending,
+                banner,
+                &headers,
+                QR_AUTO_REFRESH_SECONDS,
             )
             .await
             {
@@ -1359,6 +1666,29 @@ async fn qr_flow_page_handler(
         }
         Err(error) => {
             warn!("failed polling qr login flow: {}", error);
+            if let Some(wait_seconds) = telegram_retry_after_seconds_for_anyhow(&error) {
+                set_login_throttle_seconds(&app_state, &poll_throttle_key, wait_seconds).await;
+                if let Some(pending) = flow.pending_state.clone() {
+                    return match render_qr_flow_page(
+                        &app_state,
+                        language,
+                        &flow_id,
+                        &flow,
+                        pending,
+                        Some(PageBanner::error(qr_retry_after_message(language, wait_seconds))),
+                        &headers,
+                        u64::from(wait_seconds).max(QR_AUTO_REFRESH_SECONDS),
+                    )
+                    .await
+                    {
+                        Ok(html) => html.into_response(),
+                        Err(status) => status.into_response(),
+                    };
+                }
+
+                return Redirect::to(&qr_flow_retry_after_href(&flow_id, wait_seconds))
+                    .into_response();
+            }
             Redirect::to(&qr_flow_error_href(&flow_id, "qr_failed")).into_response()
         }
     }
@@ -1384,25 +1714,35 @@ async fn cancel_qr_flow_handler(
     Redirect::to(&setup_href(language)).into_response()
 }
 
-fn phone_flow_error_banner(language: Language, error: Option<&str>) -> Option<PageBanner> {
+fn phone_flow_error_banner(
+    language: Language,
+    error: Option<&str>,
+    wait_seconds: Option<u32>,
+) -> Option<PageBanner> {
     let translations = language.translations();
     let message = match error {
-        Some("missing_code") => Some(translations.phone_error_missing_code),
-        Some("invalid_code") => Some(translations.phone_error_invalid_code),
-        Some("code_failed") => Some(translations.phone_error_code_failed),
-        Some("missing_password") => Some(translations.phone_error_missing_password),
-        Some("invalid_password") => Some(translations.phone_error_invalid_password),
-        Some("password_retry") => Some(translations.phone_error_password_retry),
+        Some("missing_code") => Some(String::from(translations.phone_error_missing_code)),
+        Some("invalid_code") => Some(String::from(translations.phone_error_invalid_code)),
+        Some("code_failed") => Some(String::from(translations.phone_error_code_failed)),
+        Some("missing_password") => Some(String::from(translations.phone_error_missing_password)),
+        Some("invalid_password") => Some(String::from(translations.phone_error_invalid_password)),
+        Some("password_retry") => Some(String::from(translations.phone_error_password_retry)),
+        Some("retry_after") => wait_seconds.map(|wait| phone_retry_after_message(language, wait)),
         _ => None,
     }?;
 
     Some(PageBanner::error(message))
 }
 
-fn qr_flow_error_banner(language: Language, error: Option<&str>) -> Option<PageBanner> {
+fn qr_flow_error_banner(
+    language: Language,
+    error: Option<&str>,
+    wait_seconds: Option<u32>,
+) -> Option<PageBanner> {
     let translations = language.translations();
     let message = match error {
-        Some("qr_failed") => Some(translations.qr_error_failed),
+        Some("qr_failed") => Some(String::from(translations.qr_error_failed)),
+        Some("retry_after") => wait_seconds.map(|wait| qr_retry_after_message(language, wait)),
         _ => None,
     }?;
 
@@ -1522,5 +1862,35 @@ mod tests {
 
         assert!(display.starts_with("+1 "));
         assert!(display.contains("314"));
+    }
+
+    #[test]
+    fn telegram_retry_after_seconds_detects_flood_wait_values() {
+        let error = InvocationError::Rpc(grammers_client::sender::RpcError {
+            code: 420,
+            name: String::from("FLOOD_WAIT"),
+            value: Some(31),
+            caused_by: None,
+        });
+
+        assert_eq!(
+            telegram_retry_after_seconds_for_invocation_error(&error),
+            Some(33)
+        );
+    }
+
+    #[test]
+    fn telegram_retry_after_seconds_uses_phone_flood_fallback() {
+        let error = InvocationError::Rpc(grammers_client::sender::RpcError {
+            code: 400,
+            name: String::from("PHONE_NUMBER_FLOOD"),
+            value: None,
+            caused_by: None,
+        });
+
+        assert_eq!(
+            telegram_retry_after_seconds_for_invocation_error(&error),
+            Some(TELEGRAM_PHONE_FLOOD_RETRY_AFTER_SECONDS + 2)
+        );
     }
 }

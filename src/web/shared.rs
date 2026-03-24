@@ -138,6 +138,7 @@ pub(crate) type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>
 pub(crate) type MetaStoreHandle = Arc<MetaStore>;
 pub(crate) type UnlockCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
 pub(crate) type UserKeyCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
+pub(crate) type SessionLoginThrottle = Arc<Mutex<HashMap<String, i64>>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -156,6 +157,7 @@ pub(crate) struct AppState {
     pub(crate) recovery_notices: PendingRecoveryNotices,
     pub(crate) unlock_cache: UnlockCache,
     pub(crate) user_keys: UserKeyCache,
+    pub(crate) session_login_throttle: SessionLoginThrottle,
     pub(crate) passkey_login_key: SharedMasterKey,
     pub(crate) http_client: HttpClient,
 }
@@ -199,6 +201,7 @@ pub(crate) struct PendingQrLogin {
     pub(crate) session_id: String,
     pub(crate) final_path: PathBuf,
     pub(crate) session_data: SharedSensitiveBytes,
+    pub(crate) pending_state: Option<QrPendingState>,
 }
 
 #[derive(Clone)]
@@ -535,6 +538,7 @@ pub(crate) enum QrStatus {
     Authorized,
 }
 
+#[derive(Clone)]
 pub(crate) struct QrPendingState {
     pub(crate) qr_link: String,
     pub(crate) qr_svg: String,
@@ -737,6 +741,7 @@ pub(crate) enum BanDurationUnit {
 pub(crate) struct FlowPageQuery {
     pub(crate) lang: Option<String>,
     pub(crate) error: Option<String>,
+    pub(crate) wait_seconds: Option<u32>,
 }
 
 pub(crate) fn login_redirect_target(language: Language) -> String {

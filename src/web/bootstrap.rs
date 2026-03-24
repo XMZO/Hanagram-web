@@ -63,6 +63,7 @@ pub(crate) async fn run() -> Result<()> {
     let recovery_notices: PendingRecoveryNotices = Arc::new(RwLock::new(HashMap::new()));
     let unlock_cache: UnlockCache = Arc::new(RwLock::new(HashMap::new()));
     let user_keys: UserKeyCache = Arc::new(RwLock::new(HashMap::new()));
+    let session_login_throttle: SessionLoginThrottle = Arc::new(Mutex::new(HashMap::new()));
     let meta_store = Arc::new(MetaStore::open(&runtime.meta_db_path).await?);
     let system_settings = Arc::new(RwLock::new(meta_store.load_system_settings().await?));
     let runtime_cache = Arc::new(RuntimeCache::open(runtime.runtime_cache_dir.clone()).await?);
@@ -86,6 +87,7 @@ pub(crate) async fn run() -> Result<()> {
         recovery_notices,
         unlock_cache,
         user_keys,
+        session_login_throttle,
         passkey_login_key,
         http_client: HttpClient::new(),
     };
