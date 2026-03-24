@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Hanagram-web contributors
 
 use crate::web::shared::*;
-use crate::web::{dashboard, middleware};
+use crate::web::{middleware, platforms::telegram as telegram_platform};
 
 use super::runtime::set_session_note;
 use super::storage::{
@@ -152,7 +152,7 @@ fn telegram_retry_after_seconds_for_anyhow(error: &anyhow::Error) -> Option<u32>
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route(TELEGRAM_WORKSPACE_PATH, get(session_setup_page_handler))
+        .route(TELEGRAM_SETUP_PATH, get(session_setup_page_handler))
         .route(
             TELEGRAM_IMPORT_STRING_PATH,
             post(import_string_session_handler),
@@ -329,14 +329,14 @@ async fn render_setup_page(
     headers: &HeaderMap,
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
-    let languages = language_options(language, TELEGRAM_WORKSPACE_PATH);
+    let languages = language_options(language, TELEGRAM_SETUP_PATH);
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
     context.insert("i18n", translations);
     context.insert("languages", &languages);
     context.insert("banner", &banner);
-    context.insert("dashboard_href", &dashboard_href(language));
+    context.insert("dashboard_href", &telegram_workspace_href(language));
     context.insert("telegram_import_string_action", TELEGRAM_IMPORT_STRING_PATH);
     context.insert("telegram_import_upload_action", TELEGRAM_IMPORT_UPLOAD_PATH);
     context.insert("telegram_phone_login_action", TELEGRAM_PHONE_LOGIN_PATH);
@@ -423,8 +423,8 @@ async fn render_phone_flow_page(
     context.insert("i18n", translations);
     context.insert("languages", &languages);
     context.insert("banner", &banner);
-    context.insert("dashboard_href", &dashboard_href(language));
-    context.insert("setup_href", &setup_href(language));
+    context.insert("dashboard_href", &telegram_workspace_href(language));
+    context.insert("setup_href", &telegram_setup_href(language));
     context.insert("flow", &flow_view);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -456,8 +456,8 @@ async fn render_qr_flow_page(
     context.insert("i18n", translations);
     context.insert("languages", &languages);
     context.insert("banner", &banner);
-    context.insert("dashboard_href", &dashboard_href(language));
-    context.insert("setup_href", &setup_href(language));
+    context.insert("dashboard_href", &telegram_workspace_href(language));
+    context.insert("setup_href", &telegram_setup_href(language));
     context.insert("flow", &flow_view);
     context.insert("auto_refresh_seconds", &auto_refresh_seconds);
     insert_transport_security_warning(&mut context, language, headers);
@@ -530,7 +530,7 @@ async fn import_string_session_handler(
                 )
                 .await;
             }
-            Redirect::to(&dashboard_href(language)).into_response()
+            Redirect::to(&telegram_workspace_href(language)).into_response()
         }
         Err(error) => {
             warn!("failed importing telethon string session: {}", error);
@@ -756,7 +756,7 @@ async fn import_session_file_handler(
                 )
                 .await;
             }
-            Redirect::to(&dashboard_href(language)).into_response()
+            Redirect::to(&telegram_workspace_href(language)).into_response()
         }
         Err(error) => {
             warn!("failed decoding uploaded session file: {}", error);
@@ -788,7 +788,7 @@ async fn delete_session_handler(
             }
         };
     let Some(session) = session else {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     };
 
     let worker = app_state.session_workers.lock().await.remove(&session.id);
@@ -804,7 +804,7 @@ async fn delete_session_handler(
             session_file.display(),
             error
         );
-        return match dashboard::render_dashboard_page(
+        return match telegram_platform::render_workspace_page(
             &app_state,
             &authenticated,
             language,
@@ -834,7 +834,7 @@ async fn delete_session_handler(
     }
 
     app_state.shared_state.write().await.remove(&session.id);
-    Redirect::to(&dashboard_href(language)).into_response()
+    Redirect::to(&telegram_workspace_href(language)).into_response()
 }
 
 async fn rename_session_handler(
@@ -849,7 +849,7 @@ async fn rename_session_handler(
     let new_name = form.session_name.trim();
 
     if new_name.is_empty() {
-        return match dashboard::render_dashboard_page(
+        return match telegram_platform::render_workspace_page(
             &app_state,
             &authenticated,
             language,
@@ -872,7 +872,7 @@ async fn rename_session_handler(
             }
         };
     let Some(current_session) = current_session else {
-        return match dashboard::render_dashboard_page(
+        return match telegram_platform::render_workspace_page(
             &app_state,
             &authenticated,
             language,
@@ -888,7 +888,7 @@ async fn rename_session_handler(
     let next_session_name = sanitize_session_name(new_name);
 
     if next_session_name == current_session.session_key {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
     let mut updated_session = current_session.clone();
@@ -896,7 +896,7 @@ async fn rename_session_handler(
     updated_session.updated_at_unix = Utc::now().timestamp();
     if let Err(error) = persist_session_record(&app_state, &updated_session).await {
         warn!("failed saving renamed session record: {}", error);
-        return match dashboard::render_dashboard_page(
+        return match telegram_platform::render_workspace_page(
             &app_state,
             &authenticated,
             language,
@@ -916,7 +916,7 @@ async fn rename_session_handler(
             session.note = updated_session.note.clone();
         }
     }
-    Redirect::to(&dashboard_href(language)).into_response()
+    Redirect::to(&telegram_workspace_href(language)).into_response()
 }
 
 async fn update_session_note_handler(
@@ -937,13 +937,13 @@ async fn update_session_note_handler(
             }
         };
     let Some(mut session) = session else {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     };
     session.note = note.clone();
     session.updated_at_unix = Utc::now().timestamp();
     if let Err(error) = persist_session_record(&app_state, &session).await {
         warn!("failed saving session note: {}", error);
-        return match dashboard::render_dashboard_page(
+        return match telegram_platform::render_workspace_page(
             &app_state,
             &authenticated,
             language,
@@ -959,7 +959,7 @@ async fn update_session_note_handler(
         };
     }
     set_session_note(&app_state.shared_state, &session.id, note).await;
-    Redirect::to(&dashboard_href(language)).into_response()
+    Redirect::to(&telegram_workspace_href(language)).into_response()
 }
 
 async fn start_phone_login_handler(
@@ -1170,7 +1170,7 @@ async fn phone_flow_page_handler(
         Some(flow) if flow.user_id == authenticated.user.id => flow,
         Some(_) => {
             drop(flow_guard);
-            return Redirect::to(&dashboard_href(language)).into_response();
+            return Redirect::to(&telegram_workspace_href(language)).into_response();
         }
         None => {
             drop(flow_guard);
@@ -1213,7 +1213,7 @@ async fn verify_phone_code_handler(
         .map(|flow| flow.user_id == authenticated.user.id)
         .unwrap_or(false);
     if !owner_matches {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
     let verify_throttle_key = phone_code_throttle_key(&flow_id);
@@ -1236,7 +1236,7 @@ async fn verify_phone_code_handler(
     };
     if flow.user_id != authenticated.user.id {
         drop(flows);
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
     let token = match flow.stage {
@@ -1315,7 +1315,7 @@ async fn verify_phone_code_handler(
                 .await;
             }
 
-            Redirect::to(&dashboard_href(language)).into_response()
+            Redirect::to(&telegram_workspace_href(language)).into_response()
         }
         Err(SignInError::PasswordRequired(password_token)) => {
             flow.stage = PhoneLoginStage::AwaitingPassword {
@@ -1410,7 +1410,7 @@ async fn verify_phone_password_handler(
         .map(|flow| flow.user_id == authenticated.user.id)
         .unwrap_or(false);
     if !owner_matches {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
     let verify_throttle_key = phone_password_throttle_key(&flow_id);
@@ -1433,7 +1433,7 @@ async fn verify_phone_password_handler(
     };
     if flow.user_id != authenticated.user.id {
         drop(flows);
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
     let token = match flow.stage {
@@ -1511,7 +1511,7 @@ async fn verify_phone_password_handler(
                 .await;
             }
 
-            Redirect::to(&dashboard_href(language)).into_response()
+            Redirect::to(&telegram_workspace_href(language)).into_response()
         }
         Err(SignInError::InvalidPassword(password_token)) => {
             set_login_throttle_seconds(
@@ -1603,10 +1603,10 @@ async fn cancel_phone_flow_handler(
     if owner_matches {
         let _ = app_state.phone_flows.write().await.remove(&flow_id);
     } else if app_state.phone_flows.read().await.contains_key(&flow_id) {
-        return Redirect::to(&dashboard_href(language)).into_response();
+        return Redirect::to(&telegram_workspace_href(language)).into_response();
     }
 
-    Redirect::to(&setup_href(language)).into_response()
+    Redirect::to(&telegram_setup_href(language)).into_response()
 }
 
 async fn qr_flow_page_handler(
@@ -1623,7 +1623,7 @@ async fn qr_flow_page_handler(
             Some(flow) if flow.user_id == authenticated.user.id => flow.clone(),
             Some(_) => {
                 drop(flows);
-                return Redirect::to(&dashboard_href(language)).into_response();
+                return Redirect::to(&telegram_workspace_href(language)).into_response();
             }
             None => {
                 drop(flows);
@@ -1725,7 +1725,7 @@ async fn qr_flow_page_handler(
                 .await;
             }
 
-            Redirect::to(&dashboard_href(language)).into_response()
+            Redirect::to(&telegram_workspace_href(language)).into_response()
         }
         Err(error) => {
             warn!("failed polling qr login flow: {}", error);
@@ -1772,12 +1772,12 @@ async fn cancel_qr_flow_handler(
     let flow = app_state.qr_flows.read().await.get(&flow_id).cloned();
     if let Some(flow) = flow {
         if flow.user_id != authenticated.user.id {
-            return Redirect::to(&dashboard_href(language)).into_response();
+            return Redirect::to(&telegram_workspace_href(language)).into_response();
         }
         app_state.qr_flows.write().await.remove(&flow_id);
     }
 
-    Redirect::to(&setup_href(language)).into_response()
+    Redirect::to(&telegram_setup_href(language)).into_response()
 }
 
 fn phone_flow_error_banner(

@@ -59,10 +59,10 @@
             exportStringError: {{ i18n.export_string_error | json_encode | safe }}
         };
         const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
-        const DASHBOARD_INCREMENTAL_REFRESH_MS = {{ dashboard_incremental_refresh_seconds }} * 1000;
-        const DASHBOARD_FULL_REFRESH_MS = {{ dashboard_full_refresh_seconds }} * 1000;
-        const DASHBOARD_PANES = ["status", "telegram", "shortcuts"];
-        let dashboardSyncInFlight = false;
+        const TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS = {{ telegram_workspace_incremental_refresh_seconds }} * 1000;
+        const TELEGRAM_WORKSPACE_FULL_REFRESH_MS = {{ telegram_workspace_full_refresh_seconds }} * 1000;
+        const WORKSPACE_PANES = ["status", "telegram", "shortcuts"];
+        let workspaceSyncInFlight = false;
     </script>
     <style>
         :root { color-scheme: light; }
@@ -246,7 +246,7 @@
             window.setTimeout(() => root.classList.remove("card-flash"), 1400);
         }
 
-        function resetDashboardCodeChip(chip) {
+        function resetWorkspaceCodeChip(chip) {
             if (!chip) { return; }
             if (chip.__copyResetTimer) {
                 window.clearTimeout(chip.__copyResetTimer);
@@ -301,7 +301,7 @@
                         copyButton.dataset.code = "";
                         copyButton.disabled = true;
                         if (!latestCode) { copyButton.textContent = I18N.otpPlaceholder; }
-                        resetDashboardCodeChip(copyButton);
+                        resetWorkspaceCodeChip(copyButton);
                     }
                     if (visibilityLabel) {
                         visibilityLabel.textContent = I18N.otpHidden;
@@ -385,16 +385,16 @@
             button.setAttribute("aria-label", nextLabel);
         }
 
-        function activateDashboardPane(rawHash) {
+        function activateWorkspacePane(rawHash) {
             const requested = String(rawHash || window.location.hash || "#status").replace(/^#/, "");
-            const activePane = DASHBOARD_PANES.includes(requested) ? requested : "status";
+            const activePane = WORKSPACE_PANES.includes(requested) ? requested : "status";
 
-            document.querySelectorAll("[data-dashboard-pane]").forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.dashboardPane !== activePane);
+            document.querySelectorAll("[data-workspace-pane]").forEach((panel) => {
+                panel.classList.toggle("hidden", panel.dataset.workspacePane !== activePane);
             });
 
-            document.querySelectorAll("[data-dashboard-tab]").forEach((tab) => {
-                const active = tab.dataset.dashboardTab === activePane;
+            document.querySelectorAll("[data-workspace-tab]").forEach((tab) => {
+                const active = tab.dataset.workspaceTab === activePane;
                 tab.classList.toggle("bg-sage", active);
                 tab.classList.toggle("text-white", active);
                 tab.classList.toggle("border-sage", active);
@@ -518,7 +518,7 @@
             if (latestCodeChip) {
                 latestCodeChip.dataset.code = session.latest_code || "";
                 latestCodeChip.disabled = !session.latest_code;
-                resetDashboardCodeChip(latestCodeChip);
+                resetWorkspaceCodeChip(latestCodeChip);
             }
 
             const latestUpdate = card.querySelector("[data-role='latest-update']");
@@ -579,21 +579,21 @@
             }
         }
 
-        async function copyDashboardCode(button) {
+        async function copyWorkspaceCode(button) {
             const code = button.dataset.code;
             if (!code || button.disabled) { return; }
 
             const copied = await writeTextToClipboard(code);
             if (!copied) { return; }
 
-            resetDashboardCodeChip(button);
+            resetWorkspaceCodeChip(button);
             button.classList.add("copy-chip-active", "copy-chip-feedback");
 
             const label = button.querySelector("[data-role='copy-code-label']");
             if (label) { label.textContent = button.dataset.copied || I18N.copied; }
 
             button.__copyResetTimer = window.setTimeout(() => {
-                resetDashboardCodeChip(button);
+                resetWorkspaceCodeChip(button);
             }, 1200);
         }
 
@@ -716,7 +716,7 @@
                             title="${escapeHtml(I18N.copy)}"
                             aria-label="${escapeHtml(I18N.copy)}"
                             class="rounded-full border border-sage/35 bg-[#eef4ee] px-2.5 py-1.5 font-mono text-[0.95rem] font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e7f1e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-75"
-                            onclick="copyDashboardCode(this)"
+                            onclick="copyWorkspaceCode(this)"
                             ${session.latest_code ? "" : "disabled"}
                         >${escapeHtml(session.latest_code || I18N.otpPlaceholder)}</button>
                         <p data-role="otp-visibility-label" class="min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
@@ -727,7 +727,7 @@
             }).join("");
         }
 
-        function updateDashboardMeta(snapshot) {
+        function updateWorkspaceMeta(snapshot) {
             document.querySelectorAll("[data-role='total-count']").forEach((element) => {
                 element.textContent = snapshot.total_count;
             });
@@ -768,9 +768,9 @@
             return snapshot.sessions.map((session) => session.id).sort();
         }
 
-        async function syncDashboard(forceFull) {
-            if (dashboardSyncInFlight) { return; }
-            dashboardSyncInFlight = true;
+        async function syncWorkspace(forceFull) {
+            if (workspaceSyncInFlight) { return; }
+            workspaceSyncInFlight = true;
 
             try {
                 const response = await fetch(SNAPSHOT_API, {
@@ -787,7 +787,7 @@
                     return;
                 }
 
-                updateDashboardMeta(snapshot);
+                updateWorkspaceMeta(snapshot);
                 snapshot.sessions.forEach((session) => {
                     const card = findSessionCard(session.id);
                     const modal = findSessionModal(session.id);
@@ -804,12 +804,12 @@
             } catch (_) {
                 // Ignore transient sync failures.
             } finally {
-                dashboardSyncInFlight = false;
+                workspaceSyncInFlight = false;
             }
         }
 
         window.addEventListener("DOMContentLoaded", () => {
-            activateDashboardPane();
+            activateWorkspacePane();
             refreshNewBadges();
             refreshOtpVisibility();
             document.querySelectorAll("[data-session-modal]").forEach((modal) => {
@@ -826,11 +826,17 @@
                 if (openModal) { closeSessionModal(openModal.id); }
             });
 
-            window.setInterval(() => syncDashboard(false), DASHBOARD_INCREMENTAL_REFRESH_MS);
-            window.setInterval(() => syncDashboard(true), DASHBOARD_FULL_REFRESH_MS);
+            window.setInterval(
+                () => syncWorkspace(false),
+                TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS
+            );
+            window.setInterval(
+                () => syncWorkspace(true),
+                TELEGRAM_WORKSPACE_FULL_REFRESH_MS
+            );
             window.setInterval(() => refreshOtpVisibility(), 1000);
         });
-        window.addEventListener("hashchange", () => activateDashboardPane());
+        window.addEventListener("hashchange", () => activateWorkspacePane());
     </script>
 </head>
 <body class="min-h-screen font-sans text-ink antialiased">
@@ -881,6 +887,12 @@
                                     </a>
                                     {% endfor %}
                                 </div>
+                                <a
+                                    href="{{ dashboard_href }}"
+                                    class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
+                                >
+                                    {{ i18n.nav_dashboard_label }}
+                                </a>
                                 <a
                                     href="{{ settings_href }}"
                                     class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
@@ -937,13 +949,13 @@
 
         <section class="paper-shadow mt-4 rounded-[1.45rem] border border-line/80 bg-paper/95 p-3.5 sm:p-4">
             <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                <a href="#status" data-dashboard-tab="status" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_status }}</a>
-                <a href="#telegram" data-dashboard-tab="telegram" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
-                <a href="#shortcuts" data-dashboard-tab="shortcuts" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_shortcuts }}</a>
+                <a href="#status" data-workspace-tab="status" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_status }}</a>
+                <a href="#telegram" data-workspace-tab="telegram" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
+                <a href="#shortcuts" data-workspace-tab="shortcuts" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_shortcuts }}</a>
             </div>
 
             <div class="mt-4">
-                <section data-dashboard-pane="telegram" class="hidden space-y-4">
+                <section data-workspace-pane="telegram" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_sessions }}</p>
@@ -1021,7 +1033,7 @@
                                     title="{{ i18n.copy }}"
                                     aria-label="{{ i18n.copy }}"
                                     class="w-full rounded-[1rem] border border-line/80 bg-white/92 px-3 py-2.5 text-left transition hover:border-sage hover:bg-[#faf6ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-70 sm:min-w-[8.25rem]"
-                                    onclick="copyDashboardCode(this)"
+                                    onclick="copyWorkspaceCode(this)"
                                     {% if not session.latest_code %}disabled{% endif %}
                                 >
                                     <p data-role="copy-code-label" class="text-[0.65rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.latest_otp }}</p>
@@ -1051,7 +1063,7 @@
                     {% endif %}
                 </section>
 
-                <section data-dashboard-pane="shortcuts" class="hidden space-y-4">
+                <section data-workspace-pane="shortcuts" class="hidden space-y-4">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_nav_shortcuts }}</p>
@@ -1082,7 +1094,7 @@
                     </div>
                 </section>
 
-                <section data-dashboard-pane="status" class="space-y-4">
+                <section data-workspace-pane="status" class="space-y-4">
                     <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_workspace_eyebrow }}</p>
@@ -1113,7 +1125,7 @@
                         <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3">
                             <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ i18n.stat_updated }}</p>
                             <p class="mt-2 text-sm leading-6 text-ink/75" data-role="updated-at">{{ now }}</p>
-                            <p class="mt-2 text-sm leading-6 text-ink/62">{{ i18n.dashboard_refresh_incremental_label }} {{ dashboard_incremental_refresh_seconds }}s</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/62">{{ i18n.dashboard_refresh_incremental_label }} {{ telegram_workspace_incremental_refresh_seconds }}s</p>
                         </article>
                     </div>
 
@@ -1209,7 +1221,7 @@
                                                 title="{{ i18n.copy }}"
                                                 aria-label="{{ i18n.copy }}"
                                                 class="rounded-full border border-sage/35 bg-[#eef4ee] px-2.5 py-1.5 font-mono text-[0.95rem] font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e7f1e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-75"
-                                                onclick="copyDashboardCode(this)"
+                                                onclick="copyWorkspaceCode(this)"
                                                 {% if not session.latest_code %}disabled{% endif %}
                                             >{{ session.latest_code | default(value=i18n.otp_placeholder) }}</button>
                                             <p data-role="otp-visibility-label" class="min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
@@ -1258,11 +1270,11 @@
                                 <div class="mt-4 grid gap-3">
                                     <div class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3">
                                         <p class="text-sm font-medium text-ink">{{ i18n.dashboard_refresh_incremental_label }}</p>
-                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_incremental_refresh_seconds }}s</p>
+                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ telegram_workspace_incremental_refresh_seconds }}s</p>
                                     </div>
                                     <div class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3">
                                         <p class="text-sm font-medium text-ink">{{ i18n.dashboard_refresh_full_label }}</p>
-                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ dashboard_full_refresh_seconds }}s</p>
+                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ telegram_workspace_full_refresh_seconds }}s</p>
                                     </div>
                                 </div>
                             </article>

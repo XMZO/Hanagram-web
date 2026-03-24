@@ -3,7 +3,6 @@
 
 mod i18n;
 mod platforms;
-mod session_handler;
 mod state;
 mod web;
 mod web_auth;

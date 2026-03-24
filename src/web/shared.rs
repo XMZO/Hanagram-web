@@ -77,14 +77,16 @@ pub(crate) use crate::web_auth::{
 };
 
 pub(crate) const QR_AUTO_REFRESH_SECONDS: u64 = 5;
-pub(crate) const DASHBOARD_INCREMENTAL_SYNC_SECONDS: u64 = 3;
-pub(crate) const DASHBOARD_FULL_SYNC_SECONDS: u64 = 30;
-pub(crate) const DASHBOARD_OTP_VISIBILITY_SECONDS: i64 = 600;
+pub(crate) const TELEGRAM_WORKSPACE_INCREMENTAL_SYNC_SECONDS: u64 = 3;
+pub(crate) const TELEGRAM_WORKSPACE_FULL_SYNC_SECONDS: u64 = 30;
+pub(crate) const TELEGRAM_OTP_VISIBILITY_SECONDS: i64 = 600;
 pub(crate) const TELEGRAM_WORKSPACE_PATH: &str = "/platforms/telegram";
+pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
 pub(crate) const TELEGRAM_PHONE_LOGIN_PATH: &str = "/platforms/telegram/login/phone";
 pub(crate) const TELEGRAM_QR_LOGIN_PATH: &str = "/platforms/telegram/login/qr";
+pub(crate) const TELEGRAM_SNAPSHOT_API_PATH: &str = "/api/platforms/telegram/snapshot";
 pub(crate) const META_DB_FILE_NAME: &str = "app.db";
 pub(crate) const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 pub(crate) const SESSION_KEY_PREFIX: &str = "hanagram-session-key:v1:";
@@ -98,9 +100,16 @@ pub(crate) const TELEGRAM_WEBK_APP_VERSION: &str = "6.1.4 K";
 pub(crate) const TELEGRAM_WEBK_SYSTEM_LANG_CODE: &str = "en-US";
 pub(crate) const TELEGRAM_WEBK_LANG_CODE: &str = "en";
 pub(crate) const TELEGRAM_WEBK_LANG_PACK: &str = "webk";
-pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 10] = [
+pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 11] = [
     ("admin.html", include_str!("../../templates/admin.html")),
-    ("index.html", include_str!("../../templates/index.html")),
+    (
+        "dashboard_home.html",
+        include_str!("../../templates/dashboard_home.html"),
+    ),
+    (
+        "telegram_workspace.html",
+        include_str!("../../templates/telegram_workspace.html"),
+    ),
     ("login.html", include_str!("../../templates/login.html")),
     (
         "notifications.html",
@@ -353,43 +362,55 @@ pub(crate) struct BotNotificationSettingsForm {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DashboardStatusView {
+pub(crate) struct TelegramWorkspaceStatusView {
     pub(crate) kind: &'static str,
     pub(crate) connected: bool,
     pub(crate) error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DashboardMessageView {
+pub(crate) struct TelegramWorkspaceMessageView {
     pub(crate) received_at: String,
     pub(crate) text: String,
     pub(crate) code: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DashboardSessionView {
+pub(crate) struct TelegramWorkspaceSessionView {
     pub(crate) id: String,
     pub(crate) key: String,
     pub(crate) note: String,
     pub(crate) phone: String,
     pub(crate) masked_phone: String,
     pub(crate) session_file: String,
-    pub(crate) status: DashboardStatusView,
+    pub(crate) status: TelegramWorkspaceStatusView,
     pub(crate) latest_code: Option<String>,
     pub(crate) latest_message_at: Option<String>,
     pub(crate) latest_code_at_unix: Option<i64>,
     pub(crate) latest_code_expires_at_unix: Option<i64>,
-    pub(crate) recent_messages: Vec<DashboardMessageView>,
+    pub(crate) recent_messages: Vec<TelegramWorkspaceMessageView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DashboardSnapshot {
+pub(crate) struct TelegramWorkspaceSnapshot {
     pub(crate) total_count: usize,
     pub(crate) connected_count: usize,
     pub(crate) connecting_count: usize,
     pub(crate) error_count: usize,
     pub(crate) generated_at: String,
-    pub(crate) sessions: Vec<DashboardSessionView>,
+    pub(crate) sessions: Vec<TelegramWorkspaceSessionView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct PlatformWorkspaceCardView {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) total_count: usize,
+    pub(crate) connected_count: usize,
+    pub(crate) attention_count: usize,
+    pub(crate) workspace_href: String,
+    pub(crate) setup_href: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -761,9 +782,19 @@ pub(crate) fn dashboard_href(language: Language) -> String {
     String::from("/")
 }
 
-pub(crate) fn setup_href(language: Language) -> String {
+pub(crate) fn telegram_setup_href(language: Language) -> String {
+    let _ = language;
+    String::from(TELEGRAM_SETUP_PATH)
+}
+
+pub(crate) fn telegram_workspace_href(language: Language) -> String {
     let _ = language;
     String::from(TELEGRAM_WORKSPACE_PATH)
+}
+
+pub(crate) fn telegram_snapshot_api_href(language: Language) -> String {
+    let _ = language;
+    String::from(TELEGRAM_SNAPSHOT_API_PATH)
 }
 
 pub(crate) fn settings_href(language: Language) -> String {
@@ -1435,21 +1466,21 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_template_renders_unicode_session_cards() {
+    fn telegram_workspace_template_renders_unicode_session_cards() {
         let mut tera = Tera::default();
         tera.add_raw_templates(EMBEDDED_TEMPLATES)
             .expect("embedded templates should load");
 
         let language = Language::ZhCn;
         let translations = language.translations();
-        let sessions = vec![DashboardSessionView {
+        let sessions = vec![TelegramWorkspaceSessionView {
             id: String::from("session-1"),
             key: String::from("会话 🚀 España العربية"),
             note: String::from("用于测试复制卡片"),
             phone: String::from("+86 138 0000 0000"),
             masked_phone: String::from("+86 138 **** 0000"),
             session_file: String::from("sessions/session-1.session"),
-            status: DashboardStatusView {
+            status: TelegramWorkspaceStatusView {
                 kind: "connected",
                 connected: true,
                 error: None,
@@ -1458,7 +1489,7 @@ mod tests {
             latest_message_at: Some(String::from("2026-03-14 09:00:00 UTC")),
             latest_code_at_unix: Some(1_773_486_000),
             latest_code_expires_at_unix: Some(1_773_486_120),
-            recent_messages: vec![DashboardMessageView {
+            recent_messages: vec![TelegramWorkspaceMessageView {
                 received_at: String::from("2026-03-14 09:00:00 UTC"),
                 text: String::from("Telegram code: 123456"),
                 code: Some(String::from("123456")),
@@ -1468,11 +1499,15 @@ mod tests {
         let mut context = Context::new();
         context.insert("lang", &language.code());
         context.insert("i18n", translations);
-        context.insert("languages", &language_options(language, "/"));
+        context.insert(
+            "languages",
+            &language_options(language, TELEGRAM_WORKSPACE_PATH),
+        );
         context.insert("current_username", "alice");
         context.insert("show_admin", &false);
         context.insert("logout_action", "/logout");
-        context.insert("setup_href", TELEGRAM_WORKSPACE_PATH);
+        context.insert("dashboard_href", "/");
+        context.insert("setup_href", TELEGRAM_SETUP_PATH);
         context.insert("settings_href", "/settings");
         context.insert("admin_href", "/admin");
         context.insert("settings_label", &translations.nav_settings_label);
@@ -1483,7 +1518,10 @@ mod tests {
         context.insert("admin_overview_href", "/admin#users");
         context.insert("banner", &Option::<PageBanner>::None);
         context.insert("sessions", &sessions);
-        context.insert("attention_sessions", &Vec::<DashboardSessionView>::new());
+        context.insert(
+            "attention_sessions",
+            &Vec::<TelegramWorkspaceSessionView>::new(),
+        );
         context.insert("recent_activity_sessions", &sessions);
         context.insert("total_sessions", &1);
         context.insert("connected_count", &1);
@@ -1491,21 +1529,72 @@ mod tests {
         context.insert("error_count", &0);
         context.insert("attention_count", &0);
         context.insert("now", "2026-03-14 09:00:00 UTC");
-        context.insert("snapshot_api", "/api/dashboard/snapshot");
-        context.insert("dashboard_incremental_refresh_seconds", &3_u64);
-        context.insert("dashboard_full_refresh_seconds", &30_u64);
+        context.insert("snapshot_api", TELEGRAM_SNAPSHOT_API_PATH);
+        context.insert("telegram_workspace_incremental_refresh_seconds", &3_u64);
+        context.insert("telegram_workspace_full_refresh_seconds", &30_u64);
         context.insert(
             "transport_warning",
             &Option::<TransportSecurityWarning>::None,
         );
 
         let rendered = tera
-            .render("index.html", &context)
-            .expect("dashboard template should render");
+            .render("telegram_workspace.html", &context)
+            .expect("telegram workspace template should render");
 
         assert!(rendered.contains("会话 🚀 España العربية"));
         assert!(rendered.contains("data-role=\"copy-code-chip\""));
-        assert!(rendered.contains("copyDashboardCode(this)"));
+        assert!(rendered.contains("copyWorkspaceCode(this)"));
+    }
+
+    #[test]
+    fn dashboard_home_template_renders_platform_directory() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+
+        let language = Language::ZhCn;
+        let translations = language.translations();
+        let platforms = vec![PlatformWorkspaceCardView {
+            id: String::from("telegram"),
+            name: String::from("Telegram"),
+            description: String::from("独立工作区"),
+            total_count: 4,
+            connected_count: 3,
+            attention_count: 1,
+            workspace_href: String::from(TELEGRAM_WORKSPACE_PATH),
+            setup_href: String::from(TELEGRAM_SETUP_PATH),
+        }];
+
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert("languages", &language_options(language, "/"));
+        context.insert("current_username", "alice");
+        context.insert("show_admin", &false);
+        context.insert("logout_action", "/logout");
+        context.insert("settings_href", "/settings");
+        context.insert("admin_href", "/admin");
+        context.insert("settings_label", &translations.nav_settings_label);
+        context.insert("admin_label", &translations.nav_admin_label);
+        context.insert("settings_security_href", "/settings#security");
+        context.insert("settings_notifications_href", "/settings#notifications");
+        context.insert("settings_access_href", "/settings#access");
+        context.insert("admin_overview_href", "/admin#users");
+        context.insert("banner", &Option::<PageBanner>::None);
+        context.insert("platforms", &platforms);
+        context.insert("now", "2026-03-14 09:00:00 UTC");
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+
+        let rendered = tera
+            .render("dashboard_home.html", &context)
+            .expect("dashboard home template should render");
+
+        assert!(rendered.contains("Telegram"));
+        assert!(rendered.contains(translations.dashboard_platforms_title));
+        assert!(rendered.contains(translations.dashboard_open_workspace_label));
     }
 
     #[test]
