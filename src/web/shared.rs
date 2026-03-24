@@ -22,7 +22,8 @@ pub(crate) use chrono::{DateTime, Months, TimeDelta, Utc};
 pub(crate) use grammers_client::client::{LoginToken, PasswordToken, UpdatesConfiguration};
 pub(crate) use grammers_client::tl;
 pub(crate) use grammers_client::{
-    Client, InvocationError, SenderPool, SignInError, sender::SenderPoolFatHandle,
+    Client, InvocationError, SenderPool, SignInError,
+    sender::{ConnectionParams, SenderPoolFatHandle},
 };
 pub(crate) use grammers_session::Session;
 pub(crate) use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
@@ -53,7 +54,7 @@ pub(crate) use hanagram_web::security::{
 };
 pub(crate) use hanagram_web::store::{
     AuthSessionRecord, BotNotificationSettings, MetaStore, NewAuditEntry, SessionRecord,
-    SystemSettings, TelegramApiSettings, UserRecord, UserRole,
+    SystemSettings, UserRecord, UserRole,
 };
 
 pub(crate) use super::platform_key;
@@ -82,6 +83,15 @@ pub(crate) const META_DB_FILE_NAME: &str = "app.db";
 pub(crate) const DEFAULT_BOT_TEMPLATE: &str = "Hanagram OTP Alert\n\nAccount: {phone}\nSession: {session_key}\nCode: {code}\nReceived: {received_at}\nStatus: {status}\nSession file: {session_file}\n\nMessage:\n{message}";
 pub(crate) const SESSION_KEY_PREFIX: &str = "hanagram-session-key:v1:";
 pub(crate) const SESSION_NOTE_PREFIX: &str = "hanagram-note:v1:";
+pub(crate) const TELEGRAM_WEBK_API_ID: i32 = 2496;
+pub(crate) const TELEGRAM_WEBK_API_HASH: &str = "8da85b0d5bfe62527e5b244c209159c3";
+pub(crate) const TELEGRAM_WEBK_DEVICE_MODEL: &str =
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
+pub(crate) const TELEGRAM_WEBK_SYSTEM_VERSION: &str = "Win32";
+pub(crate) const TELEGRAM_WEBK_APP_VERSION: &str = "6.1.4 K";
+pub(crate) const TELEGRAM_WEBK_SYSTEM_LANG_CODE: &str = "en-US";
+pub(crate) const TELEGRAM_WEBK_LANG_CODE: &str = "en";
+pub(crate) const TELEGRAM_WEBK_LANG_PACK: &str = "webk";
 pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 10] = [
     ("admin.html", include_str!("../../templates/admin.html")),
     ("index.html", include_str!("../../templates/index.html")),
@@ -227,14 +237,38 @@ pub(crate) struct TelegramClientSession {
     pub(crate) pool_task: JoinHandle<()>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TelegramClientProfile {
+    pub(crate) api_id: i32,
+    pub(crate) api_hash: String,
+}
+
+impl TelegramClientProfile {
+    pub(crate) fn connection_params(&self) -> ConnectionParams {
+        ConnectionParams {
+            device_model: String::from(TELEGRAM_WEBK_DEVICE_MODEL),
+            system_version: String::from(TELEGRAM_WEBK_SYSTEM_VERSION),
+            app_version: String::from(TELEGRAM_WEBK_APP_VERSION),
+            system_lang_code: String::from(TELEGRAM_WEBK_SYSTEM_LANG_CODE),
+            lang_code: String::from(TELEGRAM_WEBK_LANG_CODE),
+            lang_pack: String::from(TELEGRAM_WEBK_LANG_PACK),
+            ..Default::default()
+        }
+    }
+}
+
 impl TelegramClientSession {
-    pub(crate) fn open(session: LoadedSession, api_id: i32) -> Self {
+    pub(crate) fn open(session: LoadedSession, profile: &TelegramClientProfile) -> Self {
         let session = Arc::new(session);
         let SenderPool {
             runner,
             handle: pool_handle,
             updates: _,
-        } = SenderPool::new(Arc::clone(&session), api_id);
+        } = SenderPool::with_configuration(
+            Arc::clone(&session),
+            profile.api_id,
+            profile.connection_params(),
+        );
         let client = Client::new(pool_handle.clone());
         let pool_task = tokio::spawn(runner.run());
 
@@ -246,14 +280,17 @@ impl TelegramClientSession {
         }
     }
 
-    pub(crate) fn open_empty(api_id: i32) -> Self {
-        Self::open(LoadedSession::default(), api_id)
+    pub(crate) fn open_empty(profile: &TelegramClientProfile) -> Self {
+        Self::open(LoadedSession::default(), profile)
     }
 
-    pub(crate) fn open_serialized(session_data: &[u8], api_id: i32) -> Result<Self> {
+    pub(crate) fn open_serialized(
+        session_data: &[u8],
+        profile: &TelegramClientProfile,
+    ) -> Result<Self> {
         let load =
             load_session(session_data).context("failed to load serialized session snapshot")?;
-        Ok(Self::open(load.session, api_id))
+        Ok(Self::open(load.session, profile))
     }
 
     pub(crate) fn snapshot(&self) -> Result<SensitiveBytes> {
@@ -659,8 +696,6 @@ pub(crate) struct AdminBanUserForm {
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct AdminSaveSettingsForm {
-    pub(crate) telegram_api_id: String,
-    pub(crate) telegram_api_hash: String,
     pub(crate) registration_policy: String,
     pub(crate) public_registration_open: Option<String>,
     pub(crate) session_absolute_ttl_hours: u32,
@@ -1000,54 +1035,11 @@ pub(crate) fn bot_settings_ready(settings: &BotNotificationSettings) -> bool {
     settings.enabled && !settings.bot_token.is_empty() && !settings.chat_id.is_empty()
 }
 
-pub(crate) fn configured_telegram_api(settings: &SystemSettings) -> Option<TelegramApiSettings> {
-    let api_id = settings.telegram_api.api_id?;
-    let api_hash = settings.telegram_api.api_hash.trim();
-    if api_id <= 0 || api_hash.is_empty() {
-        return None;
+pub(crate) fn configured_telegram_client_profile() -> TelegramClientProfile {
+    TelegramClientProfile {
+        api_id: TELEGRAM_WEBK_API_ID,
+        api_hash: String::from(TELEGRAM_WEBK_API_HASH),
     }
-
-    Some(TelegramApiSettings {
-        api_id: Some(api_id),
-        api_hash: api_hash.to_owned(),
-    })
-}
-
-pub(crate) fn parse_telegram_api_settings(
-    api_id_raw: &str,
-    api_hash_raw: &str,
-) -> Result<TelegramApiSettings> {
-    let api_id = match api_id_raw.trim() {
-        "" => None,
-        raw => {
-            let parsed = raw
-                .parse::<i32>()
-                .with_context(|| format!("invalid Telegram API ID value: {raw}"))?;
-            anyhow::ensure!(parsed > 0, "Telegram API ID must be greater than 0");
-            Some(parsed)
-        }
-    };
-    let api_hash = api_hash_raw.trim().to_owned();
-
-    anyhow::ensure!(
-        api_id.is_some() == !api_hash.is_empty(),
-        "Telegram API ID and API hash must be filled together"
-    );
-
-    Ok(TelegramApiSettings { api_id, api_hash })
-}
-
-pub(crate) fn telegram_api_status_summary(settings: &SystemSettings, language: Language) -> String {
-    let translations = language.translations();
-    if configured_telegram_api(settings).is_some() {
-        translations.status_configured_label.to_owned()
-    } else {
-        translations.status_not_configured_label.to_owned()
-    }
-}
-
-pub(crate) fn telegram_api_missing_message(language: Language) -> &'static str {
-    language.translations().telegram_api_missing_message
 }
 
 pub(crate) fn bot_status_summary(settings: &BotNotificationSettings, language: Language) -> String {
@@ -1501,5 +1493,20 @@ mod tests {
         assert!(rendered.contains("会话 🚀 España العربية"));
         assert!(rendered.contains("data-role=\"copy-code-chip\""));
         assert!(rendered.contains("copyDashboardCode(this)"));
+    }
+
+    #[test]
+    fn telegram_client_profile_uses_webk_fingerprint() {
+        let profile = configured_telegram_client_profile();
+        let params = profile.connection_params();
+
+        assert_eq!(profile.api_id, TELEGRAM_WEBK_API_ID);
+        assert_eq!(profile.api_hash, TELEGRAM_WEBK_API_HASH);
+        assert_eq!(params.device_model, TELEGRAM_WEBK_DEVICE_MODEL);
+        assert_eq!(params.system_version, TELEGRAM_WEBK_SYSTEM_VERSION);
+        assert_eq!(params.app_version, TELEGRAM_WEBK_APP_VERSION);
+        assert_eq!(params.system_lang_code, TELEGRAM_WEBK_SYSTEM_LANG_CODE);
+        assert_eq!(params.lang_code, TELEGRAM_WEBK_LANG_CODE);
+        assert_eq!(params.lang_pack, TELEGRAM_WEBK_LANG_PACK);
     }
 }

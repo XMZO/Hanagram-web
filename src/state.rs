@@ -13,7 +13,6 @@ use tokio::sync::RwLock;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionErrorKind {
     UnlockRequired,
-    TelegramApiMissing,
     UnlockFailed,
     Unauthorized,
     LoadFailed,
@@ -24,7 +23,6 @@ impl SessionErrorKind {
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnlockRequired => "unlock_required",
-            Self::TelegramApiMissing => "telegram_api_missing",
             Self::UnlockFailed => "unlock_failed",
             Self::Unauthorized => "unauthorized",
             Self::LoadFailed => "load_failed",

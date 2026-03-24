@@ -20,12 +20,6 @@ const APP_SCHEMA_VERSION: i64 = 2;
 const INCOMPATIBLE_SCHEMA_MESSAGE: &str = "existing metadata database schema is incompatible with this build; delete .hanagram/app.db and restart";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct TelegramApiSettings {
-    pub api_id: Option<i32>,
-    pub api_hash: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BotNotificationSettings {
     pub enabled: bool,
     pub bot_token: String,
@@ -57,7 +51,6 @@ pub struct SystemSettings {
     pub cookie_secure: bool,
     pub max_idle_timeout_minutes: Option<u32>,
     pub argon_policy: ArgonPolicy,
-    pub telegram_api: TelegramApiSettings,
 }
 
 impl Default for SystemSettings {
@@ -74,7 +67,6 @@ impl Default for SystemSettings {
             cookie_secure: true,
             max_idle_timeout_minutes: None,
             argon_policy: ArgonPolicy::minimum(),
-            telegram_api: TelegramApiSettings::default(),
         }
     }
 }

@@ -9,7 +9,6 @@ fn localized_session_error(
 ) -> Option<String> {
     let message = match error_kind? {
         SessionErrorKind::UnlockRequired => translations.session_worker_unlock_required_message,
-        SessionErrorKind::TelegramApiMissing => translations.telegram_api_missing_message,
         SessionErrorKind::UnlockFailed => translations.session_worker_unlock_failed_message,
         SessionErrorKind::Unauthorized => translations.session_worker_unauthorized_message,
         SessionErrorKind::LoadFailed => translations.session_worker_load_failed_message,

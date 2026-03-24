@@ -107,13 +107,6 @@
         </section>
         {% endif %}
 
-        {% if not telegram_api_ready %}
-        <section class="paper-shadow mb-6 rounded-[1.6rem] border border-[#e8d3ad] bg-[#fff6e6] px-5 py-4 text-sm leading-7 text-[#866434]">
-            <p class="font-semibold">{{ telegram_api_notice_title }}</p>
-            <p class="mt-2">{{ telegram_api_notice_body }}</p>
-        </section>
-        {% endif %}
-
         <section class="grid gap-5 lg:grid-cols-2">
             <article class="paper-shadow rounded-[1.8rem] border border-line/80 bg-paper/95 p-6">
                 <h2 class="font-display text-3xl font-semibold text-ink">{{ i18n.setup_string_title }}</h2>

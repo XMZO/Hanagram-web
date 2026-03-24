@@ -51,3 +51,6 @@ zstd = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[patch."https://github.com/Lonami/grammers"]
+grammers-mtsender = { path = "vendor/grammers-mtsender-webk" }

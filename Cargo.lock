@@ -1034,7 +1034,6 @@ dependencies = [
 [[package]]
 name = "grammers-mtsender"
 version = "0.8.1"
-source = "git+https://github.com/Lonami/grammers#fa7692e49f301f16dc671c2f305ac1a32cad1a8e"
 dependencies = [
  "bytes",
  "grammers-crypto",

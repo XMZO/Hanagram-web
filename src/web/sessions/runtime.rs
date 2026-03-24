@@ -157,16 +157,7 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
         master_key.as_ref().as_slice(),
     )
     .await;
-    let system_settings = app_state.system_settings.read().await.clone();
-    let Some(telegram_api) = configured_telegram_api(&system_settings) else {
-        set_session_status(
-            &app_state.shared_state,
-            &worker_key,
-            SessionStatus::Error(SessionErrorKind::TelegramApiMissing),
-        )
-        .await;
-        return;
-    };
+    let telegram_profile = configured_telegram_client_profile();
     let session =
         match load_persisted_session(master_key.as_ref().as_slice(), &encrypted_session_file).await
         {
@@ -187,9 +178,6 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
             }
         };
     let worker_state = Arc::clone(&app_state.shared_state);
-    let api_id = telegram_api
-        .api_id
-        .expect("configured telegram api id should exist");
     let meta_store = Arc::clone(&app_state.meta_store);
     let runtime_cache = Arc::clone(&app_state.runtime_cache);
     let http_client = app_state.http_client.clone();
@@ -202,7 +190,7 @@ pub(crate) async fn register_session_record(app_state: &AppState, session_record
             encrypted_session_file,
             session,
             worker_state,
-            api_id,
+            telegram_profile,
             master_key,
             meta_store,
             runtime_cache,
@@ -224,14 +212,6 @@ pub(crate) async fn unlock_user_sessions(app_state: &AppState, user_id: &str) {
         .list_session_records_for_user(user_id)
         .await
     {
-        for session_record in session_records {
-            register_session_record(app_state, session_record).await;
-        }
-    }
-}
-
-pub(crate) async fn reload_all_session_workers(app_state: &AppState) {
-    if let Ok(session_records) = app_state.meta_store.list_all_session_records().await {
         for session_record in session_records {
             register_session_record(app_state, session_record).await;
         }
@@ -287,7 +267,7 @@ async fn run_session_worker(
     encrypted_session_file: PathBuf,
     session: Arc<LoadedSession>,
     shared_state: SharedState,
-    api_id: i32,
+    telegram_profile: TelegramClientProfile,
     master_key: SharedMasterKey,
     meta_store: MetaStoreHandle,
     runtime_cache: RuntimeCacheHandle,
@@ -308,7 +288,7 @@ async fn run_session_worker(
             &key,
             Arc::clone(&session),
             &shared_state,
-            api_id,
+            &telegram_profile,
             &meta_store,
             runtime_cache.as_ref(),
             master_key.as_ref().as_slice(),
@@ -388,7 +368,7 @@ async fn run_session_once(
     key: &str,
     session: Arc<LoadedSession>,
     shared_state: &SharedState,
-    api_id: i32,
+    telegram_profile: &TelegramClientProfile,
     meta_store: &MetaStoreHandle,
     runtime_cache: &RuntimeCache,
     master_key: &[u8],
@@ -399,7 +379,11 @@ async fn run_session_once(
         runner,
         handle: pool_handle,
         updates,
-    } = SenderPool::new(Arc::clone(&session), api_id);
+    } = SenderPool::with_configuration(
+        Arc::clone(&session),
+        telegram_profile.api_id,
+        telegram_profile.connection_params(),
+    );
     let client = Client::new(pool_handle.clone());
     let pool_task = tokio::spawn(runner.run());
 

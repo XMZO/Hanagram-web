@@ -8,7 +8,6 @@ use super::middleware::{
     auth_session_is_active, clear_auth_session_sensitive_state, clear_pending_flows_for_user,
     drop_user_master_key_if_no_active_sessions, sync_active_session_idle_timeouts,
 };
-use super::sessions;
 use super::shared::*;
 
 pub(crate) fn routes() -> Router<AppState> {
@@ -506,7 +505,6 @@ pub(crate) async fn render_admin_page(
             .bot_notification_settings
             .clone(),
     );
-    let telegram_api_status = telegram_api_status_summary(&system_settings, language);
     let usernames_by_id = raw_users
         .iter()
         .map(|user| (user.id.clone(), user.username.clone()))
@@ -614,22 +612,6 @@ pub(crate) async fn render_admin_page(
     context.insert("settings_href", &settings_href(language));
     context.insert("dashboard_label", &translations.nav_dashboard_label);
     context.insert("settings_label", &translations.nav_settings_label);
-    context.insert("api_title", &translations.admin_api_title);
-    context.insert("api_description", &translations.admin_api_description);
-    context.insert("api_status_label", &translations.admin_api_status_label);
-    context.insert("api_status_value", &telegram_api_status);
-    context.insert("api_id_label", &translations.admin_api_id_label);
-    context.insert("api_hash_label", &translations.admin_api_hash_label);
-    context.insert("api_hint", &translations.admin_api_hint);
-    context.insert(
-        "telegram_api_id",
-        &system_settings
-            .telegram_api
-            .api_id
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-    );
-    context.insert("telegram_api_hash", &system_settings.telegram_api.api_hash);
     context.insert("create_user_title", &translations.admin_create_user_title);
     context.insert("username_label", &translations.login_username);
     context.insert("password_label", &translations.login_password);
@@ -1848,26 +1830,6 @@ async fn admin_save_system_settings_handler(
     }
 
     let mut settings = app_state.system_settings.read().await.clone();
-    let previous_telegram_api = settings.telegram_api.clone();
-    settings.telegram_api =
-        match parse_telegram_api_settings(&form.telegram_api_id, &form.telegram_api_hash) {
-            Ok(value) => value,
-            Err(error) => {
-                return match render_admin_page(
-                    &app_state,
-                    &authenticated,
-                    language,
-                    None,
-                    Some(PageBanner::error(error.to_string())),
-                    &headers,
-                )
-                .await
-                {
-                    Ok(html) => (StatusCode::BAD_REQUEST, html).into_response(),
-                    Err(status) => status.into_response(),
-                };
-            }
-        };
     settings.registration_policy = parse_registration_policy(&form.registration_policy);
     settings.public_registration_open = form.public_registration_open.is_some();
     settings.session_absolute_ttl_hours = form.session_absolute_ttl_hours.max(1);
@@ -1921,9 +1883,6 @@ async fn admin_save_system_settings_handler(
             requested_lanes,
         );
     }
-    let telegram_api_changed = previous_telegram_api != settings.telegram_api;
-    let telegram_api_configured = configured_telegram_api(&settings).is_some();
-
     if let Err(error) = app_state.meta_store.save_system_settings(&settings).await {
         return match render_admin_page(
             &app_state,
@@ -1960,9 +1919,6 @@ async fn admin_save_system_settings_handler(
         };
     }
     *app_state.system_settings.write().await = settings;
-    if telegram_api_changed {
-        sessions::reload_all_session_workers(&app_state).await;
-    }
 
     let _ = app_state
         .meta_store
@@ -1973,12 +1929,10 @@ async fn admin_save_system_settings_handler(
             ip_address: extract_client_ip(&headers),
             success: true,
             details_json: serde_json::json!({
-                "telegram_api_configured": telegram_api_configured,
                 "registration_policy": form.registration_policy,
                 "totp_policy": form.totp_policy,
                 "password_strength_policy": form.password_strength_policy,
-                "argon_policy_changed": argon_policy_changed,
-                "telegram_api_changed": telegram_api_changed
+                "argon_policy_changed": argon_policy_changed
             })
             .to_string(),
         })

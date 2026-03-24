@@ -136,8 +136,6 @@ async fn render_setup_page(
 ) -> std::result::Result<Html<String>, StatusCode> {
     let translations = language.translations();
     let languages = language_options(language, "/sessions/new");
-    let system_settings = app_state.system_settings.read().await.clone();
-    let telegram_api_ready = configured_telegram_api(&system_settings).is_some();
 
     let mut context = Context::new();
     context.insert("lang", &language.code());
@@ -145,15 +143,6 @@ async fn render_setup_page(
     context.insert("languages", &languages);
     context.insert("banner", &banner);
     context.insert("dashboard_href", &dashboard_href(language));
-    context.insert("telegram_api_ready", &telegram_api_ready);
-    context.insert(
-        "telegram_api_notice_title",
-        &translations.setup_telegram_api_notice_title,
-    );
-    context.insert(
-        "telegram_api_notice_body",
-        &translations.setup_telegram_api_notice_body,
-    );
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "session_setup.html", &context)
@@ -794,23 +783,13 @@ async fn start_phone_login_handler(
         )
         .await;
     }
-    let system_settings = app_state.system_settings.read().await.clone();
-    let Some(telegram_api) = configured_telegram_api(&system_settings) else {
-        return render_setup_error_response(
-            &app_state,
-            language,
-            telegram_api_missing_message(language),
-            &headers,
-        )
-        .await;
-    };
+    let telegram_profile = configured_telegram_client_profile();
     let final_path = session_storage_path(&app_state.runtime, &authenticated.user.id, &session_id);
-    let client_session =
-        TelegramClientSession::open_empty(telegram_api.api_id.expect("api id should exist"));
+    let client_session = TelegramClientSession::open_empty(&telegram_profile);
 
     let result = client_session
         .client
-        .request_login_code(&login_phone, &telegram_api.api_hash)
+        .request_login_code(&login_phone, &telegram_profile.api_hash)
         .await;
     let session_data = client_session.snapshot();
     client_session.shutdown().await;
@@ -1001,19 +980,10 @@ async fn verify_phone_code_handler(
     };
     drop(flows);
 
-    let system_settings = app_state.system_settings.read().await.clone();
-    let Some(telegram_api) = configured_telegram_api(&system_settings) else {
-        return render_setup_error_response(
-            &app_state,
-            language,
-            telegram_api_missing_message(language),
-            &headers,
-        )
-        .await;
-    };
+    let telegram_profile = configured_telegram_client_profile();
     let client_session = match TelegramClientSession::open_serialized(
         flow.session_data.as_ref().as_slice(),
-        telegram_api.api_id.expect("api id should exist"),
+        &telegram_profile,
     ) {
         Ok(client_session) => client_session,
         Err(error) => {
@@ -1176,19 +1146,10 @@ async fn verify_phone_password_handler(
     };
     drop(flows);
 
-    let system_settings = app_state.system_settings.read().await.clone();
-    let Some(telegram_api) = configured_telegram_api(&system_settings) else {
-        return render_setup_error_response(
-            &app_state,
-            language,
-            telegram_api_missing_message(language),
-            &headers,
-        )
-        .await;
-    };
+    let telegram_profile = configured_telegram_client_profile();
     let client_session = match TelegramClientSession::open_serialized(
         flow.session_data.as_ref().as_slice(),
-        telegram_api.api_id.expect("api id should exist"),
+        &telegram_profile,
     ) {
         Ok(client_session) => client_session,
         Err(error) => {
@@ -1355,17 +1316,8 @@ async fn qr_flow_page_handler(
     };
 
     let banner = qr_flow_error_banner(language, query.error.as_deref());
-    let system_settings = app_state.system_settings.read().await.clone();
-    let Some(telegram_api) = configured_telegram_api(&system_settings) else {
-        return render_setup_error_response(
-            &app_state,
-            language,
-            telegram_api_missing_message(language),
-            &headers,
-        )
-        .await;
-    };
-    match poll_qr_flow(&telegram_api, &flow).await {
+    let telegram_profile = configured_telegram_client_profile();
+    match poll_qr_flow(&telegram_profile, &flow).await {
         Ok((QrStatus::Pending(pending), session_data)) => {
             if let Some(active_flow) = app_state.qr_flows.write().await.get_mut(&flow_id) {
                 active_flow.session_data = share_sensitive_bytes(session_data);
@@ -1477,20 +1429,20 @@ async fn render_setup_error_response(
 }
 
 async fn poll_qr_flow(
-    telegram_api: &TelegramApiSettings,
+    telegram_profile: &TelegramClientProfile,
     flow: &PendingQrLogin,
 ) -> Result<(QrStatus, SensitiveBytes)> {
     let client_session = TelegramClientSession::open_serialized(
         flow.session_data.as_ref().as_slice(),
-        telegram_api.api_id.expect("api id should exist"),
+        telegram_profile,
     )
     .context("failed to open qr login session")?;
 
     let export_result = client_session
         .client
         .invoke(&tl::functions::auth::ExportLoginToken {
-            api_id: telegram_api.api_id.expect("api id should exist"),
-            api_hash: telegram_api.api_hash.clone(),
+            api_id: telegram_profile.api_id,
+            api_hash: telegram_profile.api_hash.clone(),
             except_ids: Vec::new(),
         })
         .await;
