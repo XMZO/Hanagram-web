@@ -82,6 +82,10 @@ pub(crate) const TELEGRAM_WORKSPACE_FULL_SYNC_SECONDS: u64 = 30;
 pub(crate) const TELEGRAM_OTP_VISIBILITY_SECONDS: i64 = 600;
 pub(crate) const TELEGRAM_WORKSPACE_PATH: &str = "/platforms/telegram";
 pub(crate) const STEAM_WORKSPACE_PATH: &str = "/platforms/steam";
+pub(crate) const STEAM_SNAPSHOT_API_PATH: &str = "/api/platforms/steam/snapshot";
+pub(crate) const STEAM_CONFIRMATIONS_API_PATH: &str = "/api/platforms/steam/confirmations";
+pub(crate) const STEAM_IMPORT_UPLOAD_PATH: &str = "/platforms/steam/import/upload";
+pub(crate) const STEAM_IMPORT_MANUAL_PATH: &str = "/platforms/steam/import/manual";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
@@ -801,6 +805,26 @@ pub(crate) fn telegram_workspace_href(language: Language) -> String {
 pub(crate) fn steam_workspace_href(language: Language) -> String {
     let _ = language;
     String::from(STEAM_WORKSPACE_PATH)
+}
+
+pub(crate) fn steam_snapshot_api_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_SNAPSHOT_API_PATH)
+}
+
+pub(crate) fn steam_import_upload_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_IMPORT_UPLOAD_PATH)
+}
+
+pub(crate) fn steam_import_manual_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_IMPORT_MANUAL_PATH)
+}
+
+pub(crate) fn steam_confirmations_api_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_CONFIRMATIONS_API_PATH)
 }
 
 pub(crate) fn telegram_snapshot_api_href(language: Language) -> String {
@@ -1585,8 +1609,8 @@ mod tests {
                 connected_count: 0,
                 attention_count: 0,
                 workspace_href: String::from(STEAM_WORKSPACE_PATH),
-                secondary_href: String::from("/platforms/steam#modules"),
-                secondary_label: String::from(translations.steam_workspace_secondary_action_label),
+                secondary_href: String::from("/platforms/steam#codes"),
+                secondary_label: String::from(translations.steam_codes_title),
             },
         ];
 
@@ -1621,11 +1645,11 @@ mod tests {
         assert!(rendered.contains("Steam"));
         assert!(rendered.contains(translations.dashboard_platforms_title));
         assert!(rendered.contains(translations.dashboard_open_workspace_label));
-        assert!(rendered.contains(translations.steam_workspace_secondary_action_label));
+        assert!(rendered.contains(translations.steam_codes_title));
     }
 
     #[test]
-    fn steam_workspace_template_renders_reserved_workspace() {
+    fn steam_workspace_template_renders_dynamic_codes_workspace() {
         let mut tera = Tera::default();
         tera.add_raw_templates(EMBEDDED_TEMPLATES)
             .expect("embedded templates should load");
@@ -1654,6 +1678,58 @@ mod tests {
         context.insert("settings_access_href", "/settings#access");
         context.insert("admin_overview_href", "/admin#users");
         context.insert("banner", &Option::<PageBanner>::None);
+        context.insert("default_tab", "codes");
+        context.insert("snapshot_api", STEAM_SNAPSHOT_API_PATH);
+        context.insert("confirmations_api", STEAM_CONFIRMATIONS_API_PATH);
+        context.insert("steam_import_upload_action", STEAM_IMPORT_UPLOAD_PATH);
+        context.insert("steam_import_manual_action", STEAM_IMPORT_MANUAL_PATH);
+        context.insert("steam_accounts_dir", "users/alice/steam");
+        context.insert("steam_managed_dir", "users/alice/steam/accounts");
+        context.insert("total_accounts", &1);
+        context.insert("ready_accounts", &1);
+        context.insert("managed_accounts", &1);
+        context.insert("encrypted_accounts", &1);
+        context.insert("confirmation_ready_accounts", &1);
+        context.insert("issue_count", &0);
+        context.insert(
+            "snapshot",
+            &serde_json::json!({
+                "total_count": 1,
+                "ready_count": 1,
+                "managed_count": 1,
+                "encrypted_count": 1,
+                "confirmation_ready_count": 1,
+                "issue_count": 0,
+                "generated_at": "2026-03-14 09:00:00 UTC",
+                "generated_at_unix": 1_773_486_000_i64,
+                "code_period_seconds": 30,
+                "accounts": [{
+                    "id": "alice.maFile",
+                    "account_name": "alice",
+                    "steam_id": "76561198000000000",
+                    "storage_file": "steam/alice.maFile",
+                    "current_code": "2F9J5",
+                    "code_started_at_unix": 1_773_486_000_i64,
+                    "code_expires_at_unix": 1_773_486_030_i64,
+                    "encrypted_at_rest": true,
+                    "can_manage": true,
+                    "is_manual_entry": false,
+                    "is_uploaded_mafile": true,
+                    "is_legacy_mafile": false,
+                    "has_identity_secret": true,
+                    "has_confirmation_secret_material": true,
+                    "has_confirmation_session": true,
+                    "confirmation_ready": true,
+                    "imported_from": "alice.maFile",
+                    "created_at": "2026-03-14 09:00:00 UTC",
+                    "updated_at": "2026-03-14 09:00:00 UTC",
+                    "update_material_action": "/platforms/steam/accounts/demo/materials",
+                    "rename_action": "/platforms/steam/accounts/demo/rename",
+                    "delete_action": "/platforms/steam/accounts/demo/delete"
+                }],
+                "issues": []
+            }),
+        );
         context.insert("now", "2026-03-14 09:00:00 UTC");
         context.insert(
             "transport_warning",
@@ -1665,8 +1741,9 @@ mod tests {
             .expect("steam workspace template should render");
 
         assert!(rendered.contains(translations.steam_workspace_title));
-        assert!(rendered.contains(translations.steam_workspace_modules_title));
-        assert!(rendered.contains(translations.steam_workspace_module_guard_title));
+        assert!(rendered.contains(translations.steam_codes_title));
+        assert!(rendered.contains("2F9J5"));
+        assert!(rendered.contains("copySteamCode(this)"));
     }
 
     #[test]
