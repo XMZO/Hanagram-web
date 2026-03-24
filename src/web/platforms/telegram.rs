@@ -201,7 +201,8 @@ pub(crate) async fn build_workspace_card(
         connected_count: snapshot.connected_count,
         attention_count: snapshot.connecting_count + snapshot.error_count,
         workspace_href: telegram_workspace_href(language),
-        setup_href: telegram_setup_href(language),
+        secondary_href: telegram_setup_href(language),
+        secondary_label: translations.dashboard_add_session.to_owned(),
     }
 }
 

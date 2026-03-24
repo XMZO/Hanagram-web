@@ -29,7 +29,9 @@
                         sageDeep: "#69806b",
                         peach: "#d8a79b",
                         butter: "#e7d5ae",
-                        mint: "#eef5ee"
+                        mint: "#eef5ee",
+                        steam: "#35536a",
+                        steamMist: "#e7eef3"
                     }
                 }
             }
@@ -39,10 +41,10 @@
         :root { color-scheme: light; }
         body {
             background:
-                radial-gradient(circle at 12% 16%, rgba(145, 167, 146, 0.17), transparent 24%),
-                radial-gradient(circle at 88% 18%, rgba(216, 167, 155, 0.14), transparent 20%),
-                radial-gradient(circle at 78% 82%, rgba(231, 213, 174, 0.18), transparent 24%),
-                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 42%, #f3ede3 100%);
+                radial-gradient(circle at 14% 18%, rgba(53, 83, 106, 0.15), transparent 24%),
+                radial-gradient(circle at 83% 16%, rgba(145, 167, 146, 0.14), transparent 21%),
+                radial-gradient(circle at 80% 84%, rgba(231, 213, 174, 0.16), transparent 24%),
+                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f2ece2 100%);
         }
         .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
         .paper-grid {
@@ -62,15 +64,15 @@
             <div class="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr),minmax(19rem,23rem)] lg:px-5 lg:py-5">
                 <div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-ink/60">
-                            {{ i18n.dashboard_workspace_eyebrow }}
+                        <span class="inline-flex items-center rounded-full border border-steam/20 bg-steamMist px-3 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.26em] text-steam">
+                            {{ i18n.steam_workspace_reserved_badge }}
                         </span>
-                        <span class="inline-flex items-center rounded-full border border-sage/35 bg-mint px-3 py-1.5 text-sm text-sageDeep">
+                        <span class="inline-flex items-center rounded-full border border-line bg-white/90 px-3 py-1.5 text-sm text-ink/72">
                             {{ current_username }}
                         </span>
                     </div>
-                    <h1 class="mt-3 font-display text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.35rem]">{{ i18n.dashboard_workspace_title }}</h1>
-                    <p class="mt-2 max-w-2xl text-sm leading-6 text-ink/72">{{ i18n.dashboard_platforms_description }}</p>
+                    <h1 class="mt-3 font-display text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.35rem]">{{ i18n.steam_workspace_title }}</h1>
+                    <p class="mt-2 max-w-2xl text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_description }}</p>
                 </div>
 
                 <div class="grid gap-3">
@@ -93,17 +95,14 @@
                                     </a>
                                     {% endfor %}
                                 </div>
-                                <a
-                                    href="{{ settings_href }}"
-                                    class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                                >
+                                <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">
+                                    {{ i18n.nav_dashboard_label }}
+                                </a>
+                                <a href="{{ settings_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">
                                     {{ settings_label }}
                                 </a>
                                 {% if show_admin %}
-                                <a
-                                    href="{{ admin_href }}"
-                                    class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                                >
+                                <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">
                                     {{ admin_label }}
                                 </a>
                                 {% endif %}
@@ -119,14 +118,18 @@
                         </div>
                     </div>
 
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-3 sm:grid-cols-3">
                         <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_platforms_title }}</p>
-                            <p class="mt-1.5 text-sm leading-6 text-ink/75">{{ platforms | length }}</p>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_accounts }}</p>
+                            <p class="mt-1.5 text-lg font-semibold text-ink">0</p>
                         </div>
                         <div class="rounded-[1.05rem] border border-line/80 bg-white/85 px-4 py-3">
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_shortcuts_title }}</p>
-                            <p class="mt-1.5 text-sm leading-6 text-ink/75">{{ i18n.dashboard_shortcuts_description }}</p>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_connected }}</p>
+                            <p class="mt-1.5 text-lg font-semibold text-ink">0</p>
+                        </div>
+                        <div class="rounded-[1.05rem] border border-steam/20 bg-steamMist px-4 py-3">
+                            <p class="text-xs uppercase tracking-[0.24em] text-steam/70">{{ i18n.steam_workspace_reserved_badge }}</p>
+                            <p class="mt-1.5 text-sm leading-6 text-steam">{{ i18n.login_ready_label }}</p>
                         </div>
                     </div>
                 </div>
@@ -147,66 +150,58 @@
         {% endif %}
 
         <section class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.3fr),minmax(18rem,21rem)]">
-            <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_platforms_title }}</p>
-                        <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.dashboard_platforms_title }}</h2>
+            <div class="space-y-4">
+                <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_workspace_overview_title }}</p>
+                    <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.steam_workspace_overview_title }}</h2>
+                    <p class="mt-3 text-sm leading-7 text-ink/72">{{ i18n.steam_workspace_overview_body }}</p>
+                </article>
+
+                <article id="modules" class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_workspace_modules_title }}</p>
+                            <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.steam_workspace_modules_title }}</h2>
+                        </div>
+                        <p class="max-w-2xl text-sm leading-6 text-ink/68">{{ i18n.steam_workspace_modules_description }}</p>
                     </div>
-                    <p class="max-w-2xl text-sm leading-6 text-ink/68">{{ i18n.dashboard_platforms_description }}</p>
-                </div>
 
-                <div class="mt-4 grid gap-3">
-                    {% for platform in platforms %}
-                    <article class="rounded-[1.2rem] border border-line/80 bg-paper/92 p-4">
-                        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                                <div class="flex items-center gap-2">
-                                    <span class="inline-flex items-center rounded-full border border-line bg-white px-3 py-1 text-[0.68rem] uppercase tracking-[0.2em] text-ink/50">{{ platform.id }}</span>
-                                    <p class="text-lg font-semibold text-ink">{{ platform.name }}</p>
-                                </div>
-                                <p class="mt-2 text-sm leading-6 text-ink/70">{{ platform.description }}</p>
-                            </div>
-                            <div class="grid gap-2 sm:min-w-[11rem]">
-                                <a href="{{ platform.workspace_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm text-center text-ink/80 transition hover:border-sage hover:bg-[#faf6ef]">{{ i18n.dashboard_open_workspace_label }}</a>
-                                <a href="{{ platform.secondary_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm text-center text-ink transition hover:border-sage hover:bg-[#e8dccb]">{{ platform.secondary_label }}</a>
-                            </div>
-                        </div>
-
-                        <div class="mt-4 grid gap-2 sm:grid-cols-3">
-                            <div class="rounded-[1rem] border border-line/75 bg-white/84 px-3.5 py-3">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/45">{{ i18n.stat_accounts }}</p>
-                                <p class="mt-2 text-lg font-semibold text-ink">{{ platform.total_count }}</p>
-                            </div>
-                            <div class="rounded-[1rem] border border-line/75 bg-white/84 px-3.5 py-3">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/45">{{ i18n.stat_connected }}</p>
-                                <p class="mt-2 text-lg font-semibold text-sageDeep">{{ platform.connected_count }}</p>
-                            </div>
-                            <div class="rounded-[1rem] border border-line/75 bg-white/84 px-3.5 py-3">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/45">{{ i18n.dashboard_attention_title }}</p>
-                                <p class="mt-2 text-lg font-semibold {% if platform.attention_count > 0 %}text-[#a66c60]{% else %}text-ink{% endif %}">{{ platform.attention_count }}</p>
-                            </div>
-                        </div>
-                    </article>
-                    {% endfor %}
-                </div>
-            </article>
+                    <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                        <article class="rounded-[1.15rem] border border-line/80 bg-paper/92 p-4">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_workspace_module_accounts_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_module_accounts_body }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-line/80 bg-paper/92 p-4">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_workspace_module_guard_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_module_guard_body }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-line/80 bg-paper/92 p-4">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_workspace_module_notifications_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_module_notifications_body }}</p>
+                        </article>
+                        <article class="rounded-[1.15rem] border border-line/80 bg-paper/92 p-4">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_workspace_module_storage_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/72">{{ i18n.steam_workspace_module_storage_body }}</p>
+                        </article>
+                    </div>
+                </article>
+            </div>
 
             <div class="space-y-4">
                 <article class="paper-shadow rounded-[1.35rem] border border-line/80 bg-white/88 p-4">
                     <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.dashboard_shortcuts_title }}</p>
                     <div class="mt-4 grid gap-3">
+                        <a href="{{ dashboard_href }}" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.nav_dashboard_label }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.dashboard_platforms_description }}</p>
+                        </a>
+                        <a href="#modules" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">
+                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_workspace_modules_title }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.steam_workspace_modules_description }}</p>
+                        </a>
                         <a href="{{ settings_security_href }}" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">
                             <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_security_card_title }}</p>
                             <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.dashboard_security_card_body }}</p>
-                        </a>
-                        <a href="{{ settings_notifications_href }}" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">
-                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_notifications_card_title }}</p>
-                            <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.dashboard_notifications_card_body }}</p>
-                        </a>
-                        <a href="{{ settings_access_href }}" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">
-                            <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.dashboard_access_card_title }}</p>
-                            <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.dashboard_access_card_body }}</p>
                         </a>
                         {% if show_admin %}
                         <a href="{{ admin_overview_href }}" class="rounded-[1rem] border border-line/80 bg-paper px-4 py-3 transition hover:border-sage">

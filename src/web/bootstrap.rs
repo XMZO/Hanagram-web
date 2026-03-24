@@ -106,6 +106,7 @@ pub(crate) async fn run() -> Result<()> {
         .merge(auth::protected_routes())
         .merge(notifications::routes())
         .merge(admin::routes())
+        .merge(platforms::steam::routes())
         .merge(platforms::telegram::routes())
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),

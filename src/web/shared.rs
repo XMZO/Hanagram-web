@@ -81,6 +81,7 @@ pub(crate) const TELEGRAM_WORKSPACE_INCREMENTAL_SYNC_SECONDS: u64 = 3;
 pub(crate) const TELEGRAM_WORKSPACE_FULL_SYNC_SECONDS: u64 = 30;
 pub(crate) const TELEGRAM_OTP_VISIBILITY_SECONDS: i64 = 600;
 pub(crate) const TELEGRAM_WORKSPACE_PATH: &str = "/platforms/telegram";
+pub(crate) const STEAM_WORKSPACE_PATH: &str = "/platforms/steam";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
@@ -100,7 +101,7 @@ pub(crate) const TELEGRAM_WEBK_APP_VERSION: &str = "6.1.4 K";
 pub(crate) const TELEGRAM_WEBK_SYSTEM_LANG_CODE: &str = "en-US";
 pub(crate) const TELEGRAM_WEBK_LANG_CODE: &str = "en";
 pub(crate) const TELEGRAM_WEBK_LANG_PACK: &str = "webk";
-pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 11] = [
+pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 12] = [
     ("admin.html", include_str!("../../templates/admin.html")),
     (
         "dashboard_home.html",
@@ -134,6 +135,10 @@ pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 11] = [
     (
         "settings.html",
         include_str!("../../templates/settings.html"),
+    ),
+    (
+        "steam_workspace.html",
+        include_str!("../../templates/steam_workspace.html"),
     ),
     (
         "totp_setup.html",
@@ -410,7 +415,8 @@ pub(crate) struct PlatformWorkspaceCardView {
     pub(crate) connected_count: usize,
     pub(crate) attention_count: usize,
     pub(crate) workspace_href: String,
-    pub(crate) setup_href: String,
+    pub(crate) secondary_href: String,
+    pub(crate) secondary_label: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -790,6 +796,11 @@ pub(crate) fn telegram_setup_href(language: Language) -> String {
 pub(crate) fn telegram_workspace_href(language: Language) -> String {
     let _ = language;
     String::from(TELEGRAM_WORKSPACE_PATH)
+}
+
+pub(crate) fn steam_workspace_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_WORKSPACE_PATH)
 }
 
 pub(crate) fn telegram_snapshot_api_href(language: Language) -> String {
@@ -1554,16 +1565,30 @@ mod tests {
 
         let language = Language::ZhCn;
         let translations = language.translations();
-        let platforms = vec![PlatformWorkspaceCardView {
-            id: String::from("telegram"),
-            name: String::from("Telegram"),
-            description: String::from("独立工作区"),
-            total_count: 4,
-            connected_count: 3,
-            attention_count: 1,
-            workspace_href: String::from(TELEGRAM_WORKSPACE_PATH),
-            setup_href: String::from(TELEGRAM_SETUP_PATH),
-        }];
+        let platforms = vec![
+            PlatformWorkspaceCardView {
+                id: String::from("telegram"),
+                name: String::from("Telegram"),
+                description: String::from("独立工作区"),
+                total_count: 4,
+                connected_count: 3,
+                attention_count: 1,
+                workspace_href: String::from(TELEGRAM_WORKSPACE_PATH),
+                secondary_href: String::from(TELEGRAM_SETUP_PATH),
+                secondary_label: String::from(translations.dashboard_add_session),
+            },
+            PlatformWorkspaceCardView {
+                id: String::from("steam"),
+                name: String::from("Steam"),
+                description: String::from("模块预留"),
+                total_count: 0,
+                connected_count: 0,
+                attention_count: 0,
+                workspace_href: String::from(STEAM_WORKSPACE_PATH),
+                secondary_href: String::from("/platforms/steam#modules"),
+                secondary_label: String::from(translations.steam_workspace_secondary_action_label),
+            },
+        ];
 
         let mut context = Context::new();
         context.insert("lang", &language.code());
@@ -1593,8 +1618,55 @@ mod tests {
             .expect("dashboard home template should render");
 
         assert!(rendered.contains("Telegram"));
+        assert!(rendered.contains("Steam"));
         assert!(rendered.contains(translations.dashboard_platforms_title));
         assert!(rendered.contains(translations.dashboard_open_workspace_label));
+        assert!(rendered.contains(translations.steam_workspace_secondary_action_label));
+    }
+
+    #[test]
+    fn steam_workspace_template_renders_reserved_workspace() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+
+        let language = Language::ZhCn;
+        let translations = language.translations();
+
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert(
+            "languages",
+            &language_options(language, STEAM_WORKSPACE_PATH),
+        );
+        context.insert("current_username", "alice");
+        context.insert("show_admin", &false);
+        context.insert("logout_action", "/logout");
+        context.insert("dashboard_href", "/");
+        context.insert("workspace_href", STEAM_WORKSPACE_PATH);
+        context.insert("settings_href", "/settings");
+        context.insert("admin_href", "/admin");
+        context.insert("settings_label", &translations.nav_settings_label);
+        context.insert("admin_label", &translations.nav_admin_label);
+        context.insert("settings_security_href", "/settings#security");
+        context.insert("settings_notifications_href", "/settings#notifications");
+        context.insert("settings_access_href", "/settings#access");
+        context.insert("admin_overview_href", "/admin#users");
+        context.insert("banner", &Option::<PageBanner>::None);
+        context.insert("now", "2026-03-14 09:00:00 UTC");
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+
+        let rendered = tera
+            .render("steam_workspace.html", &context)
+            .expect("steam workspace template should render");
+
+        assert!(rendered.contains(translations.steam_workspace_title));
+        assert!(rendered.contains(translations.steam_workspace_modules_title));
+        assert!(rendered.contains(translations.steam_workspace_module_guard_title));
     }
 
     #[test]
