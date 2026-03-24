@@ -220,6 +220,41 @@ fn account_update_material_action(account_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/materials")
 }
 
+async fn refresh_account_confirmation_session_if_needed(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    master_key: &[u8],
+    account: steam_platform::SteamGuardAccount,
+    force_refresh: bool,
+) -> steam_platform::SteamGuardAccount {
+    if !steam_platform::confirmation_session_can_refresh(&account) {
+        return account;
+    }
+    if !force_refresh && !steam_platform::confirmation_session_should_refresh(&account) {
+        return account;
+    }
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::refresh_confirmation_session_if_needed(
+        &steam_root,
+        master_key,
+        &account.id,
+        force_refresh,
+    )
+    .await
+    {
+        Ok(Some(refreshed)) => refreshed,
+        Ok(None) => account,
+        Err(error) => {
+            warn!(
+                "failed refreshing Steam confirmation session for account {}: {}",
+                account.id, error
+            );
+            account
+        }
+    }
+}
+
 fn confirmation_accept_action(account_id: &str, confirmation_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/confirmations/{confirmation_id}/accept")
 }
@@ -259,6 +294,19 @@ async fn build_workspace_snapshot(
         .collect::<Vec<_>>();
 
     for account in accounts {
+        let account = match shared_master_key.as_ref() {
+            Some(master_key) => {
+                refresh_account_confirmation_session_if_needed(
+                    app_state,
+                    authenticated,
+                    master_key.as_ref().as_slice(),
+                    account,
+                    false,
+                )
+                .await
+            }
+            None => account,
+        };
         let current_code =
             match steam_platform::generate_guard_code(&account.shared_secret, generated_at_unix) {
                 Ok(code) => Some(code),
@@ -362,10 +410,20 @@ async fn build_confirmation_snapshot(
     let (accounts, _) =
         steam_platform::discover_accounts(&base_dir, Some(shared_master_key.as_ref().as_slice()))
             .await;
-    let ready_accounts = accounts
-        .into_iter()
-        .filter(|account| account.can_manage() && account.confirmation_ready())
-        .collect::<Vec<_>>();
+    let mut ready_accounts = Vec::new();
+    for account in accounts {
+        let account = refresh_account_confirmation_session_if_needed(
+            app_state,
+            authenticated,
+            shared_master_key.as_ref().as_slice(),
+            account,
+            false,
+        )
+        .await;
+        if account.can_manage() && account.confirmation_ready() {
+            ready_accounts.push(account);
+        }
+    }
 
     let mut account_views = Vec::new();
     let generated_at_unix = Utc::now().timestamp().max(0);
@@ -399,14 +457,80 @@ async fn build_confirmation_snapshot(
                     confirmations: confirmation_views,
                 });
             }
-            Err(error) => account_views.push(SteamConfirmationAccountView {
-                account_id: account.id,
-                account_name: account.account_name,
-                steam_id: account.steam_id.map(|value| value.to_string()),
-                confirmation_count: 0,
-                error: Some(error.to_string()),
-                confirmations: Vec::new(),
-            }),
+            Err(error) => {
+                let retryable = error.to_string().contains("no longer authorized")
+                    && steam_platform::confirmation_session_can_refresh(&account);
+                if retryable {
+                    let refreshed = refresh_account_confirmation_session_if_needed(
+                        app_state,
+                        authenticated,
+                        shared_master_key.as_ref().as_slice(),
+                        account.clone(),
+                        true,
+                    )
+                    .await;
+                    match steam_platform::fetch_confirmations(&app_state.http_client, &refreshed)
+                        .await
+                    {
+                        Ok(confirmations) => {
+                            let confirmation_views = confirmations
+                                .into_iter()
+                                .map(|confirmation| SteamConfirmationView {
+                                    accept_action: confirmation_accept_action(
+                                        &refreshed.id,
+                                        &confirmation.id,
+                                    ),
+                                    deny_action: confirmation_deny_action(
+                                        &refreshed.id,
+                                        &confirmation.id,
+                                    ),
+                                    id: confirmation.id,
+                                    nonce: confirmation.nonce,
+                                    creator_id: confirmation.creator_id,
+                                    confirmation_type: confirmation.confirmation_type,
+                                    type_name: confirmation.type_name,
+                                    headline: confirmation.headline,
+                                    summary: confirmation.summary,
+                                    icon: confirmation.icon,
+                                    created_at: format_unix_timestamp(
+                                        confirmation.created_at_unix as i64,
+                                    ),
+                                })
+                                .collect::<Vec<_>>();
+                            total_confirmations += confirmation_views.len();
+                            account_views.push(SteamConfirmationAccountView {
+                                account_id: refreshed.id,
+                                account_name: refreshed.account_name,
+                                steam_id: refreshed.steam_id.map(|value| value.to_string()),
+                                confirmation_count: confirmation_views.len(),
+                                error: None,
+                                confirmations: confirmation_views,
+                            });
+                            continue;
+                        }
+                        Err(retry_error) => {
+                            account_views.push(SteamConfirmationAccountView {
+                                account_id: refreshed.id,
+                                account_name: refreshed.account_name,
+                                steam_id: refreshed.steam_id.map(|value| value.to_string()),
+                                confirmation_count: 0,
+                                error: Some(retry_error.to_string()),
+                                confirmations: Vec::new(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                account_views.push(SteamConfirmationAccountView {
+                    account_id: account.id,
+                    account_name: account.account_name,
+                    steam_id: account.steam_id.map(|value| value.to_string()),
+                    confirmation_count: 0,
+                    error: Some(error.to_string()),
+                    confirmations: Vec::new(),
+                })
+            }
         }
     }
     account_views.sort_by(|left, right| left.account_name.cmp(&right.account_name));
@@ -1240,7 +1364,16 @@ async fn confirmation_action_handler(
         }
     };
 
-    match steam_platform::respond_to_confirmation(
+    let account = refresh_account_confirmation_session_if_needed(
+        app_state,
+        authenticated,
+        master_key.as_ref().as_slice(),
+        account,
+        false,
+    )
+    .await;
+
+    let result = match steam_platform::respond_to_confirmation(
         &app_state.http_client,
         &account,
         confirmation_id,
@@ -1249,6 +1382,31 @@ async fn confirmation_action_handler(
     )
     .await
     {
+        Err(error)
+            if error.to_string().contains("no longer authorized")
+                && steam_platform::confirmation_session_can_refresh(&account) =>
+        {
+            let refreshed = refresh_account_confirmation_session_if_needed(
+                app_state,
+                authenticated,
+                master_key.as_ref().as_slice(),
+                account.clone(),
+                true,
+            )
+            .await;
+            steam_platform::respond_to_confirmation(
+                &app_state.http_client,
+                &refreshed,
+                confirmation_id,
+                nonce,
+                accept,
+            )
+            .await
+        }
+        other => other,
+    };
+
+    match result {
         Ok(()) => (
             StatusCode::OK,
             Json(SteamActionResponse {

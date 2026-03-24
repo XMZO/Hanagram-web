@@ -1,0 +1,47 @@
+[package]
+name = "steamguard"
+version = "0.17.1"
+authors = ["Carson McManus <carson.mcmanus1@gmail.com>"]
+edition = "2021"
+description = "Library for generating 2fa codes for Steam and responding to mobile confirmations."
+keywords = ["steam", "2fa", "steamguard", "authentication"]
+repository = "https://github.com/dyc3/steamguard-cli/tree/master/steamguard"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "^1.0"
+sha1 = "^0.10"
+base64 = "^0.22.1"
+reqwest = { version = "0.12", default-features = false, features = [
+	"blocking",
+	"json",
+	"cookies",
+	"gzip",
+	"rustls-tls",
+	"multipart",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rsa = "0.9.10"
+rand = "0.8.4"
+cookie = "0.18"
+regex = "1"
+lazy_static = "1.4.0"
+uuid = { version = "1.8", features = ["v4"] }
+log = "0.4.19"
+maplit = "1.0.2"
+thiserror = "1.0.26"
+secrecy = { version = "0.8", features = ["serde"] }
+zeroize = { version = "^1.6.0", features = ["std", "zeroize_derive"] }
+protobuf = "3.7.1"
+protobuf-json-mapping = "3.7.1"
+phonenumber = "0.3"
+serde_path_to_error = "0.1.11"
+hmac = "^0.12"
+sha2 = "^0.10"
+num_enum = "0.7.2"
+
+[build-dependencies]
+anyhow = "^1.0"
+protobuf = "3.7.1"
+protobuf-codegen = "3.7.1"

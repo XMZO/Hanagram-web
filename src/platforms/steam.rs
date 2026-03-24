@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use steamguard::refresher::TokenRefresher;
+use steamguard::steamapi::AuthenticationClient;
+use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens};
+use steamguard::transport::WebApiTransport;
 use tokio::fs;
+use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
 use hanagram_web::security::{EncryptedBlob, decrypt_bytes, encrypt_bytes};
@@ -22,6 +27,7 @@ const STEAM_MANAGED_SCHEMA_VERSION: u8 = 1;
 const STEAM_MANAGED_PACK_PREFIX: &[u8] = b"hanagram-steam-pack:v1\0";
 const STEAM_MANAGED_ZSTD_LEVEL: i32 = 9;
 const STEAM_CONFIRMATION_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+const STEAM_ACCESS_TOKEN_REFRESH_SKEW_SECONDS: i64 = 300;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,11 +49,38 @@ pub(crate) struct SteamWebSession {
     pub(crate) steam_login_secure: Option<String>,
     pub(crate) web_cookie: Option<String>,
     pub(crate) oauth_token: Option<String>,
+    pub(crate) access_token: Option<String>,
+    pub(crate) refresh_token: Option<String>,
 }
 
 impl SteamWebSession {
-    pub(crate) fn has_confirmation_cookie(&self) -> bool {
-        option_has_value(self.steam_login_secure.as_deref())
+    pub(crate) fn effective_confirmation_cookie(&self, steam_id: Option<u64>) -> Option<String> {
+        if let Some(cookie) = self
+            .steam_login_secure
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            return Some(cookie.trim().to_owned());
+        }
+
+        let access_token = self
+            .access_token
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())?;
+        let steam_id = steam_id?;
+        Some(format!("{steam_id}||{}", access_token.trim()))
+    }
+
+    fn refresh_token(&self) -> Option<&str> {
+        self.refresh_token
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+    }
+
+    fn access_token(&self) -> Option<&str> {
+        self.access_token
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
     }
 }
 
@@ -85,7 +118,8 @@ impl SteamGuardAccount {
     pub(crate) fn has_confirmation_session(&self) -> bool {
         self.session
             .as_ref()
-            .is_some_and(SteamWebSession::has_confirmation_cookie)
+            .and_then(|session| session.effective_confirmation_cookie(self.steam_id))
+            .is_some()
     }
 
     pub(crate) fn confirmation_ready(&self) -> bool {
@@ -141,6 +175,8 @@ struct StoredSteamWebSession {
     steam_login_secure: Option<String>,
     web_cookie: Option<String>,
     oauth_token: Option<String>,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -174,6 +210,8 @@ impl StoredSteamAccount {
                 steam_login_secure: value.steam_login_secure,
                 web_cookie: value.web_cookie,
                 oauth_token: value.oauth_token,
+                access_token: value.access_token,
+                refresh_token: value.refresh_token,
             }),
             storage_path,
             source_kind: SteamAccountSourceKind::Managed,
@@ -220,12 +258,24 @@ struct RawSteamSession {
     web_cookie: Option<String>,
     #[serde(default, rename = "OAuthToken")]
     oauth_token: Option<String>,
+    #[serde(default, rename = "AccessToken")]
+    access_token: Option<String>,
+    #[serde(default, rename = "RefreshToken")]
+    refresh_token: Option<String>,
     #[serde(
         default,
         rename = "SteamID",
         deserialize_with = "deserialize_optional_u64_from_any"
     )]
     steam_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamJwtClaims {
+    #[serde(deserialize_with = "deserialize_u64_from_any")]
+    sub: u64,
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_any")]
+    exp: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -448,6 +498,8 @@ pub(crate) async fn update_managed_account_materials(
             steam_login_secure: None,
             web_cookie: None,
             oauth_token: None,
+            access_token: None,
+            refresh_token: None,
         });
         session.steam_login_secure = Some(steam_login_secure);
     }
@@ -613,6 +665,8 @@ pub(crate) async fn create_manual_account(
             steam_login_secure: Some(value),
             web_cookie: None,
             oauth_token: None,
+            access_token: None,
+            refresh_token: None,
         }),
         imported_from: Some(String::from("manual-entry")),
         managed_origin: SteamManagedAccountOrigin::ManualEntry,
@@ -659,6 +713,8 @@ pub(crate) async fn import_mafile_bytes(
             steam_login_secure: normalize_optional_string(value.steam_login_secure),
             web_cookie: normalize_optional_string(value.web_cookie),
             oauth_token: normalize_optional_string(value.oauth_token),
+            access_token: normalize_optional_string(value.access_token),
+            refresh_token: normalize_optional_string(value.refresh_token),
         }),
         imported_from: file_name
             .and_then(|value| Path::new(value).file_name().and_then(|name| name.to_str()))
@@ -812,7 +868,7 @@ fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccoun
         steam_id: parsed
             .steamid
             .or(parsed.steam_id)
-            .or_else(|| parsed.session.as_ref().and_then(|session| session.steam_id)),
+            .or_else(|| parsed.session.as_ref().and_then(derive_session_steam_id)),
         shared_secret: parsed.shared_secret.trim().to_owned(),
         identity_secret: normalize_optional_string(Some(parsed.identity_secret)),
         device_id: normalize_optional_string(Some(parsed.device_id)),
@@ -822,6 +878,8 @@ fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccoun
             steam_login_secure: normalize_optional_string(session.steam_login_secure),
             web_cookie: normalize_optional_string(session.web_cookie),
             oauth_token: normalize_optional_string(session.oauth_token),
+            access_token: normalize_optional_string(session.access_token),
+            refresh_token: normalize_optional_string(session.refresh_token),
         }),
         storage_path: path.to_path_buf(),
         source_kind: SteamAccountSourceKind::LegacyMaFile,
@@ -880,12 +938,175 @@ fn build_confirmation_cookie_header(account: &SteamGuardAccount, steam_id: u64) 
     let steam_login_secure = account
         .session
         .as_ref()
-        .and_then(|session| session.steam_login_secure.as_deref())
-        .filter(|value| !value.trim().is_empty())
-        .context("Steam account is missing SteamLoginSecure")?;
+        .and_then(|session| session.effective_confirmation_cookie(Some(steam_id)))
+        .context("Steam account is missing a usable confirmation session")?;
     Ok(format!(
         "dob=; steamid={steam_id}; steamLoginSecure={steam_login_secure}"
     ))
+}
+
+pub(crate) fn confirmation_session_can_refresh(account: &SteamGuardAccount) -> bool {
+    account.can_manage()
+        && account
+            .session
+            .as_ref()
+            .and_then(SteamWebSession::refresh_token)
+            .is_some()
+}
+
+pub(crate) fn confirmation_session_should_refresh(account: &SteamGuardAccount) -> bool {
+    let Some(session) = account.session.as_ref() else {
+        return false;
+    };
+    if session.refresh_token().is_none() {
+        return false;
+    }
+
+    match session.access_token() {
+        Some(access_token) => access_token_expires_soon(access_token, Utc::now().timestamp()),
+        None => true,
+    }
+}
+
+pub(crate) async fn refresh_confirmation_session_if_needed(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    force_refresh: bool,
+) -> Result<Option<SteamGuardAccount>> {
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let Some(mut record) = load_stored_account(master_key, &storage_path).await? else {
+        return Ok(None);
+    };
+
+    let Some(session) = record.session.as_mut() else {
+        return Ok(Some(record.into_runtime(storage_path)));
+    };
+
+    let Some(refresh_token) = session
+        .refresh_token
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+    else {
+        return Ok(Some(record.into_runtime(storage_path)));
+    };
+
+    let needs_refresh = match session
+        .access_token
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(access_token) => access_token_expires_soon(access_token, Utc::now().timestamp()),
+        None => true,
+    };
+    if !force_refresh && !needs_refresh {
+        return Ok(Some(record.into_runtime(storage_path)));
+    }
+
+    let steam_id = record
+        .steam_id
+        .or_else(|| derive_stored_session_steam_id(session))
+        .context(
+            "Steam account is missing SteamID and could not derive one from stored session tokens",
+        )?;
+    let current_access_token = session
+        .access_token
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
+    let refreshed_access_token =
+        refresh_access_token_from_refresh_token(steam_id, current_access_token, refresh_token)
+            .await?;
+
+    session.access_token = Some(refreshed_access_token);
+    record.steam_id = Some(steam_id);
+    record.updated_at_unix = Utc::now().timestamp();
+    persist_stored_account(master_key, &storage_path, &record).await?;
+    Ok(Some(record.into_runtime(storage_path)))
+}
+
+fn derive_session_steam_id(session: &RawSteamSession) -> Option<u64> {
+    session
+        .steam_id
+        .or_else(|| {
+            session
+                .access_token
+                .as_deref()
+                .and_then(steam_id_from_jwt_unverified)
+        })
+        .or_else(|| {
+            session
+                .refresh_token
+                .as_deref()
+                .and_then(steam_id_from_jwt_unverified)
+        })
+}
+
+fn steam_id_from_jwt_unverified(token: &str) -> Option<u64> {
+    steam_jwt_claims_unverified(token).map(|claims| claims.sub)
+}
+
+fn derive_stored_session_steam_id(session: &StoredSteamWebSession) -> Option<u64> {
+    session
+        .access_token
+        .as_deref()
+        .and_then(steam_id_from_jwt_unverified)
+        .or_else(|| {
+            session
+                .refresh_token
+                .as_deref()
+                .and_then(steam_id_from_jwt_unverified)
+        })
+}
+
+fn access_token_expires_soon(token: &str, now_unix: i64) -> bool {
+    steam_jwt_claims_unverified(token)
+        .and_then(|claims| claims.exp)
+        .map(|exp| exp as i64 <= now_unix + STEAM_ACCESS_TOKEN_REFRESH_SKEW_SECONDS)
+        .unwrap_or(false)
+}
+
+fn steam_jwt_claims_unverified(token: &str) -> Option<SteamJwtClaims> {
+    let mut parts = token.trim().split('.');
+    let _header = parts.next()?;
+    let payload = parts.next()?;
+    let _signature = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload))
+        .ok()?;
+    serde_json::from_slice::<SteamJwtClaims>(&decoded).ok()
+}
+
+async fn refresh_access_token_from_refresh_token(
+    steam_id: u64,
+    current_access_token: String,
+    refresh_token: String,
+) -> Result<String> {
+    spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent(STEAM_CONFIRMATION_USER_AGENT)
+            .build()
+            .context("failed building blocking Steam auth client")?;
+        let transport = WebApiTransport::new(client);
+        let auth_client = AuthenticationClient::new(transport);
+        let mut refresher = TokenRefresher::new(auth_client);
+        let tokens = SteamTokens::new(
+            SteamJwt::from(current_access_token),
+            SteamJwt::from(refresh_token),
+        );
+        let refreshed = refresher
+            .refresh(steam_id, &tokens)
+            .context("failed refreshing Steam access token from refresh token")?;
+        Ok::<String, anyhow::Error>(refreshed.expose_secret().to_owned())
+    })
+    .await
+    .context("Steam access token refresh task failed")?
 }
 
 fn normalize_optional_string<T>(value: Option<T>) -> Option<String>
@@ -1088,9 +1309,7 @@ mod tests {
 
     #[test]
     fn parse_account_file_accepts_standard_mafile() {
-        let path = PathBuf::from(
-            "example/steamguard-cli/src/fixtures/maFiles/compat/1-account/1234.maFile",
-        );
+        let path = PathBuf::from("tests/fixtures/steam/compat/1-account/1234.maFile");
         let raw = std::fs::read(&path).expect("fixture should be readable");
         let account = parse_account_bytes(&raw, &path).expect("maFile should parse");
 
@@ -1103,9 +1322,7 @@ mod tests {
 
     #[test]
     fn parse_account_file_accepts_steamv2_style_mafile() {
-        let path = PathBuf::from(
-            "example/steamguard-cli/src/fixtures/maFiles/compat/steamv2/sample.maFile",
-        );
+        let path = PathBuf::from("tests/fixtures/steam/compat/steamv2/sample.maFile");
         let raw = std::fs::read(&path).expect("fixture should be readable");
         let account = parse_account_bytes(&raw, &path).expect("steamv2 maFile should parse");
 
@@ -1114,6 +1331,71 @@ mod tests {
         assert_eq!(
             account.identity_secret.as_deref(),
             Some("f62XbJcml4r1j3NcFm0GGTtmcXw=")
+        );
+    }
+
+    #[test]
+    fn parse_account_file_accepts_access_token_confirmation_session() {
+        let raw = br#"{
+            "account_name": "token-session",
+            "shared_secret": "zvIayp3JPvtvX/QGHqsqKBk/44s=",
+            "identity_secret": "GQP46b73Ws7gr8GmZFR0sDuau5c=",
+            "device_id": "android:63e01aa8-e99c-42c4-ef4c-e78bd041f129",
+            "Session": {
+                "AccessToken": "eyAidHlwIjogIkpXVCIsICJhbGciOiAiRWREU0EiIH0.eyAiaXNzIjogInI6MTRCM18yMkZEQjg0RF9BMjJDRCIsICJzdWIiOiAiNzY1NjExOTk0NDE5OTI5NzAiLCAiYXVkIjogWyAid2ViIiwgIm1vYmlsZSIgXSwgImV4cCI6IDE2OTE3NTc5MzUsICJuYmYiOiAxNjgzMDMxMDUxLCAiaWF0IjogMTY5MTY3MTA1MSwgImp0aSI6ICIxNTI1XzIyRkRCOUJBXzZBRDkwIiwgIm9hdCI6IDE2OTE2NzEwNTEsICJwZXIiOiAwLCAiaXBfc3ViamVjdCI6ICIxMDQuMjQ2LjEyNS4xNDEiLCAiaXBfY29uZmlybWVyIjogIjEwNC4yNDYuMTI1LjE0MSIgfQ.ncqc5TpVlD05lnZvy8c3Bkx70gXDvQQXN0iG5Z4mOLgY_rwasXIJXnR-X4JczT8PmZ2v5cisW5VRHAdfsz_8CA",
+                "RefreshToken": "eyAidHlwIjogIkpXVCIsICJhbGciOiAiRWREU0EiIH0.eyAiaXNzIjogInN0ZWFtIiwgInN1YiI6ICI3NjU2MTE5OTE1NTcwNjg5MiIsICJhdWQiOiBbICJ3ZWIiLCAicmVuZXciLCAiZGVyaXZlIiBdLCAiZXhwIjogMTcwNTAxMTk1NSwgIm5iZiI6IDE2Nzg0NjQ4MzcsICJpYXQiOiAxNjg3MTA0ODM3LCAianRpIjogIjE4QzVfMjJCM0Y0MzFfQ0RGNkEiLCAib2F0IjogMTY4NzEwNDgzNywgInBlciI6IDEsICJpcF9zdWJqZWN0IjogIjY5LjEyMC4xMzYuMTI0IiwgImlwX2NvbmZpcm1lciI6ICI2OS4xMjAuMTM2LjEyNCIgfQ.7p5TPj9pGQbxIzWDDNCSP9OkKYSeDnWBE8E-M8hUrxOEPCW0XwrbDUrh199RzjPDw"
+            }
+        }"#;
+        let path = PathBuf::from("tokenized.maFile");
+        let account = parse_account_bytes(raw, &path).expect("tokenized maFile should parse");
+
+        assert_eq!(account.steam_id, Some(76_561_199_441_992_970));
+        assert!(account.has_confirmation_secret_material());
+        assert!(account.has_confirmation_session());
+        assert!(account.confirmation_ready());
+        assert_eq!(
+            account
+                .session
+                .as_ref()
+                .and_then(|session| session.access_token.as_deref()),
+            Some(
+                "eyAidHlwIjogIkpXVCIsICJhbGciOiAiRWREU0EiIH0.eyAiaXNzIjogInI6MTRCM18yMkZEQjg0RF9BMjJDRCIsICJzdWIiOiAiNzY1NjExOTk0NDE5OTI5NzAiLCAiYXVkIjogWyAid2ViIiwgIm1vYmlsZSIgXSwgImV4cCI6IDE2OTE3NTc5MzUsICJuYmYiOiAxNjgzMDMxMDUxLCAiaWF0IjogMTY5MTY3MTA1MSwgImp0aSI6ICIxNTI1XzIyRkRCOUJBXzZBRDkwIiwgIm9hdCI6IDE2OTE2NzEwNTEsICJwZXIiOiAwLCAiaXBfc3ViamVjdCI6ICIxMDQuMjQ2LjEyNS4xNDEiLCAiaXBfY29uZmlybWVyIjogIjEwNC4yNDYuMTI1LjE0MSIgfQ.ncqc5TpVlD05lnZvy8c3Bkx70gXDvQQXN0iG5Z4mOLgY_rwasXIJXnR-X4JczT8PmZ2v5cisW5VRHAdfsz_8CA"
+            )
+        );
+    }
+
+    #[test]
+    fn build_confirmation_cookie_header_falls_back_to_access_token() {
+        let account = SteamGuardAccount {
+            id: String::from("demo"),
+            account_name: String::from("token-cookie"),
+            steam_id: Some(76_561_199_441_992_970),
+            shared_secret: String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="),
+            identity_secret: Some(String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=")),
+            device_id: Some(String::from("android:63e01aa8-e99c-42c4-ef4c-e78bd041f129")),
+            session: Some(SteamWebSession {
+                session_id: None,
+                steam_login: None,
+                steam_login_secure: None,
+                web_cookie: None,
+                oauth_token: None,
+                access_token: Some(String::from("access-token-value")),
+                refresh_token: Some(String::from("refresh-token-value")),
+            }),
+            storage_path: PathBuf::from("demo"),
+            source_kind: SteamAccountSourceKind::Managed,
+            managed_origin: Some(SteamManagedAccountOrigin::UploadedMaFile),
+            imported_from: Some(String::from("tokenized.maFile")),
+            encrypted_at_rest: true,
+            created_at_unix: Some(0),
+            updated_at_unix: Some(0),
+        };
+
+        let cookie = build_confirmation_cookie_header(&account, 76_561_199_441_992_970)
+            .expect("access token should produce a confirmation cookie");
+        assert_eq!(
+            cookie,
+            "dob=; steamid=76561199441992970; steamLoginSecure=76561199441992970||access-token-value"
         );
     }
 
@@ -1220,6 +1502,56 @@ mod tests {
             Some("76561197960265728||cookie-value")
         );
         assert!(account.confirmation_ready());
+
+        fs::remove_dir_all(&temp_root)
+            .await
+            .expect("temporary steam dir should be deleted");
+    }
+
+    #[tokio::test]
+    async fn imported_mafile_with_access_token_round_trips_encrypted() {
+        let temp_root = std::env::temp_dir().join(format!("hanagram-steam-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_root)
+            .await
+            .expect("temporary steam dir should be created");
+        let master_key = [5u8; 32];
+        let raw = br#"{
+            "account_name": "token-import",
+            "shared_secret": "zvIayp3JPvtvX/QGHqsqKBk/44s=",
+            "identity_secret": "GQP46b73Ws7gr8GmZFR0sDuau5c=",
+            "device_id": "android:63e01aa8-e99c-42c4-ef4c-e78bd041f129",
+            "Session": {
+                "SteamID": 76561199441992970,
+                "AccessToken": "imported-access-token",
+                "RefreshToken": "imported-refresh-token"
+            }
+        }"#;
+
+        let imported =
+            import_mafile_bytes(&temp_root, &master_key, Some("tokenized.maFile"), None, raw)
+                .await
+                .expect("tokenized maFile should import");
+        assert!(imported.confirmation_ready());
+
+        let loaded = load_managed_account(&temp_root, &master_key, &imported.id)
+            .await
+            .expect("managed account should load")
+            .expect("managed account should exist");
+        assert!(loaded.confirmation_ready());
+        assert_eq!(
+            loaded
+                .session
+                .as_ref()
+                .and_then(|session| session.access_token.as_deref()),
+            Some("imported-access-token")
+        );
+        assert_eq!(
+            loaded
+                .session
+                .as_ref()
+                .and_then(|session| session.refresh_token.as_deref()),
+            Some("imported-refresh-token")
+        );
 
         fs::remove_dir_all(&temp_root)
             .await
