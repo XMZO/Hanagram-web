@@ -879,7 +879,7 @@
             </section>
 
             <section data-tab-panel="manage">
-                <div class="grid gap-4 xl:grid-cols-[minmax(0,22rem),minmax(0,1fr)]">
+                <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,22rem),minmax(0,1fr)]">
                     <article class="paper-shadow rounded-[1.25rem] border border-line/85 bg-white/94 p-3.5 backdrop-blur-sm">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_manage_tab_label }}</p>
                         <h2 class="mt-1.5 font-display text-lg font-semibold">{{ i18n.steam_managed_accounts_label }}</h2>
@@ -969,12 +969,12 @@
 
                         <div class="mt-4 max-h-[38rem] overflow-auto pr-1">
                             {% if total_accounts > 0 %}
-                            <div class="grid items-start gap-3" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));">
+                            <div class="flex flex-wrap items-start gap-3">
                             {% for account in snapshot.accounts %}
                             <details
                                 data-manage-account
                                 data-search="{{ account.account_name }} {{ account.steam_id | default(value='') }} {{ account.storage_file }} {{ account.imported_from | default(value='') }}"
-                                class="steam-disclosure steam-manage-card overflow-hidden rounded-[1.05rem] border border-line/80 bg-white/92 transition"
+                                class="steam-disclosure steam-manage-card w-full overflow-hidden rounded-[1.05rem] border border-line/80 bg-white/92 transition sm:max-w-[22.5rem]"
                             >
                                 <summary class="cursor-pointer p-3.5">
                                     <div class="flex items-start justify-between gap-3">
@@ -1106,7 +1106,7 @@
                                 </div>
                             </details>
                             {% endfor %}
-                            <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52" style="grid-column: 1 / -1;"></div>
+                            <div data-role="steam-manage-empty" class="hidden basis-full rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52"></div>
                             </div>
                             {% else %}
                             <div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52">{{ i18n.steam_manage_empty_label }}</div>
