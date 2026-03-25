@@ -9,6 +9,7 @@ use crate::web::shared::*;
 struct SteamAccountView {
     id: String,
     account_name: String,
+    steam_username: Option<String>,
     steam_id: Option<String>,
     storage_file: String,
     current_code: Option<String>,
@@ -23,12 +24,16 @@ struct SteamAccountView {
     has_confirmation_secret_material: bool,
     has_confirmation_session: bool,
     confirmation_ready: bool,
+    has_session_tokens: bool,
+    has_refreshable_session: bool,
+    login_approval_ready: bool,
     imported_from: Option<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
     update_material_action: Option<String>,
     rename_action: Option<String>,
     delete_action: Option<String>,
+    login_action: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -86,6 +91,39 @@ struct SteamConfirmationSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct SteamApprovalView {
+    client_id: String,
+    ip: Option<String>,
+    geolocation: Option<String>,
+    city: Option<String>,
+    state: Option<String>,
+    country: Option<String>,
+    platform_label: String,
+    device_label: Option<String>,
+    approve_action: String,
+    deny_action: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SteamApprovalAccountView {
+    account_id: String,
+    account_name: String,
+    steam_username: Option<String>,
+    steam_id: Option<String>,
+    approval_count: usize,
+    error: Option<String>,
+    approvals: Vec<SteamApprovalView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SteamApprovalSnapshot {
+    ready_account_count: usize,
+    approval_count: usize,
+    generated_at: String,
+    accounts: Vec<SteamApprovalAccountView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct SteamActionResponse {
     ok: bool,
     message: String,
@@ -103,8 +141,26 @@ struct ManualSteamAccountForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct CredentialSteamAccountForm {
+    account_name: String,
+    steam_username: String,
+    steam_password: String,
+    shared_secret: String,
+    identity_secret: String,
+    device_id: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RenameSteamAccountForm {
     account_name: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamAccountLoginForm {
+    steam_username: String,
+    steam_password: String,
     lang: Option<String>,
 }
 
@@ -123,8 +179,21 @@ struct SteamConfirmationActionForm {
     lang: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct SteamApprovalActionForm {
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamQrApprovalForm {
+    account_id: String,
+    challenge_url: String,
+    lang: Option<String>,
+}
+
 const STEAM_CODES_TAB_ID: &str = "codes";
 const STEAM_MANAGE_TAB_ID: &str = "manage";
+const STEAM_APPROVALS_TAB_ID: &str = "approvals";
 const STEAM_CONFIRMATIONS_TAB_ID: &str = "confirmations";
 const STEAM_ISSUES_TAB_ID: &str = "issues";
 const STEAM_ABOUT_TAB_ID: &str = "about";
@@ -145,6 +214,7 @@ fn steam_accounts_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
 fn normalize_workspace_tab(tab: Option<&str>) -> &'static str {
     match tab {
         Some(STEAM_MANAGE_TAB_ID) => STEAM_MANAGE_TAB_ID,
+        Some(STEAM_APPROVALS_TAB_ID) => STEAM_APPROVALS_TAB_ID,
         Some(STEAM_CONFIRMATIONS_TAB_ID) => STEAM_CONFIRMATIONS_TAB_ID,
         Some(STEAM_ISSUES_TAB_ID) => STEAM_ISSUES_TAB_ID,
         Some(STEAM_ABOUT_TAB_ID) => STEAM_ABOUT_TAB_ID,
@@ -220,6 +290,10 @@ fn account_update_material_action(account_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/materials")
 }
 
+fn account_login_action(account_id: &str) -> String {
+    format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/login")
+}
+
 async fn refresh_account_confirmation_session_if_needed(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
@@ -261,6 +335,14 @@ fn confirmation_accept_action(account_id: &str, confirmation_id: &str) -> String
 
 fn confirmation_deny_action(account_id: &str, confirmation_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/confirmations/{confirmation_id}/deny")
+}
+
+fn approval_allow_action(account_id: &str, client_id: &str) -> String {
+    format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/approvals/{client_id}/approve")
+}
+
+fn approval_deny_action(account_id: &str, client_id: &str) -> String {
+    format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/approvals/{client_id}/deny")
 }
 
 async fn build_workspace_snapshot(
@@ -331,15 +413,20 @@ async fn build_workspace_snapshot(
         let has_confirmation_secret_material = account.has_confirmation_secret_material();
         let has_confirmation_session = account.has_confirmation_session();
         let confirmation_ready = account.confirmation_ready();
+        let has_session_tokens = account.has_session_tokens();
+        let has_refreshable_session = account.has_refreshable_session();
+        let login_approval_ready = account.login_approval_ready();
         let update_material_action =
             can_manage.then(|| account_update_material_action(&account.id));
         let rename_action = can_manage.then(|| account_rename_action(&account.id));
         let delete_action = can_manage.then(|| account_delete_action(&account.id));
+        let login_action = can_manage.then(|| account_login_action(&account.id));
         let code_started_at_unix_view = current_code.as_ref().map(|_| code_started_at_unix);
         let code_expires_at_unix_view = current_code.as_ref().map(|_| code_expires_at_unix);
         account_views.push(SteamAccountView {
             id: account.id.clone(),
             account_name: account.account_name,
+            steam_username: account.steam_username.clone(),
             steam_id: account.steam_id.map(|value| value.to_string()),
             storage_file: display_storage_path(&base_dir, &account.storage_path),
             current_code,
@@ -354,12 +441,16 @@ async fn build_workspace_snapshot(
             has_confirmation_secret_material,
             has_confirmation_session,
             confirmation_ready,
+            has_session_tokens,
+            has_refreshable_session,
+            login_approval_ready,
             imported_from: account.imported_from,
             created_at: account.created_at_unix.map(format_unix_timestamp),
             updated_at: account.updated_at_unix.map(format_unix_timestamp),
             update_material_action,
             rename_action,
             delete_action,
+            login_action,
         });
     }
 
@@ -542,6 +633,146 @@ async fn build_confirmation_snapshot(
     })
 }
 
+async fn build_approval_snapshot(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+) -> Result<SteamApprovalSnapshot> {
+    let base_dir = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let shared_master_key = middleware::resolved_user_master_key(app_state, authenticated)
+        .await
+        .context("user data is locked; sign in again to unlock it")?;
+    let (accounts, _) =
+        steam_platform::discover_accounts(&base_dir, Some(shared_master_key.as_ref().as_slice()))
+            .await;
+    let mut ready_accounts = Vec::new();
+    for account in accounts {
+        let account = refresh_account_confirmation_session_if_needed(
+            app_state,
+            authenticated,
+            shared_master_key.as_ref().as_slice(),
+            account,
+            false,
+        )
+        .await;
+        if account.can_manage() && account.login_approval_ready() {
+            ready_accounts.push(account);
+        }
+    }
+
+    let generated_at_unix = Utc::now().timestamp().max(0);
+    let mut total_approvals = 0usize;
+    let mut account_views = Vec::new();
+    for account in ready_accounts {
+        match steam_platform::list_login_approvals(&account).await {
+            Ok(approvals) => {
+                let approval_views = approvals
+                    .into_iter()
+                    .map(|approval| SteamApprovalView {
+                        approve_action: approval_allow_action(&account.id, &approval.client_id),
+                        deny_action: approval_deny_action(&account.id, &approval.client_id),
+                        client_id: approval.client_id,
+                        ip: approval.ip,
+                        geolocation: approval.geolocation,
+                        city: approval.city,
+                        state: approval.state,
+                        country: approval.country,
+                        platform_label: approval.platform_label,
+                        device_label: approval.device_label,
+                    })
+                    .collect::<Vec<_>>();
+                total_approvals += approval_views.len();
+                account_views.push(SteamApprovalAccountView {
+                    account_id: account.id,
+                    account_name: account.account_name,
+                    steam_username: account.steam_username,
+                    steam_id: account.steam_id.map(|value| value.to_string()),
+                    approval_count: approval_views.len(),
+                    error: None,
+                    approvals: approval_views,
+                });
+            }
+            Err(error) => {
+                if account.has_refreshable_session() {
+                    let refreshed = refresh_account_confirmation_session_if_needed(
+                        app_state,
+                        authenticated,
+                        shared_master_key.as_ref().as_slice(),
+                        account.clone(),
+                        true,
+                    )
+                    .await;
+                    match steam_platform::list_login_approvals(&refreshed).await {
+                        Ok(approvals) => {
+                            let approval_views = approvals
+                                .into_iter()
+                                .map(|approval| SteamApprovalView {
+                                    approve_action: approval_allow_action(
+                                        &refreshed.id,
+                                        &approval.client_id,
+                                    ),
+                                    deny_action: approval_deny_action(
+                                        &refreshed.id,
+                                        &approval.client_id,
+                                    ),
+                                    client_id: approval.client_id,
+                                    ip: approval.ip,
+                                    geolocation: approval.geolocation,
+                                    city: approval.city,
+                                    state: approval.state,
+                                    country: approval.country,
+                                    platform_label: approval.platform_label,
+                                    device_label: approval.device_label,
+                                })
+                                .collect::<Vec<_>>();
+                            total_approvals += approval_views.len();
+                            account_views.push(SteamApprovalAccountView {
+                                account_id: refreshed.id,
+                                account_name: refreshed.account_name,
+                                steam_username: refreshed.steam_username,
+                                steam_id: refreshed.steam_id.map(|value| value.to_string()),
+                                approval_count: approval_views.len(),
+                                error: None,
+                                approvals: approval_views,
+                            });
+                            continue;
+                        }
+                        Err(retry_error) => {
+                            account_views.push(SteamApprovalAccountView {
+                                account_id: refreshed.id,
+                                account_name: refreshed.account_name,
+                                steam_username: refreshed.steam_username,
+                                steam_id: refreshed.steam_id.map(|value| value.to_string()),
+                                approval_count: 0,
+                                error: Some(retry_error.to_string()),
+                                approvals: Vec::new(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                account_views.push(SteamApprovalAccountView {
+                    account_id: account.id,
+                    account_name: account.account_name,
+                    steam_username: account.steam_username,
+                    steam_id: account.steam_id.map(|value| value.to_string()),
+                    approval_count: 0,
+                    error: Some(error.to_string()),
+                    approvals: Vec::new(),
+                });
+            }
+        }
+    }
+
+    account_views.sort_by(|left, right| left.account_name.cmp(&right.account_name));
+    Ok(SteamApprovalSnapshot {
+        ready_account_count: account_views.len(),
+        approval_count: total_approvals,
+        generated_at: format_unix_timestamp(generated_at_unix),
+        accounts: account_views,
+    })
+}
+
 pub(crate) async fn build_workspace_card(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
@@ -566,6 +797,7 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route(STEAM_WORKSPACE_PATH, get(workspace_handler))
         .route(STEAM_SNAPSHOT_API_PATH, get(workspace_snapshot_handler))
+        .route(STEAM_APPROVALS_API_PATH, get(approvals_snapshot_handler))
         .route(
             STEAM_CONFIRMATIONS_API_PATH,
             get(confirmations_snapshot_handler),
@@ -576,8 +808,24 @@ pub(crate) fn routes() -> Router<AppState> {
             post(create_manual_account_handler),
         )
         .route(
+            STEAM_IMPORT_LOGIN_PATH,
+            post(create_logged_in_account_handler),
+        )
+        .route(
+            STEAM_APPROVAL_CHALLENGE_PATH,
+            post(approve_login_challenge_handler),
+        )
+        .route(
+            STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH,
+            post(approve_login_challenge_upload_handler),
+        )
+        .route(
             "/platforms/steam/accounts/{account_id}/materials",
             post(update_account_materials_handler),
+        )
+        .route(
+            "/platforms/steam/accounts/{account_id}/login",
+            post(login_managed_account_handler),
         )
         .route(
             "/platforms/steam/accounts/{account_id}/rename",
@@ -595,6 +843,14 @@ pub(crate) fn routes() -> Router<AppState> {
             "/platforms/steam/accounts/{account_id}/confirmations/{confirmation_id}/deny",
             post(deny_confirmation_handler),
         )
+        .route(
+            "/platforms/steam/accounts/{account_id}/approvals/{client_id}/approve",
+            post(approve_login_approval_handler),
+        )
+        .route(
+            "/platforms/steam/accounts/{account_id}/approvals/{client_id}/deny",
+            post(deny_login_approval_handler),
+        )
 }
 
 pub(crate) async fn render_workspace_page(
@@ -609,6 +865,12 @@ pub(crate) async fn render_workspace_page(
     let languages = language_options(language, STEAM_WORKSPACE_PATH);
     let settings_page_href = settings_href(language);
     let snapshot = build_workspace_snapshot(app_state, authenticated).await;
+    let approval_ready_accounts = snapshot
+        .accounts
+        .iter()
+        .filter(|account| account.can_manage && account.login_approval_ready)
+        .cloned()
+        .collect::<Vec<_>>();
     let scan_dir = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
     let managed_dir = steam_platform::managed_accounts_dir(&scan_dir);
 
@@ -645,6 +907,7 @@ pub(crate) async fn render_workspace_page(
     context.insert("default_tab", &normalize_workspace_tab(default_tab));
     context.insert("now", &snapshot.generated_at);
     context.insert("snapshot_api", &steam_snapshot_api_href(language));
+    context.insert("approvals_api", &steam_approvals_api_href(language));
     context.insert("confirmations_api", &steam_confirmations_api_href(language));
     context.insert(
         "steam_import_upload_action",
@@ -653,6 +916,18 @@ pub(crate) async fn render_workspace_page(
     context.insert(
         "steam_import_manual_action",
         &steam_import_manual_href(language),
+    );
+    context.insert(
+        "steam_import_login_action",
+        &steam_import_login_href(language),
+    );
+    context.insert(
+        "steam_approval_challenge_action",
+        &steam_approval_challenge_href(language),
+    );
+    context.insert(
+        "steam_approval_challenge_upload_action",
+        &steam_approval_challenge_upload_href(language),
     );
     context.insert("steam_accounts_dir", &scan_dir.display().to_string());
     context.insert("steam_managed_dir", &managed_dir.display().to_string());
@@ -665,6 +940,7 @@ pub(crate) async fn render_workspace_page(
         &snapshot.confirmation_ready_count,
     );
     context.insert("issue_count", &snapshot.issue_count);
+    context.insert("approval_ready_accounts", &approval_ready_accounts);
     context.insert("snapshot", &snapshot);
     insert_transport_security_warning(&mut context, language, headers);
 
@@ -727,6 +1003,32 @@ async fn workspace_snapshot_handler(
     Json(build_workspace_snapshot(&app_state, &authenticated).await)
 }
 
+async fn approvals_snapshot_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    match build_approval_snapshot(&app_state, &authenticated).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(error) => {
+            warn!("failed building Steam approval snapshot: {}", error);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(SteamActionResponse {
+                    ok: false,
+                    message: language
+                        .translations()
+                        .steam_approvals_load_failed_message
+                        .to_owned(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 async fn confirmations_snapshot_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
@@ -766,6 +1068,43 @@ async fn redirect_with_workspace_banner(
         response.headers_mut().append(header::SET_COOKIE, cookie);
     }
     response
+}
+
+fn steam_login_failure_message(
+    translations: &crate::i18n::TranslationSet,
+    error: &anyhow::Error,
+    fallback: &'static str,
+) -> String {
+    let message = error.to_string();
+    if message.contains("Steam username is required") {
+        translations.steam_login_missing_username_message.to_owned()
+    } else if message.contains("Steam password is required") {
+        translations.steam_login_missing_password_message.to_owned()
+    } else if message.contains("mobile confirmation on another device") {
+        translations
+            .steam_login_requires_other_confirmation_message
+            .to_owned()
+    } else if message.contains("email confirmation") || message.contains("email code") {
+        translations.steam_login_requires_email_message.to_owned()
+    } else {
+        fallback.to_owned()
+    }
+}
+
+fn steam_qr_failure_message(
+    translations: &crate::i18n::TranslationSet,
+    error: &anyhow::Error,
+) -> String {
+    let message = error.to_string();
+    if message.contains("challenge URL is required") {
+        translations.steam_qr_approval_missing_message.to_owned()
+    } else if message.contains("Invalid challenge URL")
+        || message.contains("no Steam login challenge URL")
+    {
+        translations.steam_qr_approval_invalid_message.to_owned()
+    } else {
+        translations.steam_qr_approval_failed_message.to_owned()
+    }
 }
 
 async fn import_mafile_handler(
@@ -987,6 +1326,210 @@ async fn create_manual_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_manual_save_failed_message),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+    }
+}
+
+async fn create_logged_in_account_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<CredentialSteamAccountForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.steam_username.trim().is_empty() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_login_missing_username_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+    if form.steam_password.is_empty() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_login_missing_password_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+    if form.shared_secret.trim().is_empty() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_missing_shared_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+    if steam_platform::validate_shared_secret(&form.shared_secret).is_err() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_invalid_shared_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+    if !form.identity_secret.trim().is_empty()
+        && steam_platform::validate_identity_secret(&form.identity_secret).is_err()
+    {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_invalid_identity_secret_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::create_logged_in_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        steam_platform::CredentialSteamAccountInput {
+            account_name: form.account_name,
+            steam_username: form.steam_username,
+            steam_password: form.steam_password,
+            shared_secret: form.shared_secret,
+            identity_secret: if form.identity_secret.trim().is_empty() {
+                None
+            } else {
+                Some(form.identity_secret)
+            },
+            device_id: if form.device_id.trim().is_empty() {
+                None
+            } else {
+                Some(form.device_id)
+            },
+        },
+    )
+    .await
+    {
+        Ok(_) => {
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::success(translations.steam_login_create_success_message),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+        Err(error) => {
+            warn!("failed creating credential Steam account: {}", error);
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::error(steam_login_failure_message(
+                    translations,
+                    &error,
+                    translations.steam_login_create_failed_message,
+                )),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+    }
+}
+
+async fn login_managed_account_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<SteamAccountLoginForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_account_missing_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+    if form.steam_password.is_empty() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_login_missing_password_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::login_managed_account_with_credentials(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+        steam_platform::SteamCredentialLoginInput {
+            steam_username: form.steam_username,
+            steam_password: form.steam_password,
+        },
+    )
+    .await
+    {
+        Ok(Some(_)) => {
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::success(translations.steam_login_update_success_message),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+        Ok(None) => {
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::error(translations.steam_account_missing_message),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+        Err(error) => {
+            warn!("failed reauthing Steam account {}: {}", account_id, error);
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::error(steam_login_failure_message(
+                    translations,
+                    &error,
+                    translations.steam_login_update_failed_message,
+                )),
                 Some(STEAM_MANAGE_TAB_ID),
             )
             .await
@@ -1280,8 +1823,418 @@ async fn deny_confirmation_handler(
     .await
 }
 
+async fn approve_login_challenge_for_account(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    headers: &HeaderMap,
+    language: Language,
+    account_id: &str,
+    challenge_url: &str,
+) -> Response {
+    let translations = language.translations();
+    if !steam_platform::is_valid_managed_account_id(account_id) {
+        return redirect_with_workspace_banner(
+            app_state,
+            headers,
+            PageBanner::error(translations.steam_account_missing_message),
+            Some(STEAM_APPROVALS_TAB_ID),
+        )
+        .await;
+    }
+    if challenge_url.trim().is_empty() {
+        return redirect_with_workspace_banner(
+            app_state,
+            headers,
+            PageBanner::error(translations.steam_qr_approval_missing_message),
+            Some(STEAM_APPROVALS_TAB_ID),
+        )
+        .await;
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await
+    else {
+        return redirect_with_workspace_banner(
+            app_state,
+            headers,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_APPROVALS_TAB_ID),
+        )
+        .await;
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let account = match steam_platform::load_managed_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        account_id,
+    )
+    .await
+    {
+        Ok(Some(account)) => account,
+        Ok(None) => {
+            return redirect_with_workspace_banner(
+                app_state,
+                headers,
+                PageBanner::error(translations.steam_account_missing_message),
+                Some(STEAM_APPROVALS_TAB_ID),
+            )
+            .await;
+        }
+        Err(error) => {
+            warn!(
+                "failed loading Steam approval account {}: {}",
+                account_id, error
+            );
+            return redirect_with_workspace_banner(
+                app_state,
+                headers,
+                PageBanner::error(translations.steam_qr_approval_failed_message),
+                Some(STEAM_APPROVALS_TAB_ID),
+            )
+            .await;
+        }
+    };
+
+    let account = refresh_account_confirmation_session_if_needed(
+        app_state,
+        authenticated,
+        master_key.as_ref().as_slice(),
+        account,
+        false,
+    )
+    .await;
+    let result = match steam_platform::approve_login_challenge(&account, challenge_url).await {
+        Err(_) if account.has_refreshable_session() => {
+            let refreshed = refresh_account_confirmation_session_if_needed(
+                app_state,
+                authenticated,
+                master_key.as_ref().as_slice(),
+                account.clone(),
+                true,
+            )
+            .await;
+            match steam_platform::approve_login_challenge(&refreshed, challenge_url).await {
+                Ok(()) => Ok(()),
+                Err(retry_error) => Err(retry_error),
+            }
+        }
+        other => other,
+    };
+
+    match result {
+        Ok(()) => {
+            redirect_with_workspace_banner(
+                app_state,
+                headers,
+                PageBanner::success(translations.steam_qr_approval_success_message),
+                Some(STEAM_APPROVALS_TAB_ID),
+            )
+            .await
+        }
+        Err(error) => {
+            warn!(
+                "failed approving Steam challenge for account {}: {}",
+                account_id, error
+            );
+            redirect_with_workspace_banner(
+                app_state,
+                headers,
+                PageBanner::error(steam_qr_failure_message(translations, &error)),
+                Some(STEAM_APPROVALS_TAB_ID),
+            )
+            .await
+        }
+    }
+}
+
+async fn approve_login_challenge_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<SteamQrApprovalForm>,
+) -> Response {
+    approve_login_challenge_for_account(
+        &app_state,
+        &authenticated,
+        &headers,
+        detect_language(&headers, form.lang.as_deref()),
+        &form.account_id,
+        &form.challenge_url,
+    )
+    .await
+}
+
+async fn approve_login_challenge_upload_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Response {
+    let mut language = detect_language(&headers, None);
+    let mut account_id = String::new();
+    let mut image_bytes: Option<Vec<u8>> = None;
+
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let field_name = field.name().unwrap_or_default().to_owned();
+                match field_name.as_str() {
+                    "lang" => {
+                        if let Ok(raw) = field.text().await {
+                            if let Some(parsed) = Language::parse(&raw) {
+                                language = parsed;
+                            }
+                        }
+                    }
+                    "account_id" => {
+                        account_id = field.text().await.unwrap_or_default();
+                    }
+                    "challenge_image" => {
+                        image_bytes = match field.bytes().await {
+                            Ok(bytes) => Some(bytes.to_vec()),
+                            Err(error) => {
+                                warn!("failed reading Steam QR upload: {}", error);
+                                return redirect_with_workspace_banner(
+                                    &app_state,
+                                    &headers,
+                                    PageBanner::error(
+                                        language
+                                            .translations()
+                                            .steam_qr_approval_read_error_message,
+                                    ),
+                                    Some(STEAM_APPROVALS_TAB_ID),
+                                )
+                                .await;
+                            }
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                warn!("failed reading Steam QR multipart upload: {}", error);
+                return redirect_with_workspace_banner(
+                    &app_state,
+                    &headers,
+                    PageBanner::error(language.translations().steam_qr_approval_read_error_message),
+                    Some(STEAM_APPROVALS_TAB_ID),
+                )
+                .await;
+            }
+        }
+    }
+
+    let Some(file_bytes) = image_bytes.filter(|value| !value.is_empty()) else {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(language.translations().steam_qr_approval_missing_message),
+            Some(STEAM_APPROVALS_TAB_ID),
+        )
+        .await;
+    };
+
+    let challenge_url = match steam_platform::extract_login_challenge_url_from_qr_image(&file_bytes)
+    {
+        Ok(url) => url,
+        Err(error) => {
+            warn!("failed decoding Steam QR upload: {}", error);
+            return redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::error(language.translations().steam_qr_approval_invalid_message),
+                Some(STEAM_APPROVALS_TAB_ID),
+            )
+            .await;
+        }
+    };
+
+    approve_login_challenge_for_account(
+        &app_state,
+        &authenticated,
+        &headers,
+        language,
+        &account_id,
+        &challenge_url,
+    )
+    .await
+}
+
+async fn approve_login_approval_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath((account_id, client_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Form(form): Form<SteamApprovalActionForm>,
+) -> Response {
+    login_approval_action_handler(
+        &app_state,
+        &authenticated,
+        language_from_headers_and_form(&headers, form.lang.as_deref()),
+        &account_id,
+        &client_id,
+        true,
+    )
+    .await
+}
+
+async fn deny_login_approval_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath((account_id, client_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Form(form): Form<SteamApprovalActionForm>,
+) -> Response {
+    login_approval_action_handler(
+        &app_state,
+        &authenticated,
+        language_from_headers_and_form(&headers, form.lang.as_deref()),
+        &account_id,
+        &client_id,
+        false,
+    )
+    .await
+}
+
 fn language_from_headers_and_form(headers: &HeaderMap, lang: Option<&str>) -> Language {
     detect_language(headers, lang)
+}
+
+async fn login_approval_action_handler(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    language: Language,
+    account_id: &str,
+    client_id: &str,
+    approve: bool,
+) -> Response {
+    let translations = language.translations();
+    if !steam_platform::is_valid_managed_account_id(account_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(SteamActionResponse {
+                ok: false,
+                message: translations.steam_account_missing_message.to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
+    let client_id = match client_id.trim().parse::<u64>() {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(SteamActionResponse {
+                    ok: false,
+                    message: translations.steam_approval_action_failed_message.to_owned(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(SteamActionResponse {
+                ok: false,
+                message: translations.session_data_locked_message.to_owned(),
+            }),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let account = match steam_platform::load_managed_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        account_id,
+    )
+    .await
+    {
+        Ok(Some(account)) => account,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(SteamActionResponse {
+                    ok: false,
+                    message: translations.steam_account_missing_message.to_owned(),
+                }),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            warn!(
+                "failed loading Steam approval account {}: {}",
+                account_id, error
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(SteamActionResponse {
+                    ok: false,
+                    message: translations.steam_approval_action_failed_message.to_owned(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let account = refresh_account_confirmation_session_if_needed(
+        app_state,
+        authenticated,
+        master_key.as_ref().as_slice(),
+        account,
+        false,
+    )
+    .await;
+    let result = match steam_platform::respond_to_login_approval(&account, client_id, approve).await
+    {
+        Err(_) if account.has_refreshable_session() => {
+            let refreshed = refresh_account_confirmation_session_if_needed(
+                app_state,
+                authenticated,
+                master_key.as_ref().as_slice(),
+                account.clone(),
+                true,
+            )
+            .await;
+            steam_platform::respond_to_login_approval(&refreshed, client_id, approve).await
+        }
+        other => other,
+    };
+
+    match result {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(SteamActionResponse {
+                ok: true,
+                message: if approve {
+                    translations.steam_approval_approve_success_message
+                } else {
+                    translations.steam_approval_deny_success_message
+                }
+                .to_owned(),
+            }),
+        )
+            .into_response(),
+        Err(error) => {
+            warn!(
+                "failed handling Steam login approval {} for account {}: {}",
+                client_id, account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(SteamActionResponse {
+                    ok: false,
+                    message: translations.steam_approval_action_failed_message.to_owned(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn confirmation_action_handler(

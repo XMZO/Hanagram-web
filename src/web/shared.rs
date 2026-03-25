@@ -84,8 +84,13 @@ pub(crate) const TELEGRAM_WORKSPACE_PATH: &str = "/platforms/telegram";
 pub(crate) const STEAM_WORKSPACE_PATH: &str = "/platforms/steam";
 pub(crate) const STEAM_SNAPSHOT_API_PATH: &str = "/api/platforms/steam/snapshot";
 pub(crate) const STEAM_CONFIRMATIONS_API_PATH: &str = "/api/platforms/steam/confirmations";
+pub(crate) const STEAM_APPROVALS_API_PATH: &str = "/api/platforms/steam/approvals";
 pub(crate) const STEAM_IMPORT_UPLOAD_PATH: &str = "/platforms/steam/import/upload";
 pub(crate) const STEAM_IMPORT_MANUAL_PATH: &str = "/platforms/steam/import/manual";
+pub(crate) const STEAM_IMPORT_LOGIN_PATH: &str = "/platforms/steam/import/login";
+pub(crate) const STEAM_APPROVAL_CHALLENGE_PATH: &str = "/platforms/steam/approvals/challenge";
+pub(crate) const STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH: &str =
+    "/platforms/steam/approvals/challenge/upload";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
@@ -825,6 +830,26 @@ pub(crate) fn steam_import_manual_href(language: Language) -> String {
 pub(crate) fn steam_confirmations_api_href(language: Language) -> String {
     let _ = language;
     String::from(STEAM_CONFIRMATIONS_API_PATH)
+}
+
+pub(crate) fn steam_approvals_api_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_APPROVALS_API_PATH)
+}
+
+pub(crate) fn steam_import_login_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_IMPORT_LOGIN_PATH)
+}
+
+pub(crate) fn steam_approval_challenge_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_APPROVAL_CHALLENGE_PATH)
+}
+
+pub(crate) fn steam_approval_challenge_upload_href(language: Language) -> String {
+    let _ = language;
+    String::from(STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH)
 }
 
 pub(crate) fn telegram_snapshot_api_href(language: Language) -> String {
@@ -1680,9 +1705,19 @@ mod tests {
         context.insert("banner", &Option::<PageBanner>::None);
         context.insert("default_tab", "codes");
         context.insert("snapshot_api", STEAM_SNAPSHOT_API_PATH);
+        context.insert("approvals_api", STEAM_APPROVALS_API_PATH);
         context.insert("confirmations_api", STEAM_CONFIRMATIONS_API_PATH);
         context.insert("steam_import_upload_action", STEAM_IMPORT_UPLOAD_PATH);
         context.insert("steam_import_manual_action", STEAM_IMPORT_MANUAL_PATH);
+        context.insert("steam_import_login_action", STEAM_IMPORT_LOGIN_PATH);
+        context.insert(
+            "steam_approval_challenge_action",
+            STEAM_APPROVAL_CHALLENGE_PATH,
+        );
+        context.insert(
+            "steam_approval_challenge_upload_action",
+            STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH,
+        );
         context.insert("steam_accounts_dir", "users/alice/steam");
         context.insert("steam_managed_dir", "users/alice/steam/accounts");
         context.insert("total_accounts", &1);
@@ -1691,6 +1726,14 @@ mod tests {
         context.insert("encrypted_accounts", &1);
         context.insert("confirmation_ready_accounts", &1);
         context.insert("issue_count", &0);
+        context.insert(
+            "approval_ready_accounts",
+            &serde_json::json!([{
+                "id": "alice.maFile",
+                "account_name": "alice",
+                "steam_username": "alice_steam",
+            }]),
+        );
         context.insert(
             "snapshot",
             &serde_json::json!({
@@ -1706,6 +1749,7 @@ mod tests {
                 "accounts": [{
                     "id": "alice.maFile",
                     "account_name": "alice",
+                    "steam_username": "alice_steam",
                     "steam_id": "76561198000000000",
                     "storage_file": "steam/alice.maFile",
                     "current_code": "2F9J5",
@@ -1720,10 +1764,14 @@ mod tests {
                     "has_confirmation_secret_material": true,
                     "has_confirmation_session": true,
                     "confirmation_ready": true,
+                    "has_session_tokens": true,
+                    "has_refreshable_session": true,
+                    "login_approval_ready": true,
                     "imported_from": "alice.maFile",
                     "created_at": "2026-03-14 09:00:00 UTC",
                     "updated_at": "2026-03-14 09:00:00 UTC",
                     "update_material_action": "/platforms/steam/accounts/demo/materials",
+                    "login_action": "/platforms/steam/accounts/demo/login",
                     "rename_action": "/platforms/steam/accounts/demo/rename",
                     "delete_action": "/platforms/steam/accounts/demo/delete"
                 }],

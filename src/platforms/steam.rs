@@ -1,18 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use base64::Engine;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
+use image::ImageReader;
+use rqrr::PreparedImage;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use steamguard::approver::Challenge;
+use steamguard::protobufs::enums::ESessionPersistence;
+use steamguard::protobufs::steammessages_auth_steamclient::{
+    CAuthentication_GetAuthSessionInfo_Response, EAuthSessionGuardType, EAuthTokenPlatformType,
+};
 use steamguard::refresher::TokenRefresher;
 use steamguard::steamapi::AuthenticationClient;
-use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens};
+use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens, TwoFactorSecret};
 use steamguard::transport::WebApiTransport;
+use steamguard::userlogin::UpdateAuthSessionError;
+use steamguard::{
+    DeviceDetails, LoginApprover, LoginError, SteamGuardAccount as VendorSteamGuardAccount,
+    UserLogin,
+};
 use tokio::fs;
 use tokio::task::spawn_blocking;
 use tracing::warn;
@@ -89,6 +101,7 @@ impl SteamWebSession {
 pub(crate) struct SteamGuardAccount {
     pub(crate) id: String,
     pub(crate) account_name: String,
+    pub(crate) steam_username: Option<String>,
     pub(crate) steam_id: Option<u64>,
     pub(crate) shared_secret: String,
     pub(crate) identity_secret: Option<String>,
@@ -104,6 +117,26 @@ pub(crate) struct SteamGuardAccount {
 }
 
 impl SteamGuardAccount {
+    pub(crate) fn has_session_tokens(&self) -> bool {
+        self.session
+            .as_ref()
+            .and_then(SteamWebSession::access_token)
+            .is_some()
+    }
+
+    pub(crate) fn has_refreshable_session(&self) -> bool {
+        self.can_manage()
+            && self
+                .session
+                .as_ref()
+                .and_then(SteamWebSession::refresh_token)
+                .is_some()
+    }
+
+    pub(crate) fn login_approval_ready(&self) -> bool {
+        self.steam_id.is_some() && self.has_session_tokens()
+    }
+
     pub(crate) fn has_identity_secret(&self) -> bool {
         option_has_value(self.identity_secret.as_deref())
     }
@@ -157,6 +190,22 @@ pub(crate) struct UpdateSteamAccountInput {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CredentialSteamAccountInput {
+    pub(crate) account_name: String,
+    pub(crate) steam_username: String,
+    pub(crate) steam_password: String,
+    pub(crate) shared_secret: String,
+    pub(crate) identity_secret: Option<String>,
+    pub(crate) device_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SteamCredentialLoginInput {
+    pub(crate) steam_username: String,
+    pub(crate) steam_password: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SteamConfirmation {
     pub(crate) id: String,
     pub(crate) nonce: String,
@@ -167,6 +216,18 @@ pub(crate) struct SteamConfirmation {
     pub(crate) summary: Vec<String>,
     pub(crate) icon: Option<String>,
     pub(crate) created_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct SteamLoginApproval {
+    pub(crate) client_id: String,
+    pub(crate) ip: Option<String>,
+    pub(crate) geolocation: Option<String>,
+    pub(crate) city: Option<String>,
+    pub(crate) state: Option<String>,
+    pub(crate) country: Option<String>,
+    pub(crate) platform_label: String,
+    pub(crate) device_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -185,6 +246,8 @@ struct StoredSteamAccount {
     schema_version: u8,
     id: String,
     account_name: String,
+    #[serde(default)]
+    steam_username: Option<String>,
     steam_id: Option<u64>,
     shared_secret: String,
     identity_secret: Option<String>,
@@ -201,6 +264,7 @@ impl StoredSteamAccount {
         SteamGuardAccount {
             id: self.id,
             account_name: self.account_name,
+            steam_username: self.steam_username,
             steam_id: self.steam_id,
             shared_secret: self.shared_secret,
             identity_secret: self.identity_secret,
@@ -493,21 +557,424 @@ pub(crate) async fn update_managed_account_materials(
         }
     }
     if let Some(steam_login_secure) = normalize_optional_string(input.steam_login_secure) {
-        let session = record.session.get_or_insert(StoredSteamWebSession {
-            session_id: None,
-            steam_login: None,
-            steam_login_secure: None,
-            web_cookie: None,
-            oauth_token: None,
-            access_token: None,
-            refresh_token: None,
-        });
+        let session = record
+            .session
+            .get_or_insert_with(default_stored_web_session);
         session.steam_login_secure = Some(steam_login_secure);
     }
 
     record.updated_at_unix = Utc::now().timestamp();
     persist_stored_account(master_key, &storage_path, &record).await?;
     Ok(true)
+}
+
+fn default_stored_web_session() -> StoredSteamWebSession {
+    StoredSteamWebSession {
+        session_id: None,
+        steam_login: None,
+        steam_login_secure: None,
+        web_cookie: None,
+        oauth_token: None,
+        access_token: None,
+        refresh_token: None,
+    }
+}
+
+fn stored_web_session_mut(record: &mut StoredSteamAccount) -> &mut StoredSteamWebSession {
+    record
+        .session
+        .get_or_insert_with(default_stored_web_session)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SteamCredentialLoginResult {
+    steam_username: String,
+    steam_id: u64,
+    access_token: String,
+    refresh_token: String,
+}
+
+fn build_blocking_steam_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .user_agent(STEAM_CONFIRMATION_USER_AGENT)
+        .build()
+        .context("failed building blocking Steam client")
+}
+
+fn build_steam_mobile_device_details() -> DeviceDetails {
+    DeviceDetails {
+        friendly_name: String::from("Hanagram Web"),
+        platform_type: EAuthTokenPlatformType::k_EAuthTokenPlatformType_MobileApp,
+        os_type: -500,
+        gaming_device_type: 528,
+    }
+}
+
+fn map_login_error(error: LoginError) -> anyhow::Error {
+    match error {
+        LoginError::BadCredentials => anyhow!("Steam username or password is incorrect"),
+        LoginError::TooManyAttempts => anyhow!("Steam is rate limiting login attempts"),
+        LoginError::SessionExpired => anyhow!("Steam login session expired before completion"),
+        other => anyhow!("Steam credential login failed: {other}"),
+    }
+}
+
+fn map_guard_submit_error(error: UpdateAuthSessionError) -> anyhow::Error {
+    match error {
+        UpdateAuthSessionError::IncorrectSteamGuardCode => {
+            anyhow!("the generated Steam Guard code was rejected")
+        }
+        UpdateAuthSessionError::TooManyAttempts => {
+            anyhow!("Steam rate limited Steam Guard submissions")
+        }
+        UpdateAuthSessionError::SessionExpired => anyhow!("Steam login session expired"),
+        UpdateAuthSessionError::DuplicateRequest => {
+            anyhow!("Steam login request was already approved elsewhere")
+        }
+        other => anyhow!("failed submitting Steam Guard code: {other}"),
+    }
+}
+
+async fn perform_credential_login(
+    shared_secret: String,
+    steam_username: String,
+    steam_password: String,
+) -> Result<SteamCredentialLoginResult> {
+    spawn_blocking(move || {
+        let username = steam_username.trim().to_owned();
+        ensure!(!username.is_empty(), "Steam username is required");
+        ensure!(
+            !steam_password.is_empty(),
+            "Steam password is required for credential login"
+        );
+
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let shared_secret = TwoFactorSecret::parse_shared_secret(shared_secret.trim().to_owned())
+            .context("failed parsing Steam shared_secret")?;
+
+        let mut vendor_account = VendorSteamGuardAccount::new();
+        vendor_account.account_name = username.clone();
+        vendor_account.shared_secret = shared_secret;
+
+        let mut login = UserLogin::new(transport.clone(), build_steam_mobile_device_details());
+        let confirmation_methods = login
+            .begin_auth_via_credentials(&username, &steam_password)
+            .map_err(map_login_error)?;
+
+        let has_guardless_flow = confirmation_methods.iter().any(|method| {
+            method.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_None
+        });
+        let has_device_code = confirmation_methods.iter().any(|method| {
+            method.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode
+        });
+        let requires_device_confirmation = confirmation_methods.iter().any(|method| {
+            method.confirmation_type
+                == EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceConfirmation
+        });
+        let requires_email_code = confirmation_methods.iter().any(|method| {
+            method.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
+        });
+        let requires_email_confirmation = confirmation_methods.iter().any(|method| {
+            method.confirmation_type
+                == EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation
+        });
+
+        if !has_guardless_flow {
+            if has_device_code {
+                let server_time = steamguard::steamapi::get_server_time(transport.clone())
+                    .context("failed querying Steam server time for credential login")?
+                    .server_time();
+                let guard_code = vendor_account.generate_code(server_time);
+                match login.submit_steam_guard_code(
+                    EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode,
+                    guard_code,
+                ) {
+                    Ok(_) | Err(UpdateAuthSessionError::DuplicateRequest) => {}
+                    Err(error) => return Err(map_guard_submit_error(error)),
+                }
+            } else if requires_device_confirmation {
+                bail!("Steam requested mobile confirmation on another device for this login");
+            } else if requires_email_code {
+                bail!("Steam requested an email code for this login");
+            } else if requires_email_confirmation {
+                bail!("Steam requested email confirmation for this login");
+            } else if !confirmation_methods.is_empty() {
+                bail!("Steam requested an unsupported login confirmation method");
+            }
+        }
+
+        let tokens = login
+            .poll_until_tokens()
+            .context("failed polling Steam for credential login tokens")?;
+        let steam_id = tokens
+            .access_token()
+            .decode()
+            .context("failed decoding Steam access token")?
+            .steam_id();
+
+        Ok::<SteamCredentialLoginResult, anyhow::Error>(SteamCredentialLoginResult {
+            steam_username: username,
+            steam_id,
+            access_token: tokens.access_token().expose_secret().to_owned(),
+            refresh_token: tokens.refresh_token().expose_secret().to_owned(),
+        })
+    })
+    .await
+    .context("Steam credential login task failed")?
+}
+
+fn apply_credential_login_result(
+    record: &mut StoredSteamAccount,
+    login_result: &SteamCredentialLoginResult,
+) {
+    record.steam_username = Some(login_result.steam_username.clone());
+    record.steam_id = Some(login_result.steam_id);
+    if record.device_id.is_none() && record.identity_secret.is_some() {
+        record.device_id = Some(generate_device_id_for_steam_id(login_result.steam_id));
+    }
+
+    let session = stored_web_session_mut(record);
+    session.access_token = Some(login_result.access_token.clone());
+    session.refresh_token = Some(login_result.refresh_token.clone());
+}
+
+pub(crate) async fn create_logged_in_account(
+    root_dir: &Path,
+    master_key: &[u8],
+    input: CredentialSteamAccountInput,
+) -> Result<SteamGuardAccount> {
+    ensure_managed_accounts_dir(root_dir).await?;
+    validate_shared_secret(&input.shared_secret)?;
+
+    let identity_secret = normalize_optional_string(input.identity_secret);
+    if let Some(secret) = identity_secret.as_deref() {
+        validate_identity_secret(secret)?;
+    }
+
+    let login_result = perform_credential_login(
+        input.shared_secret.trim().to_owned(),
+        input.steam_username,
+        input.steam_password,
+    )
+    .await?;
+
+    let display_name = if input.account_name.trim().is_empty() {
+        login_result.steam_username.as_str()
+    } else {
+        input.account_name.as_str()
+    };
+    let now = Utc::now().timestamp();
+    let mut record = StoredSteamAccount {
+        schema_version: STEAM_MANAGED_SCHEMA_VERSION,
+        id: Uuid::new_v4().to_string(),
+        account_name: sanitize_account_name(display_name),
+        steam_username: Some(login_result.steam_username.clone()),
+        steam_id: Some(login_result.steam_id),
+        shared_secret: input.shared_secret.trim().to_owned(),
+        identity_secret,
+        device_id: normalize_optional_string(input.device_id),
+        session: None,
+        imported_from: Some(String::from("credential-login")),
+        managed_origin: SteamManagedAccountOrigin::ManualEntry,
+        created_at_unix: now,
+        updated_at_unix: now,
+    };
+    apply_credential_login_result(&mut record, &login_result);
+
+    let storage_path = managed_account_storage_path(root_dir, &record.id);
+    persist_stored_account(master_key, &storage_path, &record).await?;
+    Ok(record.into_runtime(storage_path))
+}
+
+pub(crate) async fn login_managed_account_with_credentials(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    input: SteamCredentialLoginInput,
+) -> Result<Option<SteamGuardAccount>> {
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let Some(mut record) = load_stored_account(master_key, &storage_path).await? else {
+        return Ok(None);
+    };
+
+    let steam_username = normalize_optional_string(Some(input.steam_username))
+        .or_else(|| record.steam_username.clone())
+        .context("Steam username is required")?;
+    let login_result = perform_credential_login(
+        record.shared_secret.clone(),
+        steam_username,
+        input.steam_password,
+    )
+    .await?;
+
+    apply_credential_login_result(&mut record, &login_result);
+    record.updated_at_unix = Utc::now().timestamp();
+    persist_stored_account(master_key, &storage_path, &record).await?;
+    Ok(Some(record.into_runtime(storage_path)))
+}
+
+fn build_vendor_account(account: &SteamGuardAccount) -> Result<VendorSteamGuardAccount> {
+    let steam_id = account
+        .steam_id
+        .context("Steam account is missing SteamID for login approvals")?;
+    let shared_secret =
+        TwoFactorSecret::parse_shared_secret(account.shared_secret.trim().to_owned())
+            .context("failed parsing Steam shared_secret for login approvals")?;
+
+    let mut vendor_account = VendorSteamGuardAccount::new();
+    vendor_account.account_name = account
+        .steam_username
+        .clone()
+        .unwrap_or_else(|| account.account_name.clone());
+    vendor_account.steam_id = steam_id;
+    vendor_account.shared_secret = shared_secret;
+    Ok(vendor_account)
+}
+
+fn build_vendor_tokens(account: &SteamGuardAccount) -> Result<SteamTokens> {
+    let session = account
+        .session
+        .as_ref()
+        .context("Steam account is missing session material")?;
+    let access_token = session
+        .access_token()
+        .context("Steam account is missing an access token")?
+        .to_owned();
+    let refresh_token = session.refresh_token().unwrap_or_default().to_owned();
+    Ok(SteamTokens::new(
+        SteamJwt::from(access_token),
+        SteamJwt::from(refresh_token),
+    ))
+}
+
+fn login_approval_platform_label(platform_type: EAuthTokenPlatformType) -> &'static str {
+    match platform_type {
+        EAuthTokenPlatformType::k_EAuthTokenPlatformType_SteamClient => "Steam Client",
+        EAuthTokenPlatformType::k_EAuthTokenPlatformType_WebBrowser => "Web Browser",
+        EAuthTokenPlatformType::k_EAuthTokenPlatformType_MobileApp => "Mobile App",
+        _ => "Unknown",
+    }
+}
+
+fn build_login_approval(
+    client_id: u64,
+    session: &CAuthentication_GetAuthSessionInfo_Response,
+) -> SteamLoginApproval {
+    SteamLoginApproval {
+        client_id: client_id.to_string(),
+        ip: normalize_optional_string(Some(session.ip().to_owned())),
+        geolocation: normalize_optional_string(Some(session.geoloc().to_owned())),
+        city: normalize_optional_string(Some(session.city().to_owned())),
+        state: normalize_optional_string(Some(session.state().to_owned())),
+        country: normalize_optional_string(Some(session.country().to_owned())),
+        platform_label: login_approval_platform_label(session.platform_type()).to_owned(),
+        device_label: normalize_optional_string(Some(session.device_friendly_name().to_owned())),
+    }
+}
+
+pub(crate) async fn list_login_approvals(
+    account: &SteamGuardAccount,
+) -> Result<Vec<SteamLoginApproval>> {
+    let vendor_account = build_vendor_account(account)?;
+    let vendor_tokens = build_vendor_tokens(account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let approver = LoginApprover::new(transport, &vendor_tokens);
+        let client_ids = approver
+            .list_auth_sessions()
+            .context("failed listing Steam login approvals")?;
+
+        let mut approvals = Vec::with_capacity(client_ids.len());
+        for client_id in client_ids {
+            let session = approver
+                .get_auth_session_info(client_id)
+                .with_context(|| format!("failed loading Steam approval session {client_id}"))?;
+            approvals.push(build_login_approval(client_id, &session));
+        }
+
+        let _ = vendor_account;
+        Ok::<Vec<SteamLoginApproval>, anyhow::Error>(approvals)
+    })
+    .await
+    .context("Steam login approval listing task failed")?
+}
+
+pub(crate) async fn respond_to_login_approval(
+    account: &SteamGuardAccount,
+    client_id: u64,
+    approve: bool,
+) -> Result<()> {
+    let vendor_account = build_vendor_account(account)?;
+    let vendor_tokens = build_vendor_tokens(account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let mut approver = LoginApprover::new(transport, &vendor_tokens);
+        let challenge = Challenge::new(1, client_id);
+        if approve {
+            approver
+                .approve(
+                    &vendor_account,
+                    challenge,
+                    ESessionPersistence::k_ESessionPersistence_Persistent,
+                )
+                .context("failed approving Steam login session")?;
+        } else {
+            approver
+                .deny(&vendor_account, challenge)
+                .context("failed denying Steam login session")?;
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .context("Steam login approval action task failed")?
+}
+
+pub(crate) async fn approve_login_challenge(
+    account: &SteamGuardAccount,
+    challenge_url: &str,
+) -> Result<()> {
+    let vendor_account = build_vendor_account(account)?;
+    let vendor_tokens = build_vendor_tokens(account)?;
+    let challenge_url = challenge_url.trim().to_owned();
+    ensure!(!challenge_url.is_empty(), "Steam challenge URL is required");
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let mut approver = LoginApprover::new(transport, &vendor_tokens);
+        approver
+            .approve_from_challenge_url(
+                &vendor_account,
+                challenge_url,
+                ESessionPersistence::k_ESessionPersistence_Persistent,
+            )
+            .context("failed approving Steam QR login challenge")?;
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .context("Steam QR approval task failed")?
+}
+
+pub(crate) fn extract_login_challenge_url_from_qr_image(raw_bytes: &[u8]) -> Result<String> {
+    let image = ImageReader::new(Cursor::new(raw_bytes))
+        .with_guessed_format()
+        .context("failed reading Steam QR image format")?
+        .decode()
+        .context("failed decoding Steam QR image")?
+        .to_luma8();
+    let mut prepared = PreparedImage::prepare(image);
+    for grid in prepared.detect_grids() {
+        let (_, text) = grid.decode().context("failed decoding Steam QR image")?;
+        if text.contains("s.team") {
+            return Ok(text);
+        }
+    }
+    bail!("no Steam login challenge URL was found in the QR image")
 }
 
 pub(crate) async fn query_steam_server_time(http_client: &reqwest::Client) -> Result<i64> {
@@ -685,18 +1152,15 @@ pub(crate) async fn create_manual_account(
         schema_version: STEAM_MANAGED_SCHEMA_VERSION,
         id: Uuid::new_v4().to_string(),
         account_name,
+        steam_username: None,
         steam_id: Some(input.steam_id),
         shared_secret: input.shared_secret.trim().to_owned(),
         identity_secret,
         device_id,
-        session: steam_login_secure.map(|value| StoredSteamWebSession {
-            session_id: None,
-            steam_login: None,
-            steam_login_secure: Some(value),
-            web_cookie: None,
-            oauth_token: None,
-            access_token: None,
-            refresh_token: None,
+        session: steam_login_secure.map(|value| {
+            let mut session = default_stored_web_session();
+            session.steam_login_secure = Some(value);
+            session
         }),
         imported_from: Some(String::from("manual-entry")),
         managed_origin: SteamManagedAccountOrigin::ManualEntry,
@@ -733,6 +1197,7 @@ pub(crate) async fn import_mafile_bytes(
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(&parsed.account_name),
         ),
+        steam_username: None,
         steam_id: parsed.steam_id,
         shared_secret: parsed.shared_secret,
         identity_secret: parsed.identity_secret,
@@ -895,6 +1360,7 @@ fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccoun
     Ok(SteamGuardAccount {
         id: path.display().to_string(),
         account_name,
+        steam_username: None,
         steam_id: parsed
             .steamid
             .or(parsed.steam_id)
@@ -976,12 +1442,7 @@ fn build_confirmation_cookie_header(account: &SteamGuardAccount, steam_id: u64) 
 }
 
 pub(crate) fn confirmation_session_can_refresh(account: &SteamGuardAccount) -> bool {
-    account.can_manage()
-        && account
-            .session
-            .as_ref()
-            .and_then(SteamWebSession::refresh_token)
-            .is_some()
+    account.has_refreshable_session()
 }
 
 pub(crate) fn confirmation_session_should_refresh(account: &SteamGuardAccount) -> bool {
@@ -1399,6 +1860,7 @@ mod tests {
         let account = SteamGuardAccount {
             id: String::from("demo"),
             account_name: String::from("token-cookie"),
+            steam_username: None,
             steam_id: Some(76_561_199_441_992_970),
             shared_secret: String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="),
             identity_secret: Some(String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=")),
