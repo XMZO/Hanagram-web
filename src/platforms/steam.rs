@@ -174,6 +174,7 @@ pub(crate) struct SteamGuardLoadIssue {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ManualSteamAccountInput {
     pub(crate) account_name: String,
+    pub(crate) steam_username: Option<String>,
     pub(crate) steam_id: u64,
     pub(crate) shared_secret: String,
     pub(crate) identity_secret: Option<String>,
@@ -183,6 +184,7 @@ pub(crate) struct ManualSteamAccountInput {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct UpdateSteamAccountInput {
+    pub(crate) steam_username: Option<String>,
     pub(crate) shared_secret: Option<String>,
     pub(crate) identity_secret: Option<String>,
     pub(crate) device_id: Option<String>,
@@ -429,6 +431,10 @@ pub(crate) fn sanitize_account_name(raw: &str) -> String {
     }
 }
 
+fn extract_raw_steam_username(raw_account_name: &str) -> Option<String> {
+    normalize_optional_string(Some(raw_account_name.to_owned()))
+}
+
 pub(crate) fn managed_accounts_dir(root_dir: &Path) -> PathBuf {
     root_dir.join("accounts")
 }
@@ -541,6 +547,9 @@ pub(crate) async fn update_managed_account_materials(
         return Ok(false);
     };
 
+    if let Some(steam_username) = normalize_optional_string(input.steam_username) {
+        record.steam_username = Some(steam_username);
+    }
     if let Some(shared_secret) = normalize_optional_string(input.shared_secret) {
         validate_shared_secret(&shared_secret)?;
         record.shared_secret = shared_secret;
@@ -1152,7 +1161,7 @@ pub(crate) async fn create_manual_account(
         schema_version: STEAM_MANAGED_SCHEMA_VERSION,
         id: Uuid::new_v4().to_string(),
         account_name,
-        steam_username: None,
+        steam_username: normalize_optional_string(input.steam_username),
         steam_id: Some(input.steam_id),
         shared_secret: input.shared_secret.trim().to_owned(),
         identity_secret,
@@ -1197,7 +1206,7 @@ pub(crate) async fn import_mafile_bytes(
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(&parsed.account_name),
         ),
-        steam_username: None,
+        steam_username: parsed.steam_username.clone(),
         steam_id: parsed.steam_id,
         shared_secret: parsed.shared_secret,
         identity_secret: parsed.identity_secret,
@@ -1342,6 +1351,7 @@ async fn load_managed_runtime_account(master_key: &[u8], path: &Path) -> Result<
 fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccount> {
     let parsed: RawSteamGuardAccount = serde_json::from_slice(raw_bytes)
         .with_context(|| format!("failed parsing Steam Guard file {}", path.display()))?;
+    let steam_username = extract_raw_steam_username(&parsed.account_name);
 
     let account_name = if parsed.account_name.trim().is_empty() {
         path.file_stem()
@@ -1360,7 +1370,7 @@ fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccoun
     Ok(SteamGuardAccount {
         id: path.display().to_string(),
         account_name,
-        steam_username: None,
+        steam_username,
         steam_id: parsed
             .steamid
             .or(parsed.steam_id)
@@ -1805,6 +1815,7 @@ mod tests {
         let account = parse_account_bytes(&raw, &path).expect("maFile should parse");
 
         assert_eq!(account.account_name, "example");
+        assert_eq!(account.steam_username.as_deref(), Some("example"));
         assert_eq!(account.steam_id, Some(1234));
         assert_eq!(account.shared_secret, "zvIayp3JPvtvX/QGHqsqKBk/44s=");
         assert_eq!(account.identity_secret.as_deref(), Some("kjsdlwowiqe="));
@@ -1818,6 +1829,7 @@ mod tests {
         let account = parse_account_bytes(&raw, &path).expect("steamv2 maFile should parse");
 
         assert_eq!(account.account_name, "afarihm");
+        assert_eq!(account.steam_username.as_deref(), Some("afarihm"));
         assert_eq!(account.steam_id, Some(76_561_199_441_992_970));
         assert_eq!(
             account.identity_secret.as_deref(),
@@ -1909,6 +1921,7 @@ mod tests {
             &master_key,
             ManualSteamAccountInput {
                 account_name: String::from("Demo Steam"),
+                steam_username: Some(String::from("demo_login")),
                 steam_id: 76_561_197_960_265_728,
                 shared_secret: String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="),
                 identity_secret: Some(String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=")),
@@ -1923,6 +1936,7 @@ mod tests {
         assert!(issues.is_empty());
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].account_name, "Demo Steam");
+        assert_eq!(accounts[0].steam_username.as_deref(), Some("demo_login"));
         assert_eq!(accounts[0].id, created.id);
         assert!(accounts[0].encrypted_at_rest);
         assert!(accounts[0].confirmation_ready());
@@ -1949,6 +1963,7 @@ mod tests {
             &master_key,
             ManualSteamAccountInput {
                 account_name: String::from("Updater"),
+                steam_username: None,
                 steam_id: 76_561_197_960_265_728,
                 shared_secret: String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="),
                 identity_secret: None,
@@ -1964,6 +1979,7 @@ mod tests {
             &master_key,
             &created.id,
             UpdateSteamAccountInput {
+                steam_username: Some(String::from("updater_login")),
                 shared_secret: None,
                 identity_secret: Some(String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=")),
                 device_id: None,
@@ -1978,6 +1994,7 @@ mod tests {
             .await
             .expect("managed account should load")
             .expect("managed account should still exist");
+        assert_eq!(account.steam_username.as_deref(), Some("updater_login"));
         assert_eq!(
             account.identity_secret.as_deref(),
             Some("GQP46b73Ws7gr8GmZFR0sDuau5c=")
@@ -2024,12 +2041,14 @@ mod tests {
                 .await
                 .expect("tokenized maFile should import");
         assert!(imported.confirmation_ready());
+        assert_eq!(imported.steam_username.as_deref(), Some("token-import"));
 
         let loaded = load_managed_account(&temp_root, &master_key, &imported.id)
             .await
             .expect("managed account should load")
             .expect("managed account should exist");
         assert!(loaded.confirmation_ready());
+        assert_eq!(loaded.steam_username.as_deref(), Some("token-import"));
         assert_eq!(
             loaded
                 .session

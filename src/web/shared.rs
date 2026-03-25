@@ -1618,7 +1618,7 @@ mod tests {
             PlatformWorkspaceCardView {
                 id: String::from("telegram"),
                 name: String::from("Telegram"),
-                description: String::from("独立工作区"),
+                description: String::from(translations.dashboard_sessions_description),
                 total_count: 4,
                 connected_count: 3,
                 attention_count: 1,
@@ -1629,7 +1629,7 @@ mod tests {
             PlatformWorkspaceCardView {
                 id: String::from("steam"),
                 name: String::from("Steam"),
-                description: String::from("模块预留"),
+                description: String::from(translations.steam_platform_description),
                 total_count: 0,
                 connected_count: 0,
                 attention_count: 0,

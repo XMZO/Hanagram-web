@@ -143,6 +143,87 @@
             background: rgba(255, 255, 255, 0.98);
             box-shadow: 0 18px 40px rgba(31, 56, 79, 0.10);
         }
+        .steam-disclosure {
+            transition:
+                border-color 180ms ease,
+                background-color 180ms ease,
+                box-shadow 220ms ease,
+                transform 220ms ease;
+        }
+        .steam-disclosure[open] {
+            border-color: rgba(31, 79, 114, 0.22);
+            box-shadow: 0 18px 40px rgba(31, 56, 79, 0.08);
+        }
+        .steam-approval-dropzone {
+            transition:
+                border-color 180ms ease,
+                background-color 180ms ease,
+                box-shadow 220ms ease,
+                transform 220ms ease;
+        }
+        .steam-approval-dropzone:hover,
+        .steam-approval-dropzone:focus-visible {
+            border-color: rgba(31, 79, 114, 0.42);
+            background: rgba(230, 240, 247, 0.56);
+            box-shadow: 0 14px 28px rgba(31, 56, 79, 0.08);
+            transform: translateY(-1px);
+        }
+        .steam-approval-dropzone.is-dragging,
+        .steam-approval-dropzone.is-ready {
+            border-color: rgba(65, 108, 102, 0.34);
+            background: rgba(237, 248, 244, 0.92);
+        }
+        .steam-approval-dropzone.is-error {
+            border-color: rgba(203, 143, 122, 0.42);
+            background: rgba(251, 239, 236, 0.94);
+        }
+        [data-tab-button] {
+            transition:
+                background-color 180ms ease,
+                color 180ms ease,
+                transform 180ms ease,
+                box-shadow 180ms ease;
+        }
+        [data-tab-button]:hover {
+            transform: translateY(-1px);
+        }
+        @keyframes steamPanelIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px) scale(0.992);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        @keyframes steamPopIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px) scale(0.985);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        [data-tab-panel].tab-active > * {
+            animation: steamPanelIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        [data-manage-modal].grid > div {
+            animation: steamPopIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .steam-disclosure,
+            .steam-approval-dropzone,
+            [data-tab-button],
+            [data-tab-panel].tab-active > *,
+            [data-manage-modal].grid > div {
+                animation: none !important;
+                transition: none !important;
+                transform: none !important;
+            }
+        }
         [data-tab-panel] { display: none; }
         [data-tab-panel].tab-active { display: block; }
     </style>
@@ -230,10 +311,10 @@
                             <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.12)]"></span>
                             <p class="truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</p>
                         </div>
+                        ${account.steam_username
+                            ? `<p class="mt-1.5 truncate text-[0.74rem] text-ink/54">${escapeHtml(account.steam_username)}</p>`
+                            : ""}
                         <div class="mt-2 flex flex-wrap items-center gap-2">
-                            ${account.steam_username
-                                ? `<span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.68rem] text-ink/62">${escapeHtml(account.steam_username)}</span>`
-                                : ""}
                             <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(sourceBadge)}</span>
                             <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
                         </div>
@@ -944,10 +1025,10 @@
                 form.dataset.pasteBound = "true";
 
                 const fileInput = form.querySelector("input[name='challenge_image']");
-                const pasteZone = form.querySelector("[data-role='steam-approval-paste-zone']");
+                const dropzone = form.querySelector("[data-role='steam-approval-dropzone']");
                 const status = form.querySelector("[data-role='steam-approval-paste-status']");
                 const fileName = form.querySelector("[data-role='steam-approval-file-name']");
-                if (!fileInput || !pasteZone || !status || !fileName) { return; }
+                if (!fileInput || !dropzone || !status || !fileName) { return; }
 
                 function setPasteStatus(kind, message) {
                     const classMap = {
@@ -957,6 +1038,12 @@
                     };
                     status.className = classMap[kind] || classMap.neutral;
                     status.textContent = message;
+                    dropzone.classList.remove("is-ready", "is-error");
+                    if (kind === "success") {
+                        dropzone.classList.add("is-ready");
+                    } else if (kind === "error") {
+                        dropzone.classList.add("is-error");
+                    }
                 }
 
                 function syncSelectedFile() {
@@ -970,7 +1057,7 @@
                     setPasteStatus("success", I18N.approvalPasteReady);
                 }
 
-                function assignClipboardImage(file) {
+                function assignImageFile(file) {
                     try {
                         const transfer = new DataTransfer();
                         transfer.items.add(file);
@@ -981,7 +1068,30 @@
                     }
                 }
 
-                pasteZone.addEventListener("paste", (event) => {
+                function acceptImageFile(file) {
+                    if (!file) {
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        return;
+                    }
+                    if (!assignImageFile(file)) {
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        return;
+                    }
+                    syncSelectedFile();
+                }
+
+                dropzone.addEventListener("click", () => {
+                    fileInput.click();
+                });
+
+                dropzone.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        fileInput.click();
+                    }
+                });
+
+                dropzone.addEventListener("paste", (event) => {
                     const items = Array.from(event.clipboardData?.items || []);
                     const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
                     if (!imageItem) {
@@ -996,17 +1106,37 @@
                     }
 
                     event.preventDefault();
-                    if (!assignClipboardImage(file)) {
+                    if (!assignImageFile(file)) {
                         setPasteStatus("error", I18N.approvalPasteError);
                         return;
                     }
-
-                    pasteZone.value = "";
                     syncSelectedFile();
                 });
 
-                pasteZone.addEventListener("input", () => {
-                    pasteZone.value = "";
+                dropzone.addEventListener("dragover", (event) => {
+                    event.preventDefault();
+                    dropzone.classList.add("is-dragging");
+                });
+
+                dropzone.addEventListener("dragleave", () => {
+                    dropzone.classList.remove("is-dragging");
+                });
+
+                dropzone.addEventListener("drop", (event) => {
+                    event.preventDefault();
+                    dropzone.classList.remove("is-dragging");
+                    const files = Array.from(event.dataTransfer?.files || []);
+                    const imageFile = files.find((file) => (file.type || "").startsWith("image/"));
+                    acceptImageFile(imageFile || null);
+                });
+
+                form.addEventListener("submit", (event) => {
+                    const file = fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+                    if (!file) {
+                        event.preventDefault();
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        dropzone.focus();
+                    }
                 });
                 fileInput.addEventListener("change", syncSelectedFile);
                 syncSelectedFile();
@@ -1281,10 +1411,10 @@
                                         <span class="inline-flex h-2.5 w-2.5 rounded-full bg-steam shadow-[0_0_0_6px_rgba(53,83,106,0.12)]"></span>
                                         <p class="truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</p>
                                     </div>
+                                    {% if account.steam_username %}
+                                    <p class="mt-1.5 truncate text-[0.74rem] text-ink/54">{{ account.steam_username }}</p>
+                                    {% endif %}
                                     <div class="mt-2 flex flex-wrap items-center gap-2">
-                                        {% if account.steam_username %}
-                                        <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.68rem] text-ink/62">{{ account.steam_username }}</span>
-                                        {% endif %}
                                         <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">
                                             {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
                                         </span>
@@ -1411,6 +1541,10 @@
                                 <label class="block">
                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_account_name_label }}</span>
                                     <input name="account_name" type="text" maxlength="96" required placeholder="{{ i18n.steam_account_name_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                </label>
+                                <label class="block">
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.admin_audit_username_label }}</span>
+                                    <input name="steam_username" type="text" autocomplete="username" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                 </label>
                                 <label class="block">
                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_steam_id_input_label }}</span>
@@ -1636,6 +1770,10 @@
                                                 <input type="hidden" name="lang" value="{{ lang }}">
                                                 <div class="grid gap-3 sm:grid-cols-2">
                                                     <label class="block">
+                                                        <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.admin_audit_username_label }}</span>
+                                                        <input name="steam_username" type="text" autocomplete="username" value="{{ account.steam_username | default(value='') }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    </label>
+                                                    <label class="block">
                                                         <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_shared_secret_label }}</span>
                                                         <input name="shared_secret" type="text" placeholder="{{ i18n.steam_shared_secret_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                                     </label>
@@ -1727,14 +1865,14 @@
                             <summary class="cursor-pointer text-sm font-medium text-ink">
                                 <span class="inline-flex items-center gap-2">
                                     <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
-                                    <span>{{ i18n.steam_qr_approval_title }}</span>
+                                    <span>{{ i18n.steam_link_approval_title }}</span>
                                 </span>
                             </summary>
-                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_qr_approval_description }}</p>
+                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_link_approval_description }}</p>
                             <form method="post" action="{{ steam_approval_challenge_action }}" class="mt-3 grid gap-3">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
-                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_account_name_label }}</span>
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_approval_account_label }}</span>
                                     <select name="account_id" required class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                         {% for account in approval_ready_accounts %}
                                         <option value="{{ account.id }}">{{ account.account_name }}{% if account.steam_username %} · {{ account.steam_username }}{% endif %}</option>
@@ -1753,14 +1891,14 @@
                             <summary class="cursor-pointer text-sm font-medium text-ink">
                                 <span class="inline-flex items-center gap-2">
                                     <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
-                                    <span>{{ i18n.steam_qr_approval_image_label }}</span>
+                                    <span>{{ i18n.steam_qr_approval_title }}</span>
                                 </span>
                             </summary>
                             <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_qr_approval_description }}</p>
                             <form method="post" action="{{ steam_approval_challenge_upload_action }}" enctype="multipart/form-data" class="mt-3 grid gap-3" data-role="steam-approval-image-form">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
-                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_account_name_label }}</span>
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_approval_account_label }}</span>
                                     <select name="account_id" required class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                         {% for account in approval_ready_accounts %}
                                         <option value="{{ account.id }}">{{ account.account_name }}{% if account.steam_username %} · {{ account.steam_username }}{% endif %}</option>
@@ -1768,14 +1906,22 @@
                                     </select>
                                 </label>
                                 <label class="block">
-                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_qr_approval_paste_label }}</span>
-                                    <textarea data-role="steam-approval-paste-zone" rows="3" placeholder="{{ i18n.steam_qr_approval_paste_placeholder }}" class="mt-2 w-full resize-none rounded-[1rem] border border-dashed border-steam/25 bg-white px-3.5 py-3 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20"></textarea>
-                                    <p data-role="steam-approval-paste-status" class="mt-2 text-xs leading-5 text-ink/58">{{ i18n.steam_qr_approval_paste_placeholder }}</p>
-                                </label>
-                                <label class="block">
                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_qr_approval_image_label }}</span>
-                                    <input name="challenge_image" type="file" required accept="image/*" class="mt-2 block w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink">
-                                    <p data-role="steam-approval-file-name" class="mt-2 break-all text-xs leading-5 text-ink/52"></p>
+                                    <input name="challenge_image" type="file" accept="image/*" class="sr-only">
+                                    <div
+                                        data-role="steam-approval-dropzone"
+                                        tabindex="0"
+                                        class="steam-approval-dropzone mt-2 rounded-[1rem] border border-dashed border-steam/25 bg-white px-4 py-4 outline-none"
+                                    >
+                                        <div class="flex items-start gap-3">
+                                            <div class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[0.95rem] border border-steam/18 bg-steamMist text-sm font-semibold text-steam">+</div>
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-medium text-ink">{{ i18n.steam_qr_approval_dropzone_title }}</p>
+                                                <p data-role="steam-approval-paste-status" class="mt-2 text-xs leading-5 text-ink/58">{{ i18n.steam_qr_approval_paste_placeholder }}</p>
+                                                <p data-role="steam-approval-file-name" class="mt-2 break-all text-xs leading-5 text-ink/50"></p>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </label>
                                 <button type="submit" class="w-full rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_qr_approval_image_button }}</button>
                             </form>

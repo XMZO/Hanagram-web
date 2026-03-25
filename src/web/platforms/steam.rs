@@ -132,6 +132,7 @@ struct SteamActionResponse {
 #[derive(Debug, Default, Deserialize)]
 struct ManualSteamAccountForm {
     account_name: String,
+    steam_username: String,
     steam_id: String,
     shared_secret: String,
     identity_secret: String,
@@ -166,6 +167,7 @@ struct SteamAccountLoginForm {
 
 #[derive(Debug, Default, Deserialize)]
 struct UpdateSteamMaterialForm {
+    steam_username: String,
     shared_secret: String,
     identity_secret: String,
     device_id: String,
@@ -1097,7 +1099,7 @@ fn steam_qr_failure_message(
 ) -> String {
     let message = error.to_string();
     if message.contains("challenge URL is required") {
-        translations.steam_qr_approval_missing_message.to_owned()
+        translations.steam_link_approval_missing_message.to_owned()
     } else if message.contains("Invalid challenge URL")
         || message.contains("no Steam login challenge URL")
     {
@@ -1290,6 +1292,11 @@ async fn create_manual_account_handler(
         master_key.as_ref().as_slice(),
         steam_platform::ManualSteamAccountInput {
             account_name: form.account_name,
+            steam_username: if form.steam_username.trim().is_empty() {
+                None
+            } else {
+                Some(form.steam_username)
+            },
             steam_id,
             shared_secret: form.shared_secret,
             identity_secret: if form.identity_secret.trim().is_empty() {
@@ -1558,6 +1565,7 @@ async fn update_account_materials_handler(
     }
 
     if form.shared_secret.trim().is_empty()
+        && form.steam_username.trim().is_empty()
         && form.identity_secret.trim().is_empty()
         && form.device_id.trim().is_empty()
         && form.steam_login_secure.trim().is_empty()
@@ -1610,6 +1618,7 @@ async fn update_account_materials_handler(
         master_key.as_ref().as_slice(),
         &account_id,
         steam_platform::UpdateSteamAccountInput {
+            steam_username: Some(form.steam_username),
             shared_secret: Some(form.shared_secret),
             identity_secret: Some(form.identity_secret),
             device_id: Some(form.device_id),
@@ -1845,7 +1854,7 @@ async fn approve_login_challenge_for_account(
         return redirect_with_workspace_banner(
             app_state,
             headers,
-            PageBanner::error(translations.steam_qr_approval_missing_message),
+            PageBanner::error(translations.steam_link_approval_missing_message),
             Some(STEAM_APPROVALS_TAB_ID),
         )
         .await;
