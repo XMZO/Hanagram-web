@@ -89,13 +89,21 @@
             approvalActionRunning: {{ i18n.steam_approval_action_running_message | json_encode | safe }},
             approvalApproved: {{ i18n.steam_approval_approve_success_message | json_encode | safe }},
             approvalDenied: {{ i18n.steam_approval_deny_success_message | json_encode | safe }},
-            approvalActionFailed: {{ i18n.steam_approval_action_failed_message | json_encode | safe }}
+            approvalActionFailed: {{ i18n.steam_approval_action_failed_message | json_encode | safe }},
+            approvalPasteLabel: {{ i18n.steam_qr_approval_paste_label | json_encode | safe }},
+            approvalPastePlaceholder: {{ i18n.steam_qr_approval_paste_placeholder | json_encode | safe }},
+            approvalPasteReady: {{ i18n.steam_qr_approval_paste_ready_message | json_encode | safe }},
+            approvalPasteError: {{ i18n.steam_qr_approval_paste_error_message | json_encode | safe }}
         };
         let steamSnapshotInFlight = false;
         let steamApprovalsInFlight = false;
         let steamApprovalsLoadedAt = 0;
         let steamConfirmationsInFlight = false;
         let steamConfirmationsLoadedAt = 0;
+        let steamApprovalStatusTimer = null;
+        let steamConfirmationStatusTimer = null;
+        let activeSteamManageModal = null;
+        let activeSteamManageOpener = null;
         const STEAM_APPROVALS_REFRESH_INTERVAL_MS = 20000;
         const STEAM_CONFIRMATIONS_REFRESH_INTERVAL_MS = 20000;
     </script>
@@ -130,7 +138,6 @@
         .steam-disclosure[open] [data-role='steam-disclosure-icon'] {
             transform: rotate(90deg);
         }
-        .steam-manage-card[open],
         .steam-confirmation-card[open] {
             border-color: rgba(31, 79, 114, 0.30);
             background: rgba(255, 255, 255, 0.98);
@@ -224,6 +231,9 @@
                             <p class="truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</p>
                         </div>
                         <div class="mt-2 flex flex-wrap items-center gap-2">
+                            ${account.steam_username
+                                ? `<span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.68rem] text-ink/62">${escapeHtml(account.steam_username)}</span>`
+                                : ""}
                             <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(sourceBadge)}</span>
                             <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
                         </div>
@@ -362,6 +372,10 @@
         function setConfirmationStatus(kind, message) {
             const root = document.querySelector("[data-role='steam-confirmations-status']");
             if (!root) { return; }
+            if (steamConfirmationStatusTimer) {
+                window.clearTimeout(steamConfirmationStatusTimer);
+                steamConfirmationStatusTimer = null;
+            }
             if (!message) {
                 root.className = "hidden";
                 root.textContent = "";
@@ -376,6 +390,12 @@
 
             root.className = classMap[kind] || classMap.error;
             root.textContent = message;
+            if (kind === "success") {
+                steamConfirmationStatusTimer = window.setTimeout(() => {
+                    root.className = "hidden";
+                    root.textContent = "";
+                }, 4500);
+            }
         }
 
         function renderConfirmationSummary(summary) {
@@ -609,6 +629,10 @@
         function setApprovalStatus(kind, message) {
             const root = document.querySelector("[data-role='steam-approvals-status']");
             if (!root) { return; }
+            if (steamApprovalStatusTimer) {
+                window.clearTimeout(steamApprovalStatusTimer);
+                steamApprovalStatusTimer = null;
+            }
             if (!message) {
                 root.className = "hidden";
                 root.textContent = "";
@@ -623,6 +647,12 @@
 
             root.className = classMap[kind] || classMap.error;
             root.textContent = message;
+            if (kind === "success") {
+                steamApprovalStatusTimer = window.setTimeout(() => {
+                    root.className = "hidden";
+                    root.textContent = "";
+                }, 4500);
+            }
         }
 
         function renderApprovalLocation(approval) {
@@ -727,13 +757,13 @@
             if (!root) { return; }
 
             if (!Array.isArray(snapshot.accounts) || snapshot.accounts.length === 0) {
-                root.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2 2xl:col-span-3">${escapeHtml(I18N.approvalsUnavailable)}</div>`;
+                root.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2">${escapeHtml(I18N.approvalsUnavailable)}</div>`;
                 return;
             }
 
             const allClear = snapshot.approval_count === 0 && snapshot.accounts.every((account) => !account.error);
             const intro = allClear
-                ? `<div class="rounded-[1rem] border border-sage/30 bg-mint px-4 py-3 text-sm leading-6 text-sageDeep md:col-span-2 2xl:col-span-3">${escapeHtml(I18N.approvalsEmpty)}</div>`
+                ? `<div class="rounded-[1rem] border border-sage/30 bg-mint px-4 py-3 text-sm leading-6 text-sageDeep md:col-span-2">${escapeHtml(I18N.approvalsEmpty)}</div>`
                 : "";
             root.innerHTML = intro + snapshot.accounts.map(renderApprovalAccount).join("");
             root.querySelectorAll("[data-approval-account]").forEach((card) => {
@@ -881,6 +911,14 @@
                 }
             });
 
+            if (activeSteamManageModal) {
+                const target = activeSteamManageModal.dataset.manageModal || "";
+                const sourceCard = document.querySelector(`[data-manage-account][data-manage-id="${target}"]`);
+                if (sourceCard?.classList.contains("hidden")) {
+                    closeActiveSteamManageModal(false);
+                }
+            }
+
             const emptyState = document.querySelector("[data-role='steam-manage-empty']");
             if (emptyState) {
                 emptyState.classList.toggle("hidden", visibleCount !== 0 || query.length === 0);
@@ -900,7 +938,130 @@
             });
         }
 
+        function bindSteamApprovalPasteForms() {
+            document.querySelectorAll("[data-role='steam-approval-image-form']").forEach((form) => {
+                if (form.dataset.pasteBound === "true") { return; }
+                form.dataset.pasteBound = "true";
+
+                const fileInput = form.querySelector("input[name='challenge_image']");
+                const pasteZone = form.querySelector("[data-role='steam-approval-paste-zone']");
+                const status = form.querySelector("[data-role='steam-approval-paste-status']");
+                const fileName = form.querySelector("[data-role='steam-approval-file-name']");
+                if (!fileInput || !pasteZone || !status || !fileName) { return; }
+
+                function setPasteStatus(kind, message) {
+                    const classMap = {
+                        neutral: "mt-2 text-xs leading-5 text-ink/58",
+                        success: "mt-2 text-xs leading-5 text-sageDeep",
+                        error: "mt-2 text-xs leading-5 text-[#98675f]"
+                    };
+                    status.className = classMap[kind] || classMap.neutral;
+                    status.textContent = message;
+                }
+
+                function syncSelectedFile() {
+                    const file = fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+                    if (!file) {
+                        fileName.textContent = "";
+                        setPasteStatus("neutral", I18N.approvalPastePlaceholder);
+                        return;
+                    }
+                    fileName.textContent = file.name || I18N.approvalPasteLabel;
+                    setPasteStatus("success", I18N.approvalPasteReady);
+                }
+
+                function assignClipboardImage(file) {
+                    try {
+                        const transfer = new DataTransfer();
+                        transfer.items.add(file);
+                        fileInput.files = transfer.files;
+                        return true;
+                    } catch (_) {
+                        return false;
+                    }
+                }
+
+                pasteZone.addEventListener("paste", (event) => {
+                    const items = Array.from(event.clipboardData?.items || []);
+                    const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
+                    if (!imageItem) {
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        return;
+                    }
+
+                    const file = imageItem.getAsFile();
+                    if (!file) {
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        return;
+                    }
+
+                    event.preventDefault();
+                    if (!assignClipboardImage(file)) {
+                        setPasteStatus("error", I18N.approvalPasteError);
+                        return;
+                    }
+
+                    pasteZone.value = "";
+                    syncSelectedFile();
+                });
+
+                pasteZone.addEventListener("input", () => {
+                    pasteZone.value = "";
+                });
+                fileInput.addEventListener("change", syncSelectedFile);
+                syncSelectedFile();
+            });
+        }
+
+        function closeActiveSteamManageModal(restoreFocus = true) {
+            if (!activeSteamManageModal) { return; }
+
+            activeSteamManageModal.classList.add("hidden");
+            activeSteamManageModal.classList.remove("grid");
+            activeSteamManageModal.setAttribute("aria-hidden", "true");
+            document.body.classList.remove("overflow-hidden");
+
+            const opener = activeSteamManageOpener;
+            activeSteamManageModal = null;
+            activeSteamManageOpener = null;
+
+            if (restoreFocus && opener && typeof opener.focus === "function") {
+                opener.focus();
+            }
+        }
+
+        function openSteamManageModal(target, opener) {
+            const modal = document.querySelector(`[data-manage-modal="${target}"]`);
+            if (!modal) { return; }
+
+            closeActiveSteamManageModal(false);
+            activeSteamManageModal = modal;
+            activeSteamManageOpener = opener || null;
+            modal.classList.remove("hidden");
+            modal.classList.add("grid");
+            modal.setAttribute("aria-hidden", "false");
+            document.body.classList.add("overflow-hidden");
+
+            const closeButton = modal.querySelector("[data-manage-close-button]");
+            window.setTimeout(() => {
+                closeButton?.focus();
+            }, 0);
+        }
+
         window.addEventListener("DOMContentLoaded", () => {
+            const pageBanner = document.querySelector("[data-role='steam-page-banner'][data-banner-kind='success']");
+            if (pageBanner) {
+                window.setTimeout(() => {
+                    pageBanner.style.display = "none";
+                }, 4500);
+            }
+
+            document.querySelectorAll("[data-manage-modal]").forEach((modal) => {
+                if (modal.parentElement !== document.body) {
+                    document.body.appendChild(modal);
+                }
+            });
+
             document.querySelectorAll("[data-tab-button]").forEach((button) => {
                 button.addEventListener("click", () => {
                     window.location.hash = button.dataset.tabButton || "codes";
@@ -933,15 +1094,23 @@
                 });
             });
 
-            document.querySelectorAll("[data-manage-account]").forEach((card) => {
-                card.addEventListener("toggle", () => {
-                    if (!card.open) { return; }
-                    document.querySelectorAll("[data-manage-account]").forEach((other) => {
-                        if (other !== card && other.open) {
-                            other.open = false;
-                        }
-                    });
+            document.querySelectorAll("[data-manage-open]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const target = button.dataset.manageOpen || "";
+                    openSteamManageModal(target, button);
                 });
+            });
+
+            document.querySelectorAll("[data-manage-close]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    closeActiveSteamManageModal();
+                });
+            });
+
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Escape" && activeSteamManageModal) {
+                    closeActiveSteamManageModal();
+                }
             });
 
             const filterInput = document.querySelector("[data-role='steam-manage-filter']");
@@ -949,6 +1118,7 @@
                 filterInput.addEventListener("input", applyManageFilter);
             }
             applyManageFilter();
+            bindSteamApprovalPasteForms();
 
             refreshSteamCountdowns();
             window.setInterval(() => refreshSteamCountdowns(), 1000);
@@ -1072,7 +1242,7 @@
         </section>
 
         {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.2rem] border px-4 py-3.5 text-sm leading-6 whitespace-pre-line {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+        <section data-role="steam-page-banner" data-banner-kind="{{ banner.kind }}" class="paper-shadow mt-4 rounded-[1.2rem] border px-4 py-3.5 text-sm leading-6 whitespace-pre-line {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
             {{ banner.message }}
         </section>
         {% endif %}
@@ -1112,6 +1282,9 @@
                                         <p class="truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</p>
                                     </div>
                                     <div class="mt-2 flex flex-wrap items-center gap-2">
+                                        {% if account.steam_username %}
+                                        <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.68rem] text-ink/62">{{ account.steam_username }}</span>
+                                        {% endif %}
                                         <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">
                                             {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
                                         </span>
@@ -1153,8 +1326,8 @@
             </section>
 
             <section data-tab-panel="manage">
-                <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,22rem),minmax(0,1fr)]">
-                    <article class="paper-shadow rounded-[1.25rem] border border-line/85 bg-white/94 p-3.5 backdrop-blur-sm xl:sticky xl:top-4">
+                <div class="grid items-start justify-center gap-4 xl:grid-cols-[minmax(18rem,20rem),minmax(0,56rem)]">
+                    <article class="order-2 paper-shadow rounded-[1.25rem] border border-line/85 bg-white/94 p-3.5 backdrop-blur-sm xl:sticky xl:top-4 xl:order-1">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_manage_tab_label }}</p>
                         <h2 class="mt-1.5 font-display text-lg font-semibold">{{ i18n.steam_managed_accounts_label }}</h2>
                         <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_managed_list_description }}</p>
@@ -1270,7 +1443,7 @@
                         </details>
                     </article>
 
-                    <article id="manage" class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
+                    <article id="manage" class="order-1 paper-shadow w-full max-w-[56rem] justify-self-start rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm xl:order-2">
                         <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                             <div>
                                 <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_manage_tab_label }}</p>
@@ -1287,14 +1460,15 @@
 
                         <div class="mt-4 max-h-[38rem] overflow-auto pr-1">
                             {% if total_accounts > 0 %}
-                            <div class="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                            <div class="grid gap-3 md:grid-cols-2">
                             {% for account in snapshot.accounts %}
-                            <details
+                            <article
                                 data-manage-account
+                                data-manage-id="steam-manage-{{ loop.index0 }}"
                                 data-search="{{ account.account_name }} {{ account.steam_username | default(value='') }} {{ account.steam_id | default(value='') }} {{ account.storage_file }} {{ account.imported_from | default(value='') }}"
-                                class="steam-disclosure steam-manage-card h-fit overflow-hidden rounded-[1.05rem] border border-line/80 bg-white/92 transition"
+                                class="steam-manage-card overflow-hidden rounded-[1.05rem] border border-line/80 bg-white/92 transition hover:border-steam/25 hover:shadow-[0_16px_32px_rgba(31,56,79,0.08)]"
                             >
-                                <summary class="cursor-pointer p-3">
+                                <button type="button" data-manage-open="steam-manage-{{ loop.index0 }}" class="block w-full p-3 text-left">
                                     <div class="flex items-start justify-between gap-3">
                                         <div class="min-w-0 flex-1">
                                             <div class="flex min-w-0 items-center gap-2">
@@ -1302,47 +1476,80 @@
                                                 <h3 class="min-w-0 truncate text-[0.98rem] font-semibold text-ink">{{ account.account_name }}</h3>
                                             </div>
                                             {% if account.steam_username %}
-                                            <p class="mt-1.5 truncate text-[0.72rem] text-ink/50">{{ account.steam_username }}</p>
+                                            <p class="mt-1.5 truncate text-[0.74rem] text-ink/54">{{ account.steam_username }}</p>
                                             {% elif account.updated_at %}
-                                            <p class="mt-1.5 truncate text-[0.72rem] text-ink/46">{{ i18n.admin_audit_updated_label }} · {{ account.updated_at }}</p>
+                                            <p class="mt-1.5 truncate text-[0.74rem] text-ink/48">{{ i18n.admin_audit_updated_label }} · {{ account.updated_at }}</p>
                                             {% elif account.imported_from %}
-                                            <p class="mt-1.5 truncate text-[0.72rem] text-ink/46">{{ i18n.steam_imported_from_label }} · {{ account.imported_from }}</p>
+                                            <p class="mt-1.5 truncate text-[0.74rem] text-ink/48">{{ i18n.steam_imported_from_label }} · {{ account.imported_from }}</p>
                                             {% else %}
-                                            <p class="mt-1.5 truncate text-[0.72rem] text-ink/40">{{ account.storage_file }}</p>
+                                            <p class="mt-1.5 truncate text-[0.74rem] text-ink/44">{{ account.storage_file }}</p>
                                             {% endif %}
                                         </div>
 
-                                        <div class="inline-flex shrink-0 items-center gap-2 rounded-full border border-line/80 bg-white px-3 py-1.5 text-[0.72rem] font-medium text-ink/68">
-                                            <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
-                                            <span class="hidden sm:inline">{{ i18n.open_details }}</span>
-                                        </div>
+                                        <span class="inline-flex shrink-0 items-center gap-2 rounded-full border border-steam/20 bg-steamMist px-3 py-1.5 text-[0.72rem] font-medium text-steam">
+                                            <span>{{ i18n.open_details }}</span>
+                                            <span aria-hidden="true">›</span>
+                                        </span>
                                     </div>
 
                                     <div class="mt-3 flex flex-wrap gap-2">
-                                        {% if account.steam_username %}
-                                        <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.68rem] text-ink/62">{{ account.steam_username }}</span>
-                                        {% endif %}
-                                        <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
-                                        <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
-                                            {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
-                                        </span>
+                                        <span class="inline-flex max-w-full rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
                                         <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.has_session_tokens %}border-sage/30 bg-mint text-sageDeep{% else %}border-line bg-white text-ink/58{% endif %}">
                                             {% if account.has_session_tokens %}{{ i18n.steam_session_ready_label }}{% else %}{{ i18n.steam_session_missing_label }}{% endif %}
-                                        </span>
-                                        <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.has_refreshable_session %}border-steam/20 bg-steamMist text-steam{% else %}border-line bg-white text-ink/58{% endif %}">
-                                            {% if account.has_refreshable_session %}{{ i18n.steam_session_auto_refresh_ready_label }}{% else %}{{ i18n.steam_session_auto_refresh_missing_label }}{% endif %}
-                                        </span>
-                                        <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                            {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
                                         </span>
                                         <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
                                             {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
                                         </span>
                                     </div>
+                                </button>
+                            </article>
 
-                                </summary>
+                            <div
+                                data-manage-modal="steam-manage-{{ loop.index0 }}"
+                                aria-hidden="true"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="steam-manage-title-{{ loop.index0 }}"
+                                class="fixed inset-0 z-[70] hidden place-items-center overflow-y-auto p-3 sm:p-5"
+                            >
+                                <button type="button" data-manage-close class="absolute inset-0 bg-[rgba(29,49,67,0.22)] backdrop-blur-[5px]" aria-label="{{ i18n.close }}"></button>
+                                <div class="relative my-auto flex max-h-full w-full max-w-[46rem] flex-col overflow-hidden rounded-[1.2rem] border border-line/90 bg-white/98 shadow-[0_28px_80px_rgba(31,56,79,0.18)]">
+                                    <div class="border-b border-line/75 bg-[linear-gradient(135deg,rgba(255,255,255,.98),rgba(235,243,249,.96))] px-4 py-4 sm:px-5">
+                                        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <span class="inline-flex h-2.5 w-2.5 rounded-full {% if account.current_code %}bg-steam{% else %}bg-peach{% endif %}"></span>
+                                                    <h3 id="steam-manage-title-{{ loop.index0 }}" class="text-lg font-semibold text-ink sm:text-[1.15rem]">{{ account.account_name }}</h3>
+                                                    {% if account.steam_username %}
+                                                    <span class="inline-flex max-w-full rounded-full border border-line/80 bg-white/92 px-2.5 py-1 text-[0.72rem] text-ink/62">{{ account.steam_username }}</span>
+                                                    {% endif %}
+                                                </div>
+                                                <p class="mt-2 break-all font-mono text-[0.72rem] text-ink/58">{{ account.storage_file }}</p>
+                                            </div>
+                                            <button type="button" data-manage-close data-manage-close-button class="inline-flex shrink-0 items-center justify-center rounded-full border border-line/80 bg-white px-3.5 py-2 text-sm font-medium text-ink/72 transition hover:bg-paper">{{ i18n.close }}</button>
+                                        </div>
 
-                                <div class="border-t border-line/70 px-3.5 py-3.5">
+                                        <div class="mt-3 flex flex-wrap gap-2">
+                                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-ink/68">
+                                                {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
+                                            </span>
+                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.has_session_tokens %}border-sage/30 bg-mint text-sageDeep{% else %}border-line bg-white text-ink/58{% endif %}">
+                                                {% if account.has_session_tokens %}{{ i18n.steam_session_ready_label }}{% else %}{{ i18n.steam_session_missing_label }}{% endif %}
+                                            </span>
+                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.has_refreshable_session %}border-steam/20 bg-steamMist text-steam{% else %}border-line bg-white text-ink/58{% endif %}">
+                                                {% if account.has_refreshable_session %}{{ i18n.steam_session_auto_refresh_ready_label }}{% else %}{{ i18n.steam_session_auto_refresh_missing_label }}{% endif %}
+                                            </span>
+                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.encrypted_at_rest %}border-sage/30 bg-mint text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
+                                                {% if account.encrypted_at_rest %}{{ i18n.steam_storage_encrypted_label }}{% else %}{{ i18n.steam_storage_plaintext_label }}{% endif %}
+                                            </span>
+                                            <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
+                                                {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div class="overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
                                     <div class="grid gap-2 sm:grid-cols-2">
                                         {% if account.steam_username %}
                                         <div class="rounded-[0.9rem] border border-line/80 bg-paper px-3 py-2.5">
@@ -1455,10 +1662,11 @@
                                         {{ i18n.steam_manage_legacy_hint }}
                                     </div>
                                     {% endif %}
+                                    </div>
                                 </div>
-                            </details>
+                            </div>
                             {% endfor %}
-                            <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52 sm:col-span-2 2xl:col-span-3"></div>
+                            <div data-role="steam-manage-empty" class="hidden rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52 md:col-span-2"></div>
                             </div>
                             {% else %}
                             <div class="rounded-[1rem] border border-dashed border-line bg-white/75 px-4 py-8 text-center text-sm text-ink/52">{{ i18n.steam_manage_empty_label }}</div>
@@ -1469,13 +1677,40 @@
             </section>
 
             <section data-tab-panel="approvals">
-                <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,22rem),minmax(0,1fr)]">
-                    <article class="paper-shadow rounded-[1.25rem] border border-line/85 bg-white/94 p-3.5 backdrop-blur-sm xl:sticky xl:top-4">
+                <div class="grid items-start justify-center gap-4 xl:grid-cols-[minmax(18rem,20rem),minmax(0,56rem)]">
+                    <article id="approvals" class="order-1 paper-shadow w-full max-w-[56rem] justify-self-start rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm xl:order-2">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_approvals_tab_label }}</p>
+                                <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.steam_approvals_title }}</h2>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div class="rounded-[1rem] border border-line/80 bg-paper px-3.5 py-2 text-sm text-ink/62">
+                                    <span class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_session_ready_label }}</span>
+                                    <span data-role="steam-approvals-ready-accounts" class="ml-2 font-semibold text-ink">{{ approval_ready_accounts | length }}</span>
+                                </div>
+                                <div class="rounded-[1rem] border border-steam/20 bg-steamMist px-3.5 py-2 text-sm text-steam">
+                                    <span class="text-xs uppercase tracking-[0.18em] text-steam/72">{{ i18n.steam_approvals_title }}</span>
+                                    <span data-role="steam-approvals-total" class="ml-2 font-semibold">0</span>
+                                </div>
+                                <button type="button" data-approval-refresh class="rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_approvals_refresh_button }}</button>
+                            </div>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_approvals_description }}</p>
+                        <p class="mt-2 text-xs uppercase tracking-[0.22em] text-ink/42">{{ i18n.stat_updated }} · <span data-role="steam-approvals-updated-at" class="font-mono">-</span></p>
+
+                        <div data-role="steam-approvals-status" class="hidden"></div>
+                        <div data-role="steam-approvals-list" class="mt-4 grid gap-3 md:grid-cols-2">
+                            <div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2">{{ i18n.steam_approvals_loading_message }}</div>
+                        </div>
+                    </article>
+
+                    <article class="order-2 paper-shadow rounded-[1.25rem] border border-line/85 bg-white/94 p-3.5 backdrop-blur-sm xl:sticky xl:top-4 xl:order-1">
                         <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_approvals_tab_label }}</p>
                         <h2 class="mt-1.5 font-display text-lg font-semibold">{{ i18n.steam_approvals_title }}</h2>
                         <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_approvals_description }}</p>
 
-                        <div class="mt-3 grid gap-2">
+                        <div class="mt-3 grid grid-cols-2 gap-2">
                             <div class="rounded-[0.95rem] border border-line/85 bg-white/84 px-3.5 py-2.5">
                                 <p class="text-[0.62rem] uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_session_ready_label }}</p>
                                 <p data-role="steam-approvals-ready-accounts" class="mt-1 text-base font-semibold text-ink">{{ approval_ready_accounts | length }}</p>
@@ -1484,11 +1719,8 @@
                                 <p class="text-[0.62rem] uppercase tracking-[0.22em] text-steam/76">{{ i18n.steam_approvals_title }}</p>
                                 <p data-role="steam-approvals-total" class="mt-1 text-base font-semibold text-steam">0</p>
                             </div>
-                            <div class="rounded-[0.95rem] border border-line/85 bg-white/84 px-3.5 py-2.5">
-                                <p class="text-[0.62rem] uppercase tracking-[0.22em] text-ink/45">{{ i18n.stat_updated }}</p>
-                                <p data-role="steam-approvals-updated-at" class="mt-1 break-all font-mono text-[0.78rem] text-ink/62">-</p>
-                            </div>
                         </div>
+                        <p class="mt-2 text-xs uppercase tracking-[0.22em] text-ink/42">{{ i18n.stat_updated }} · <span data-role="steam-approvals-updated-at" class="font-mono normal-case tracking-normal">-</span></p>
 
                         {% if approval_ready_accounts | length > 0 %}
                         <details open class="steam-disclosure mt-3 rounded-[1rem] border border-line/80 bg-paper/88 px-3.5 py-3">
@@ -1525,7 +1757,7 @@
                                 </span>
                             </summary>
                             <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_qr_approval_description }}</p>
-                            <form method="post" action="{{ steam_approval_challenge_upload_action }}" enctype="multipart/form-data" class="mt-3 grid gap-3">
+                            <form method="post" action="{{ steam_approval_challenge_upload_action }}" enctype="multipart/form-data" class="mt-3 grid gap-3" data-role="steam-approval-image-form">
                                 <input type="hidden" name="lang" value="{{ lang }}">
                                 <label class="block">
                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_account_name_label }}</span>
@@ -1536,8 +1768,14 @@
                                     </select>
                                 </label>
                                 <label class="block">
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_qr_approval_paste_label }}</span>
+                                    <textarea data-role="steam-approval-paste-zone" rows="3" placeholder="{{ i18n.steam_qr_approval_paste_placeholder }}" class="mt-2 w-full resize-none rounded-[1rem] border border-dashed border-steam/25 bg-white px-3.5 py-3 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20"></textarea>
+                                    <p data-role="steam-approval-paste-status" class="mt-2 text-xs leading-5 text-ink/58">{{ i18n.steam_qr_approval_paste_placeholder }}</p>
+                                </label>
+                                <label class="block">
                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_qr_approval_image_label }}</span>
                                     <input name="challenge_image" type="file" required accept="image/*" class="mt-2 block w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink">
+                                    <p data-role="steam-approval-file-name" class="mt-2 break-all text-xs leading-5 text-ink/52"></p>
                                 </label>
                                 <button type="submit" class="w-full rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_qr_approval_image_button }}</button>
                             </form>
@@ -1547,33 +1785,6 @@
                             {{ i18n.steam_approvals_unavailable_message }}
                         </div>
                         {% endif %}
-                    </article>
-
-                    <article id="approvals" class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_approvals_tab_label }}</p>
-                                <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.steam_approvals_title }}</h2>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2">
-                                <div class="rounded-[1rem] border border-line/80 bg-paper px-3.5 py-2 text-sm text-ink/62">
-                                    <span class="text-xs uppercase tracking-[0.18em] text-ink/42">{{ i18n.steam_session_ready_label }}</span>
-                                    <span data-role="steam-approvals-ready-accounts" class="ml-2 font-semibold text-ink">{{ approval_ready_accounts | length }}</span>
-                                </div>
-                                <div class="rounded-[1rem] border border-steam/20 bg-steamMist px-3.5 py-2 text-sm text-steam">
-                                    <span class="text-xs uppercase tracking-[0.18em] text-steam/72">{{ i18n.steam_approvals_title }}</span>
-                                    <span data-role="steam-approvals-total" class="ml-2 font-semibold">0</span>
-                                </div>
-                                <button type="button" data-approval-refresh class="rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_approvals_refresh_button }}</button>
-                            </div>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_approvals_description }}</p>
-                        <p class="mt-2 text-xs uppercase tracking-[0.22em] text-ink/42">{{ i18n.stat_updated }} · <span data-role="steam-approvals-updated-at" class="font-mono">-</span></p>
-
-                        <div data-role="steam-approvals-status" class="hidden"></div>
-                        <div data-role="steam-approvals-list" class="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                            <div class="rounded-[1rem] border border-dashed border-line bg-white/78 px-4 py-8 text-sm leading-6 text-ink/56 md:col-span-2 2xl:col-span-3">{{ i18n.steam_approvals_loading_message }}</div>
-                        </div>
                     </article>
                 </div>
             </section>
