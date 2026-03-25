@@ -450,11 +450,18 @@
         function refreshNewBadges() {
             document.querySelectorAll("[data-session-card]").forEach((card) => {
                 const latestCodeAt = card.dataset.latestCodeAt;
+                const latestCodeExpiresAt = parseUnixTimestamp(card.dataset.latestCodeExpiresAt);
                 const sessionKey = card.dataset.sessionKey;
                 const indicator = card.querySelector("[data-new-indicator]");
                 if (!indicator) { return; }
 
                 if (!latestCodeAt || !sessionKey) {
+                    indicator.classList.add("hidden");
+                    return;
+                }
+
+                const hasVisibleCode = latestCodeExpiresAt > 0 && Math.floor(Date.now() / 1000) < latestCodeExpiresAt;
+                if (!hasVisibleCode) {
                     indicator.classList.add("hidden");
                     return;
                 }
