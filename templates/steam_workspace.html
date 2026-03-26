@@ -104,6 +104,8 @@
         let steamConfirmationStatusTimer = null;
         let activeSteamManageModal = null;
         let activeSteamManageOpener = null;
+        let hoveredSteamApprovalDropzone = null;
+        let focusedSteamApprovalDropzone = null;
         const STEAM_APPROVALS_REFRESH_INTERVAL_MS = 20000;
         const STEAM_CONFIRMATIONS_REFRESH_INTERVAL_MS = 20000;
     </script>
@@ -1019,6 +1021,34 @@
             });
         }
 
+        function isTextEditableElement(element) {
+            if (!element || !(element instanceof HTMLElement)) { return false; }
+            if (element.isContentEditable) { return true; }
+
+            const tagName = element.tagName.toLowerCase();
+            if (tagName === "textarea" || tagName === "select") { return true; }
+            if (tagName !== "input") { return false; }
+
+            const type = (element.getAttribute("type") || "text").toLowerCase();
+            return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(type);
+        }
+
+        function visibleSteamApprovalDropzone(dropzone) {
+            return dropzone && dropzone.isConnected && dropzone.getClientRects().length > 0 ? dropzone : null;
+        }
+
+        function preferredSteamApprovalDropzone() {
+            return visibleSteamApprovalDropzone(hoveredSteamApprovalDropzone)
+                || visibleSteamApprovalDropzone(focusedSteamApprovalDropzone);
+        }
+
+        function pastedImageFileFromEvent(event) {
+            const items = Array.from(event.clipboardData?.items || []);
+            const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
+            if (!imageItem) { return null; }
+            return imageItem.getAsFile();
+        }
+
         function bindSteamApprovalPasteForms() {
             document.querySelectorAll("[data-role='steam-approval-image-form']").forEach((form) => {
                 if (form.dataset.pasteBound === "true") { return; }
@@ -1080,37 +1110,50 @@
                     syncSelectedFile();
                 }
 
+                dropzone.__steamAcceptImageFile = acceptImageFile;
+
                 dropzone.addEventListener("click", () => {
+                    focusedSteamApprovalDropzone = dropzone;
                     fileInput.click();
+                });
+
+                dropzone.addEventListener("mouseenter", () => {
+                    hoveredSteamApprovalDropzone = dropzone;
+                });
+
+                dropzone.addEventListener("mouseleave", () => {
+                    if (hoveredSteamApprovalDropzone === dropzone) {
+                        hoveredSteamApprovalDropzone = null;
+                    }
+                });
+
+                dropzone.addEventListener("focus", () => {
+                    focusedSteamApprovalDropzone = dropzone;
+                });
+
+                dropzone.addEventListener("blur", () => {
+                    if (focusedSteamApprovalDropzone === dropzone) {
+                        focusedSteamApprovalDropzone = null;
+                    }
                 });
 
                 dropzone.addEventListener("keydown", (event) => {
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
+                        focusedSteamApprovalDropzone = dropzone;
                         fileInput.click();
                     }
                 });
 
                 dropzone.addEventListener("paste", (event) => {
-                    const items = Array.from(event.clipboardData?.items || []);
-                    const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
-                    if (!imageItem) {
-                        setPasteStatus("error", I18N.approvalPasteError);
-                        return;
-                    }
-
-                    const file = imageItem.getAsFile();
+                    const file = pastedImageFileFromEvent(event);
                     if (!file) {
                         setPasteStatus("error", I18N.approvalPasteError);
                         return;
                     }
 
                     event.preventDefault();
-                    if (!assignImageFile(file)) {
-                        setPasteStatus("error", I18N.approvalPasteError);
-                        return;
-                    }
-                    syncSelectedFile();
+                    acceptImageFile(file);
                 });
 
                 dropzone.addEventListener("dragover", (event) => {
@@ -1141,6 +1184,28 @@
                 fileInput.addEventListener("change", syncSelectedFile);
                 syncSelectedFile();
             });
+
+            if (document.body.dataset.steamApprovalGlobalPasteBound !== "true") {
+                document.body.dataset.steamApprovalGlobalPasteBound = "true";
+                document.addEventListener("paste", (event) => {
+                    if (event.defaultPrevented) { return; }
+                    if (isTextEditableElement(event.target) || isTextEditableElement(document.activeElement)) {
+                        return;
+                    }
+
+                    const dropzone = preferredSteamApprovalDropzone();
+                    if (!dropzone) { return; }
+
+                    const file = pastedImageFileFromEvent(event);
+                    if (!file) { return; }
+
+                    const acceptImageFile = dropzone.__steamAcceptImageFile;
+                    if (typeof acceptImageFile !== "function") { return; }
+
+                    event.preventDefault();
+                    acceptImageFile(file);
+                });
+            }
         }
 
         function closeActiveSteamManageModal(restoreFocus = true) {
