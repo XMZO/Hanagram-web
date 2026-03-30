@@ -427,56 +427,32 @@
 </head>
 <body class="min-h-screen font-sans text-ink antialiased">
     <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-        <section class="paper-shadow overflow-hidden rounded-[1.75rem] border border-line/80 bg-paper/95">
-            <div class="grid gap-5 px-5 py-5 lg:grid-cols-[minmax(0,1fr),auto] lg:items-start lg:px-6">
-                <div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="inline-flex items-center rounded-full border border-line bg-white/90 px-3 py-1 text-[0.7rem] font-medium uppercase tracking-[0.24em] text-ink/52">
-                            {{ settings_sections_title }}
-                        </span>
-                        <span class="inline-flex items-center rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm font-medium text-sageDeep">
-                            {{ current_username }}
-                        </span>
-                    </div>
-                    <h1 class="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">{{ title }}</h1>
-                    <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/70">{{ description }}</p>
+        <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <span class="inline-flex items-center rounded-full border border-sage/35 bg-mist px-3 py-1.5 text-sm text-sageDeep">
+                        {{ current_username }}
+                    </span>
+                    <h1 class="font-display text-lg font-semibold tracking-tight text-ink">{{ title }}</h1>
                 </div>
-
-                <div class="flex flex-wrap gap-2 lg:justify-end">
+                <div class="flex flex-wrap items-center gap-1.5">
                     {% if show_workspace_links %}
-                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ dashboard_label }}</a>
+                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ dashboard_label }}</a>
                     {% if show_admin %}
-                    <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ admin_label }}</a>
+                    <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ admin_label }}</a>
                     {% endif %}
                     {% endif %}
                 </div>
             </div>
+        </header>
 
-            <div class="border-t border-line/80 px-5 py-4 lg:px-6">
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
-                        <p class="mt-2 text-lg font-semibold">{{ totp_status }}</p>
-                    </article>
-                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ recovery_label }}</p>
-                        <p class="mt-2 text-lg font-semibold">{{ recovery_remaining }}</p>
-                    </article>
-                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
-                        <p class="mt-2 text-lg font-semibold">{{ passkey_count }}</p>
-                    </article>
-                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                        <p class="mt-2 text-sm leading-7 text-ink/74">{{ idle_effective_timeout }}</p>
-                    </article>
-                    <article class="rounded-[1.2rem] border border-line bg-white/88 px-4 py-3">
-                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ sessions_title }}</p>
-                        <p class="mt-2 text-lg font-semibold">{{ active_session_count }}</p>
-                    </article>
-                </div>
-            </div>
-        </section>
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-[0.78rem]">
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ totp_label }} · <span class="ml-1 font-semibold">{{ totp_status }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ recovery_label }} · <span class="ml-1 font-semibold">{{ recovery_remaining }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ passkeys_label }} · <span class="ml-1 font-semibold">{{ passkey_count }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ idle_summary_label }} · <span class="ml-1 font-semibold">{{ idle_effective_timeout }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ sessions_title }} · <span class="ml-1 font-semibold">{{ active_session_count }}</span></span>
+        </div>
 
         {% if transport_warning %}
         <section class="paper-shadow mt-4 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
@@ -508,11 +484,7 @@
 
             <div class="mt-4">
                 <section data-settings-pane="security" class="space-y-4">
-                    <div>
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_nav_security }}</p>
-                        <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ security_title }}</h2>
-                        <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ security_description }}</p>
-                    </div>
+                    <h2 class="font-display text-xl font-semibold">{{ security_title }}</h2>
 
                     {% if recovery_notice %}
                     <article class="rounded-[1.45rem] border border-[#e8d3ad] bg-[#fff7e6] p-4">
@@ -551,7 +523,7 @@
                         {% endif %}
                     </div>
 
-                    <section data-security-pane="overview" class="grid gap-3 xl:grid-cols-[minmax(0,1.12fr),minmax(18rem,0.88fr)]">
+                    <section data-security-pane="overview">
                         <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
                             <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                 <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
@@ -576,59 +548,22 @@
                                 </div>
                             </div>
                         </article>
-
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_sections_title }}</p>
-                            <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ security_title }}</h3>
-                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ security_description }}</p>
-                            <div class="mt-3 grid gap-2.5">
-                                <button type="button" data-security-target="password" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
-                                    <span class="block text-sm font-semibold text-ink">{{ password_title }}</span>
-                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ password_description }}</span>
-                                </button>
-                                {% if show_workspace_links %}
-                                <button type="button" data-security-target="totp" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
-                                    <span class="block text-sm font-semibold text-ink">{{ totp_setup_label }}</span>
-                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ totp_hint }}</span>
-                                </button>
-                                <button type="button" data-security-target="passkeys" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-3 text-left transition hover:border-sage hover:bg-white">
-                                    <span class="block text-sm font-semibold text-ink">{{ passkeys_title }}</span>
-                                    <span class="mt-1.5 block text-sm leading-6 text-ink/62">{{ passkeys_description }}</span>
-                                </button>
-                                {% endif %}
-                            </div>
-                        </article>
                     </section>
 
                     <section data-security-pane="password" class="hidden">
-                        <div class="grid gap-3 xl:grid-cols-[minmax(0,1.04fr),minmax(18rem,0.96fr)]">
-                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                                <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ password_description }}</p>
-                                <form method="post" action="{{ password_action }}" class="mt-3 grid gap-3">
-                                    <input type="hidden" name="lang" value="{{ lang }}">
-                                    <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                    <div class="grid gap-3 sm:grid-cols-2">
-                                        <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                        <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                    </div>
-                                    <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
-                                </form>
-                            </article>
-
-                            <aside class="grid gap-3">
-                                <div class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
+                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
+                            <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
+                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ password_description }}</p>
+                            <form method="post" action="{{ password_action }}" class="mt-3 grid gap-3">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
+                                <div class="grid gap-3 sm:grid-cols-2">
+                                    <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
+                                    <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
                                 </div>
-                                <div class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ sessions_title }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ active_session_count }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ access_current_only_hint }}</p>
-                                </div>
-                            </aside>
-                        </div>
+                                <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
+                            </form>
+                        </article>
                     </section>
 
                     {% if show_workspace_links %}
@@ -662,12 +597,8 @@
 
                     <section data-security-pane="passkeys" class="hidden">
                         <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                <div>
-                                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ passkeys_label }}</p>
-                                    <h3 class="mt-2 text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
-                                    <p class="mt-2 max-w-3xl text-sm leading-6 text-ink/68">{{ passkeys_description }}</p>
-                                </div>
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <h3 class="text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
                                 <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
                             </div>
 
@@ -763,13 +694,9 @@
 
                 {% if show_workspace_links %}
                 <section data-settings-pane="notifications" class="hidden space-y-4">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_nav_notifications }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ notifications_section_title }}</h2>
-                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ notifications_section_description }}</p>
-                        </div>
-                        <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <h2 class="font-display text-xl font-semibold">{{ notifications_section_title }}</h2>
+                        <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
                     </div>
 
                     <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
@@ -858,15 +785,11 @@
 
                 {% if show_workspace_links %}
                 <section data-settings-pane="access" class="hidden space-y-4">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ settings_nav_access }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ sessions_title }}</h2>
-                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ sessions_description }}</p>
-                        </div>
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <h2 class="font-display text-xl font-semibold">{{ sessions_title }}</h2>
                         {% if has_other_sessions %}
                         <form method="post" action="{{ revoke_all_action }}">
-                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ revoke_all_label }}</button>
+                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-3.5 py-1.5 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ revoke_all_label }}</button>
                         </form>
                         {% endif %}
                     </div>

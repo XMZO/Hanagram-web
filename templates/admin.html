@@ -539,39 +539,31 @@
 </head>
 <body class="min-h-screen font-sans text-ink antialiased">
     <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-        <section class="paper-shadow overflow-hidden rounded-[1.75rem] border border-line/80 bg-paper/95">
-            <div class="grid gap-5 px-5 py-5 lg:grid-cols-[minmax(0,1fr),auto] lg:items-start lg:px-6">
-                <div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="inline-flex items-center rounded-full border border-line bg-white/90 px-3 py-1 text-[0.7rem] font-medium uppercase tracking-[0.24em] text-ink/52">{{ admin_sections_title }}</span>
-                        <span class="inline-flex items-center rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm font-medium text-sageDeep">{{ current_admin_username }}</span>
-                    </div>
-                    <h1 class="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">{{ title }}</h1>
-                    <p class="mt-3 max-w-3xl text-sm leading-7 text-ink/70">{{ description }}</p>
+        <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <span class="inline-flex items-center rounded-full border border-sage/35 bg-mist px-3 py-1.5 text-sm text-sageDeep">
+                        {{ current_admin_username }}
+                    </span>
+                    <h1 class="font-display text-lg font-semibold tracking-tight text-ink">{{ title }}</h1>
                 </div>
-
-                <div class="flex flex-wrap gap-2 lg:justify-end">
-                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">{{ dashboard_label }}</a>
-                    <a href="{{ settings_href }}" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">{{ settings_label }}</a>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ dashboard_label }}</a>
+                    <a href="{{ settings_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ settings_label }}</a>
                 </div>
             </div>
+        </header>
 
-            <div class="border-t border-line/80 px-5 py-4 lg:px-6">
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                    <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_users_label }}</p><p class="mt-2 text-2xl font-semibold">{{ total_users }}</p></article>
-                    <article class="rounded-[1.15rem] border border-peach/30 bg-[#fbefec] px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-[#98675f]/70">{{ overview_locked_label }}</p><p class="mt-2 text-2xl font-semibold text-[#98675f]">{{ locked_users_count }}</p></article>
-                    <article class="rounded-[1.15rem] border border-sage/30 bg-mist px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-sageDeep/75">{{ overview_web_sessions_label }}</p><p class="mt-2 text-2xl font-semibold text-sageDeep">{{ total_active_auth_sessions }}</p></article>
-                    <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_mfa_label }}</p><p class="mt-2 text-2xl font-semibold">{{ mfa_enabled_users }}</p></article>
-                    <article class="rounded-[1.15rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ overview_audit_rows_label }}</p><p class="mt-2 text-2xl font-semibold">{{ audit_log_count }}</p></article>
-                </div>
-
-                <div class="mt-3 grid gap-3 sm:grid-cols-3">
-                    <article class="rounded-[1.1rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ registration_label }}</p><p class="mt-2 font-semibold">{{ current_registration_label }}</p></article>
-                    <article class="rounded-[1.1rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_policy_label }}</p><p class="mt-2 font-semibold">{{ current_totp_policy_label }}</p></article>
-                    <article class="rounded-[1.1rem] border border-line bg-white/88 px-4 py-3"><p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ password_policy_label }}</p><p class="mt-2 font-semibold">{{ current_password_policy_label }}</p></article>
-                </div>
-            </div>
-        </section>
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-[0.78rem]">
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_users_label }} · <span class="ml-1 font-semibold">{{ total_users }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[#98675f]">{{ overview_locked_label }} · <span class="ml-1 font-semibold">{{ locked_users_count }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-sage/30 bg-mist px-2.5 py-1 text-sageDeep">{{ overview_web_sessions_label }} · <span class="ml-1 font-semibold">{{ total_active_auth_sessions }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_mfa_label }} · <span class="ml-1 font-semibold">{{ mfa_enabled_users }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_audit_rows_label }} · <span class="ml-1 font-semibold">{{ audit_log_count }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ registration_label }} · <span class="ml-1 font-semibold">{{ current_registration_label }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ totp_policy_label }} · <span class="ml-1 font-semibold">{{ current_totp_policy_label }}</span></span>
+            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ password_policy_label }} · <span class="ml-1 font-semibold">{{ current_password_policy_label }}</span></span>
+        </div>
 
         {% if transport_warning %}
         <section class="paper-shadow mt-4 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
@@ -593,14 +585,12 @@
 
             <div class="mt-4">
                 <section data-admin-pane="users" class="space-y-4">
-                    <div>
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_users }}</p>
-                        <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ users_title }}</h2>
-                        <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ users_description }}</p>
-                    </div>
+                    <h2 class="font-display text-xl font-semibold">{{ users_title }}</h2>
 
-                    <div class="grid gap-4 xl:grid-cols-[19rem,minmax(0,1fr)]">
-                        <aside class="grid gap-4 xl:sticky xl:top-4 xl:self-start">
+                    <div class="grid gap-4">
+                        <details class="rounded-[1.35rem] border border-line bg-white/92">
+                            <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-ink">{{ create_user_title }} / {{ recent_auth_title }}</summary>
+                            <div class="grid gap-4 border-t border-line/80 p-4 lg:grid-cols-2">
                             <article class="rounded-[1.35rem] border border-line bg-white/92 p-4">
                                 <div class="flex flex-wrap items-center justify-between gap-3">
                                     <h3 class="text-lg font-semibold">{{ create_user_title }}</h3>
@@ -652,7 +642,8 @@
                                 </div>
                                 {% endif %}
                             </article>
-                        </aside>
+                            </div>
+                        </details>
 
                         <script id="admin-users-config" type="application/json">{{ admin_users_config_json | safe }}</script>
                         <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
@@ -693,11 +684,7 @@
                     </div>
                 </section>
                 <section data-admin-pane="policy" class="hidden space-y-4">
-                    <div>
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_policy }}</p>
-                        <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ policy_title }}</h2>
-                        <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ policy_description }}</p>
-                    </div>
+                    <h2 class="font-display text-xl font-semibold">{{ policy_title }}</h2>
 
                     <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
                         <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="connectivity" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ registration_label }}</button>
@@ -821,13 +808,8 @@
                     </form>
                 </section>
                 <section data-admin-pane="audit" class="hidden space-y-4">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ admin_nav_audit }}</p>
-                            <h2 class="mt-2 font-display text-2xl font-semibold sm:text-3xl">{{ audit_title }}</h2>
-                            <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ audit_description }}</p>
-                        </div>
-
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <h2 class="font-display text-xl font-semibold">{{ audit_title }}</h2>
                         <div class="flex flex-wrap gap-2">
                             <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ overview_audit_rows_label }} · {{ audit_log_count }}</span>
                             <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_label }} · <span data-admin-audit-filter-count>{{ audit_filtered_count }}</span></span>
