@@ -25,3 +25,6 @@
 .DS_Store
 Thumbs.db
 /example
+
+# Claude Code
+.claude/
