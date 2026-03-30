@@ -106,6 +106,8 @@
             statusInactive: {{ i18n.steam_status_state_inactive | json_encode | safe }},
             exportQrWarning: {{ i18n.steam_export_qr_warning | json_encode | safe }},
             exportQrCopied: {{ i18n.steam_export_qr_copied_message | json_encode | safe }},
+            bulkAcceptBtn: {{ i18n.steam_bulk_accept_all_button | json_encode | safe }},
+            bulkDenyBtn: {{ i18n.steam_bulk_deny_all_button | json_encode | safe }},
             bulkAcceptConfirm: {{ i18n.steam_bulk_accept_confirm_prompt | json_encode | safe }},
             bulkDenyConfirm: {{ i18n.steam_bulk_deny_confirm_prompt | json_encode | safe }},
             bulkRunning: {{ i18n.steam_bulk_action_running_message | json_encode | safe }},
@@ -326,7 +328,7 @@
                     ? I18N.sourceUpload
                     : I18N.sourceLegacy;
             return `<article
-                class="rounded-[1rem] border border-line/80 bg-white/92 p-3.5"
+                class="min-w-0 overflow-hidden rounded-[1rem] border border-line/80 bg-white/92 p-3.5"
                 data-steam-account
                 data-account-id="${escapeHtml(account.id)}"
                 data-code-expires-at="${escapeHtml(account.code_expires_at_unix || 0)}"
@@ -356,7 +358,7 @@
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <p data-role="steam-code-label" class="text-[0.62rem] uppercase tracking-[0.2em] text-ink/45">${escapeHtml(I18N.currentCodeLabel)}</p>
-                            <p class="mt-1 font-mono text-[1.28rem] font-semibold tracking-[0.22em] text-ink sm:text-[1.38rem]">${escapeHtml(account.current_code || "")}</p>
+                            <p class="mt-1 font-mono text-[1.15rem] font-semibold tracking-[0.14em] text-ink sm:text-[1.38rem] sm:tracking-[0.22em]">${escapeHtml(account.current_code || "")}</p>
                         </div>
                         <span class="shrink-0 rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.64rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(I18N.copy)}</span>
                     </div>
@@ -366,7 +368,7 @@
         }
 
         function renderSteamIssueCard(issue) {
-            return `<article class="rounded-[1rem] border border-peach/35 bg-[#fbefec] p-3.5">
+            return `<article class="min-w-0 overflow-hidden rounded-[1rem] border border-peach/35 bg-[#fbefec] p-3.5">
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0 flex-1">
                         <p class="text-[0.62rem] uppercase tracking-[0.2em] text-[#98675f]/72">${escapeHtml(I18N.fileLabel)}</p>
@@ -467,7 +469,7 @@
         }
 
         function resolveSteamTab() {
-            const validTabs = ["codes", "manage", "approvals", "confirmations", "issues", "about"];
+            const validTabs = ["codes", "manage", "setup", "approvals", "confirmations", "issues", "about"];
             const hashTab = (window.location.hash || "").replace(/^#/, "");
             if (validTabs.includes(hashTab)) {
                 return hashTab;
@@ -579,11 +581,15 @@
                                 <span class="inline-flex h-2.5 w-2.5 rounded-full ${account.error ? "bg-peach" : "bg-steam"}"></span>
                                 <h2 class="min-w-0 truncate text-[0.98rem] font-semibold text-ink">${escapeHtml(account.account_name)}</h2>
                             </div>
-                            <div class="mt-2 flex flex-wrap gap-2">
+                            <div class="mt-2 flex flex-wrap items-center gap-2">
                                 <span class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
                                 <span class="inline-flex rounded-full border ${account.error ? "border-peach/35 bg-[#fbefec] text-[#98675f]" : "border-steam/20 bg-steamMist text-steam"} px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em]">${escapeHtml(String(account.confirmation_count || 0))}</span>
                                 ${account.error
                                     ? `<span class="inline-flex rounded-full border border-peach/35 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-[#98675f]">${escapeHtml(I18N.confirmationsAccountError)}</span>`
+                                    : ""}
+                                ${(!account.error && account.confirmation_count > 0)
+                                    ? `<button type="button" data-bulk-accept="${escapeHtml(account.id)}" class="inline-flex rounded-full border border-steam/25 bg-steamMist px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-steam transition hover:bg-steam hover:text-white">${escapeHtml(I18N.bulkAcceptBtn)}</button>
+                                       <button type="button" data-bulk-deny="${escapeHtml(account.id)}" class="inline-flex rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-[#98675f] transition hover:bg-peach hover:text-white">${escapeHtml(I18N.bulkDenyBtn)}</button>`
                                     : ""}
                             </div>
                         </div>
@@ -981,7 +987,7 @@
         }
 
         function activateSteamTab(tabId) {
-            const nextTab = ["codes", "manage", "approvals", "confirmations", "issues", "about"].includes(tabId) ? tabId : "codes";
+            const nextTab = ["codes", "manage", "setup", "approvals", "confirmations", "issues", "about"].includes(tabId) ? tabId : "codes";
             document.querySelectorAll("[data-tab-button]").forEach((button) => {
                 const active = button.dataset.tabButton === nextTab;
                 button.classList.toggle("bg-sage", active);
@@ -1364,7 +1370,7 @@
     data-default-tab="{{ default_tab }}"
 >
     <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
-    <main class="mx-auto max-w-[1240px] px-4 py-5 sm:px-6 lg:px-8">
+    <main class="mx-auto max-w-[1240px] overflow-x-hidden px-4 py-5 sm:px-6 lg:px-8">
         <section class="paper-shadow overflow-hidden rounded-[1.45rem] border border-line/90 bg-[linear-gradient(135deg,rgba(255,255,255,.97),rgba(234,243,250,.95))]">
             <div class="h-1.5 bg-gradient-to-r from-[#153246] via-[#2b587a] to-[#7ea6c4]"></div>
             <div class="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1.05fr),minmax(20rem,0.95fr)] lg:px-5">
@@ -1476,7 +1482,7 @@
 
         <div class="mt-4 space-y-4">
             <section data-tab-panel="codes" class="tab-active">
-                <article id="codes" class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
+                <article id="codes" class="paper-shadow overflow-hidden rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_codes_tab_label }}</p>
@@ -1490,7 +1496,7 @@
                         {% for account in snapshot.accounts %}
                         {% if account.current_code %}
                         <article
-                            class="rounded-[1rem] border border-line/80 bg-white/92 p-3.5"
+                            class="min-w-0 overflow-hidden rounded-[1rem] border border-line/80 bg-white/92 p-3.5"
                             data-steam-account
                             data-account-id="{{ account.id }}"
                             data-code-expires-at="{{ account.code_expires_at_unix }}"
@@ -1522,7 +1528,7 @@
                                 <div class="flex items-start justify-between gap-3">
                                     <div class="min-w-0">
                                         <p data-role="steam-code-label" class="text-[0.62rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.steam_current_code_label }}</p>
-                                        <p class="mt-1 font-mono text-[1.28rem] font-semibold tracking-[0.22em] text-ink sm:text-[1.38rem]">{{ account.current_code }}</p>
+                                        <p class="mt-1 font-mono text-[1.15rem] font-semibold tracking-[0.14em] text-ink sm:text-[1.38rem] sm:tracking-[0.22em]">{{ account.current_code }}</p>
                                     </div>
                                     <span class="shrink-0 rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.64rem] uppercase tracking-[0.16em] text-steam">{{ i18n.copy }}</span>
                                 </div>
@@ -1851,6 +1857,15 @@
                                                 <button type="submit" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_login_existing_button }}</button>
                                             </form>
                                         </div>
+
+                                        {% if account.has_session_tokens and not account.has_revocation_code %}
+                                        <div class="rounded-[1rem] border border-sage/25 bg-mint/60 px-3.5 py-3">
+                                            <p class="text-[0.65rem] uppercase tracking-[0.18em] text-sageDeep/74">{{ i18n.steam_link_auth_title }}</p>
+                                            <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.steam_link_auth_description }}</p>
+                                            <button type="button" data-link-auth="{{ account.id }}" class="mt-3 w-full rounded-[1rem] bg-sage px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sageDeep">{{ i18n.steam_link_auth_button }}</button>
+                                            <div id="link-auth-status-{{ account.id }}" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
+                                        </div>
+                                        {% endif %}
 
                                         <div class="grid gap-3">
                                             <form method="post" action="{{ account.rename_action }}" class="grid gap-2">
@@ -2339,7 +2354,7 @@
                     const data = await jsonPost(SETUP_BEGIN_API, { steam_username: username, steam_password: password, lang: LANG });
                     if (data.ok && data.step === "confirm") {
                         const hintEl = document.getElementById("setup-phone-hint");
-                        if (hintEl) hintEl.textContent = I18N.setupPhoneHint + ": " + (data.phone_hint || "") + " (" + (data.confirm_type === "sms" ? I18N.setupConfirmTypeSms : I18N.setupConfirmTypeEmail) + ")";
+                        if (hintEl) hintEl.textContent = I18N.setupPhoneHint + ": " + (data.masked_phone || "") + " (" + (data.verify_channel === "sms" ? I18N.setupConfirmTypeSms : I18N.setupConfirmTypeEmail) + ")";
                         showSetupStep("confirm");
                     } else if (data.ok && data.step === "transfer") {
                         showSetupStep("transfer");
@@ -2460,7 +2475,7 @@
                     const data = await resp.json();
                     const resultEl = document.getElementById("time-check-result");
                     if (data.ok) {
-                        document.getElementById("time-check-server").textContent = data.server_time;
+                        document.getElementById("time-check-server").textContent = data.remote_time;
                         document.getElementById("time-check-local").textContent = data.local_time;
                         const driftEl = document.getElementById("time-check-drift");
                         driftEl.textContent = (data.drift_seconds >= 0 ? "+" : "") + data.drift_seconds + "s";
@@ -2526,10 +2541,10 @@
                 if (data.ok && data.status) {
                     const s = data.status;
                     resultEl.innerHTML = "<div class='space-y-1 text-sm'>"
-                        + "<div><b>State:</b> " + (s.state > 0 ? I18N.statusActive : I18N.statusInactive) + "</div>"
-                        + "<div><b>Device:</b> " + (s.device_identifier || "—") + "</div>"
-                        + "<div><b>Revocation attempts:</b> " + s.revocation_attempts_remaining + "</div>"
-                        + "<div><b>Version:</b> " + s.version + "</div>"
+                        + "<div><b>State:</b> " + (s.guard_state > 0 ? I18N.statusActive : I18N.statusInactive) + "</div>"
+                        + "<div><b>Device:</b> " + (s.bound_device || "—") + "</div>"
+                        + "<div><b>Revocation attempts:</b> " + s.remaining_revoke_tries + "</div>"
+                        + "<div><b>Version:</b> " + s.schema_ver + "</div>"
                         + "</div>";
                 } else {
                     resultEl.textContent = data.message || "Error";
@@ -2583,6 +2598,40 @@
                 alert(err.message);
             }
             proxyBtn.disabled = false;
+        });
+
+        // ----------- Link authenticator for existing account -----------
+        document.addEventListener("click", async (e) => {
+            const linkBtn = e.target.closest("[data-link-auth]");
+            if (!linkBtn) return;
+            const accountId = linkBtn.dataset.linkAuth;
+            const statusEl = document.getElementById("link-auth-status-" + accountId);
+            linkBtn.disabled = true;
+            if (statusEl) { statusEl.textContent = I18N.setupRunning; statusEl.classList.remove("hidden"); }
+            try {
+                const data = await jsonPost("/platforms/steam/accounts/" + accountId + "/authenticator/link", { lang: LANG });
+                if (data.ok) {
+                    // Close the manage modal
+                    const closeBtn = linkBtn.closest("[data-manage-modal]")?.querySelector("[data-manage-close-button]");
+                    if (closeBtn) closeBtn.click();
+                    // Switch to setup tab and show the appropriate step
+                    const setupTab = document.querySelector("[data-tab-button='setup']");
+                    if (setupTab) setupTab.click();
+                    if (data.step === "confirm") {
+                        const hintEl = document.getElementById("setup-phone-hint");
+                        if (hintEl) hintEl.textContent = I18N.setupPhoneHint + ": " + (data.masked_phone || "") + " (" + (data.verify_channel === "sms" ? I18N.setupConfirmTypeSms : I18N.setupConfirmTypeEmail) + ")";
+                        showSetupStep("confirm");
+                    } else if (data.step === "transfer") {
+                        showSetupStep("transfer");
+                    }
+                } else {
+                    if (statusEl) { showStatus(statusEl, data.message || "Error", true); }
+                }
+            } catch (err) {
+                if (statusEl) { showStatus(statusEl, err.message, true); }
+            } finally {
+                linkBtn.disabled = false;
+            }
         });
 
         // ----------- Bulk confirmations -----------

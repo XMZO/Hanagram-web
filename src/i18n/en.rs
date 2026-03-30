@@ -744,6 +744,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_setup_missing_credentials_message: "Please enter both username and password.",
     steam_setup_no_pending_message: "No pending authenticator setup found. Please start over.",
     steam_setup_save_failed_message: "Failed to save the new authenticator. Please try again.",
+    steam_link_auth_title: "Link Authenticator",
+    steam_link_auth_description: "Enable Steam Guard Mobile Authenticator for this account using the stored session. A confirmation code will be sent to your phone or email.",
+    steam_link_auth_button: "Link Authenticator",
 
     // Remove authenticator
     steam_remove_title: "Remove Authenticator",

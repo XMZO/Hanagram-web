@@ -936,6 +936,11 @@ pub(crate) fn routes() -> Router<AppState> {
             STEAM_SETUP_TRANSFER_FINISH_PATH,
             post(setup_transfer_finish_handler),
         )
+        // Link authenticator for existing account
+        .route(
+            "/platforms/steam/accounts/{account_id}/authenticator/link",
+            post(link_authenticator_for_account_handler),
+        )
         // Remove authenticator
         .route(
             "/platforms/steam/accounts/{account_id}/authenticator/remove",
@@ -2534,7 +2539,137 @@ async fn confirmation_action_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Setup / Link authenticator handlers
+// Link authenticator for existing managed account
+// ---------------------------------------------------------------------------
+
+async fn link_authenticator_for_account_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    // Clear any previous setup for this user.
+    {
+        let mut setups = app_state.steam_setups.write().await;
+        setups.retain(|_, pending| pending.user_id != authenticated.user.id);
+    }
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::enroll_guard_for_managed_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok((steam_username, outcome)) => match outcome {
+            steam_platform::GuardEnrollmentResult::Provisioned {
+                guard_data,
+                steam_timestamp,
+                masked_phone,
+                verify_channel,
+                registrar,
+            } => {
+                let setup_id = Uuid::new_v4().to_string();
+                let pending = PendingSteamSetup {
+                    user_id: authenticated.user.id.clone(),
+                    auth_session_id: authenticated.auth_session.id.clone(),
+                    created_at: Utc::now().timestamp(),
+                    stage: SteamSetupStage::AwaitingVerification {
+                        registrar,
+                        guard_data,
+                        steam_timestamp,
+                        masked_phone: masked_phone.clone(),
+                        verify_channel: verify_channel.clone(),
+                        steam_username,
+                    },
+                };
+                app_state
+                    .steam_setups
+                    .write()
+                    .await
+                    .insert(setup_id.clone(), pending);
+
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "confirm",
+                    "setup_id": setup_id,
+                    "masked_phone": masked_phone,
+                    "verify_channel": verify_channel
+                }))
+                .into_response()
+            }
+            steam_platform::GuardEnrollmentResult::DeviceConflict { registrar } => {
+                let setup_id = Uuid::new_v4().to_string();
+                let pending = PendingSteamSetup {
+                    user_id: authenticated.user.id.clone(),
+                    auth_session_id: authenticated.auth_session.id.clone(),
+                    created_at: Utc::now().timestamp(),
+                    stage: SteamSetupStage::AwaitingMigrationCode {
+                        registrar,
+                        steam_username: String::new(),
+                    },
+                };
+                app_state
+                    .steam_setups
+                    .write()
+                    .await
+                    .insert(setup_id.clone(), pending);
+
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "transfer",
+                    "setup_id": setup_id
+                }))
+                .into_response()
+            }
+        },
+        Err(error) => {
+            warn!(
+                "failed linking authenticator for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_setup_link_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Guard enrollment handlers (fresh login flow)
 // ---------------------------------------------------------------------------
 
 async fn setup_begin_handler(
@@ -2577,26 +2712,26 @@ async fn setup_begin_handler(
 
     let username = form.steam_username.clone();
     let password = form.steam_password.clone();
-    match steam_platform::setup_login_and_link(username, password).await {
+    match steam_platform::enroll_new_guard(username, password).await {
         Ok((steam_username, outcome)) => match outcome {
-            steam_platform::SetupLinkOutcome::Linked {
-                vendor_account,
-                server_time,
-                phone_hint,
-                confirm_type,
-                linker,
+            steam_platform::GuardEnrollmentResult::Provisioned {
+                guard_data,
+                steam_timestamp,
+                masked_phone,
+                verify_channel,
+                registrar,
             } => {
                 let setup_id = Uuid::new_v4().to_string();
                 let pending = PendingSteamSetup {
                     user_id: authenticated.user.id.clone(),
                     auth_session_id: authenticated.auth_session.id.clone(),
                     created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::LinkedAwaitingConfirmation {
-                        linker,
-                        vendor_account,
-                        server_time,
-                        phone_hint: phone_hint.clone(),
-                        confirm_type: confirm_type.clone(),
+                    stage: SteamSetupStage::AwaitingVerification {
+                        registrar,
+                        guard_data,
+                        steam_timestamp,
+                        masked_phone: masked_phone.clone(),
+                        verify_channel: verify_channel.clone(),
                         steam_username,
                     },
                 };
@@ -2610,19 +2745,19 @@ async fn setup_begin_handler(
                     "ok": true,
                     "step": "confirm",
                     "setup_id": setup_id,
-                    "phone_hint": phone_hint,
-                    "confirm_type": confirm_type
+                    "masked_phone": masked_phone,
+                    "verify_channel": verify_channel
                 }))
                 .into_response()
             }
-            steam_platform::SetupLinkOutcome::AlreadyPresent { linker } => {
+            steam_platform::GuardEnrollmentResult::DeviceConflict { registrar } => {
                 let setup_id = Uuid::new_v4().to_string();
                 let pending = PendingSteamSetup {
                     user_id: authenticated.user.id.clone(),
                     auth_session_id: authenticated.auth_session.id.clone(),
                     created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::TransferAwaitingSms {
-                        linker,
+                    stage: SteamSetupStage::AwaitingMigrationCode {
+                        registrar,
                         steam_username: form.steam_username.clone(),
                     },
                 };
@@ -2725,35 +2860,35 @@ async fn setup_finalize_handler(
     };
 
     match pending.stage {
-        SteamSetupStage::LinkedAwaitingConfirmation {
-            mut linker,
-            mut vendor_account,
-            server_time,
+        SteamSetupStage::AwaitingVerification {
+            mut registrar,
+            mut guard_data,
+            steam_timestamp,
             steam_username,
             ..
         } => {
-            let confirm_code = form.confirm_code.trim().to_owned();
+            let code = form.confirm_code.trim().to_owned();
             let username = steam_username.clone();
 
-            let finalize_result = tokio::task::spawn_blocking(move || {
-                steam_platform::finalize_authenticator_link(
-                    &mut linker,
-                    &mut vendor_account,
-                    server_time,
-                    confirm_code,
+            let enrollment_result = tokio::task::spawn_blocking(move || {
+                steam_platform::confirm_guard_enrollment(
+                    &mut registrar,
+                    &mut guard_data,
+                    steam_timestamp,
+                    code,
                 )?;
-                Ok::<_, anyhow::Error>(vendor_account)
+                Ok::<_, anyhow::Error>(guard_data)
             })
             .await;
 
-            match finalize_result {
-                Ok(Ok(finalized_account)) => {
+            match enrollment_result {
+                Ok(Ok(enrolled_data)) => {
                     let steam_root =
                         steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-                    match steam_platform::save_setup_account(
+                    match steam_platform::persist_enrolled_guard(
                         &steam_root,
                         master_key.as_ref().as_slice(),
-                        &finalized_account,
+                        &enrolled_data,
                         &username,
                         &build_dummy_tokens_for_setup(),
                     )
@@ -2896,26 +3031,26 @@ async fn setup_transfer_start_handler(
     };
 
     match pending.stage {
-        SteamSetupStage::TransferAwaitingSms {
-            mut linker,
+        SteamSetupStage::AwaitingMigrationCode {
+            mut registrar,
             steam_username,
         } => {
             let username = steam_username.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                steam_platform::begin_authenticator_transfer(&mut linker)?;
-                Ok::<_, anyhow::Error>(linker)
+                steam_platform::initiate_guard_migration(&mut registrar)?;
+                Ok::<_, anyhow::Error>(registrar)
             })
             .await;
 
             match result {
-                Ok(Ok(linker_back)) => {
+                Ok(Ok(registrar_back)) => {
                     let ready = PendingSteamSetup {
                         user_id: authenticated.user.id.clone(),
                         auth_session_id: authenticated.auth_session.id.clone(),
                         created_at: Utc::now().timestamp(),
-                        stage: SteamSetupStage::TransferAwaitingSms {
-                            linker: linker_back,
+                        stage: SteamSetupStage::AwaitingMigrationCode {
+                            registrar: registrar_back,
                             steam_username: username,
                         },
                     };
@@ -3042,26 +3177,26 @@ async fn setup_transfer_finish_handler(
     };
 
     match pending.stage {
-        SteamSetupStage::TransferAwaitingSms {
-            mut linker,
+        SteamSetupStage::AwaitingMigrationCode {
+            mut registrar,
             steam_username,
         } => {
-            let sms_code = form.sms_code.trim().to_owned();
+            let migration_code = form.sms_code.trim().to_owned();
             let username = steam_username.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                steam_platform::finish_authenticator_transfer(&mut linker, sms_code)
+                steam_platform::complete_guard_migration(&mut registrar, migration_code)
             })
             .await;
 
             match result {
-                Ok(Ok(vendor_account)) => {
+                Ok(Ok(migrated_guard)) => {
                     let steam_root =
                         steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-                    match steam_platform::save_setup_account(
+                    match steam_platform::persist_enrolled_guard(
                         &steam_root,
                         master_key.as_ref().as_slice(),
-                        &vendor_account,
+                        &migrated_guard,
                         &username,
                         &build_dummy_tokens_for_setup(),
                     )
@@ -3169,7 +3304,7 @@ async fn setup_cancel_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Remove authenticator handler
+// Guard revocation handler
 // ---------------------------------------------------------------------------
 
 async fn remove_authenticator_handler(
@@ -3217,7 +3352,7 @@ async fn remove_authenticator_handler(
     };
 
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    match steam_platform::remove_managed_authenticator(
+    match steam_platform::revoke_account_guard(
         &steam_root,
         master_key.as_ref().as_slice(),
         &account_id,
@@ -3225,18 +3360,18 @@ async fn remove_authenticator_handler(
     )
     .await
     {
-        Ok(result) => {
-            if result.success {
+        Ok(outcome) => {
+            if outcome.revoked {
                 Json(serde_json::json!({
                     "ok": true,
                     "message": translations.steam_remove_success_message
                 }))
                 .into_response()
             } else {
-                let msg = if let Some(remaining) = result.attempts_remaining {
+                let msg = if let Some(left) = outcome.tries_left {
                     format!(
                         "{} ({})",
-                        translations.steam_remove_incorrect_code_message, remaining
+                        translations.steam_remove_incorrect_code_message, left
                     )
                 } else {
                     translations.steam_remove_incorrect_code_message.to_owned()
@@ -3246,7 +3381,7 @@ async fn remove_authenticator_handler(
                     Json(serde_json::json!({
                         "ok": false,
                         "message": msg,
-                        "attempts_remaining": result.attempts_remaining
+                        "tries_left": outcome.tries_left
                     })),
                 )
                     .into_response()
@@ -3254,7 +3389,7 @@ async fn remove_authenticator_handler(
         }
         Err(error) => {
             warn!(
-                "failed removing authenticator for account {}: {}",
+                "guard revocation failed for account {}: {}",
                 account_id, error
             );
             (
@@ -3270,7 +3405,7 @@ async fn remove_authenticator_handler(
 }
 
 // ---------------------------------------------------------------------------
-// 2FA status query handler
+// Security profile handler
 // ---------------------------------------------------------------------------
 
 async fn account_status_handler(
@@ -3307,7 +3442,7 @@ async fn account_status_handler(
     };
 
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    match steam_platform::query_two_factor_status(
+    match steam_platform::fetch_security_info(
         &steam_root,
         master_key.as_ref().as_slice(),
         &account_id,
@@ -3337,7 +3472,7 @@ async fn account_status_handler(
 }
 
 // ---------------------------------------------------------------------------
-// QR code export handler
+// TOTP URI / QR export handler
 // ---------------------------------------------------------------------------
 
 async fn account_export_qr_handler(
@@ -3394,7 +3529,7 @@ async fn account_export_qr_handler(
         }
     };
 
-    match steam_platform::build_steam_otpauth_uri(&account) {
+    match steam_platform::generate_totp_uri(&account) {
         Ok(uri) => match render_qr_svg(&uri) {
             Ok(svg) => Json(serde_json::json!({
                 "ok": true,
@@ -3432,7 +3567,7 @@ async fn account_export_qr_handler(
 }
 
 // ---------------------------------------------------------------------------
-// WinAuth import handler
+// Third-party guard import handler
 // ---------------------------------------------------------------------------
 
 async fn import_winauth_handler(
@@ -3472,7 +3607,7 @@ async fn import_winauth_handler(
         Some(form.account_name.as_str())
     };
 
-    match steam_platform::import_winauth_uri(
+    match steam_platform::ingest_third_party_guard(
         &steam_root,
         master_key.as_ref().as_slice(),
         &form.uri,
@@ -3506,7 +3641,7 @@ async fn import_winauth_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Bulk confirmation handlers
+// Batch trade confirmation handlers
 // ---------------------------------------------------------------------------
 
 async fn bulk_accept_confirmations_handler(
@@ -3601,9 +3736,9 @@ async fn bulk_confirmation_action(
     };
 
     let result = if accept {
-        steam_platform::accept_all_confirmations(&app_state.http_client, &account).await
+        steam_platform::batch_approve_trades(&app_state.http_client, &account).await
     } else {
-        steam_platform::deny_all_confirmations(&app_state.http_client, &account).await
+        steam_platform::batch_reject_trades(&app_state.http_client, &account).await
     };
 
     match result {
@@ -3740,7 +3875,7 @@ async fn account_proxy_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Time sync check handler
+// Clock drift measurement handler
 // ---------------------------------------------------------------------------
 
 async fn time_check_handler(
@@ -3752,11 +3887,11 @@ async fn time_check_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
 
-    match steam_platform::check_time_sync(&app_state.http_client).await {
-        Ok((server_time, local_time, drift)) => Json(serde_json::json!({
+    match steam_platform::measure_clock_drift(&app_state.http_client).await {
+        Ok((remote_ts, local_ts, drift)) => Json(serde_json::json!({
             "ok": true,
-            "server_time": server_time,
-            "local_time": local_time,
+            "remote_time": remote_ts,
+            "local_time": local_ts,
             "drift_seconds": drift
         }))
         .into_response(),

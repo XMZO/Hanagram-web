@@ -754,6 +754,9 @@ pub struct TranslationSet {
     pub steam_setup_missing_credentials_message: &'static str,
     pub steam_setup_no_pending_message: &'static str,
     pub steam_setup_save_failed_message: &'static str,
+    pub steam_link_auth_title: &'static str,
+    pub steam_link_auth_description: &'static str,
+    pub steam_link_auth_button: &'static str,
 
     // Remove authenticator
     pub steam_remove_title: &'static str,

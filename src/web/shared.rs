@@ -280,16 +280,16 @@ pub(crate) struct PendingSteamSetup {
 }
 
 pub(crate) enum SteamSetupStage {
-    LinkedAwaitingConfirmation {
-        linker: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
-        vendor_account: steamguard::SteamGuardAccount,
-        server_time: u64,
-        phone_hint: String,
-        confirm_type: String,
+    AwaitingVerification {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        guard_data: steamguard::SteamGuardAccount,
+        steam_timestamp: u64,
+        masked_phone: String,
+        verify_channel: String,
         steam_username: String,
     },
-    TransferAwaitingSms {
-        linker: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+    AwaitingMigrationCode {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
         steam_username: String,
     },
     Complete {

@@ -744,6 +744,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_setup_missing_credentials_message: "请输入用户名和密码。",
     steam_setup_no_pending_message: "未找到待处理的认证器设置，请重新开始。",
     steam_setup_save_failed_message: "保存新认证器失败，请重试。",
+    steam_link_auth_title: "启用令牌",
+    steam_link_auth_description: "使用已保存的登录会话为此账号启用 Steam Guard 手机令牌。确认码将发送到你的手机或邮箱。",
+    steam_link_auth_button: "启用令牌",
 
     // 移除认证器
     steam_remove_title: "移除认证器",

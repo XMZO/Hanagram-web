@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(wc -l /e/gayhub/Hanagram-web/vendor/steamguard/src/*.rs /e/gayhub/Hanagram-web/example/steamguard-cli/steamguard/src/*.rs)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(find /e/gayhub/Hanagram-web -type f \\\\\\(-name *.rs -o -name *.js -o -name *.ts -o -name *.tsx -o -name *.py \\\\\\) ! -path */node_modules/* ! -path */.git/* ! -path */target/* ! -path */example/*)",
+      "Bash(find /e/gayhub/Hanagram-web -type d -name example* -o -name *steamguard-cli*)",
+      "Bash(grep -r \"Do you want to continue\\\\|Accept all open mobile confirmations\\\\|Enter your revocation code\\\\|Looks like you\" /e/gayhub/Hanagram-web --include=*.rs --include=*.js --include=*.ts)",
+      "Bash(wc -l /e/gayhub/Hanagram-web/example/steamguard-cli/src/commands/*.rs)"
     ]
   }
 }
