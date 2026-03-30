@@ -460,6 +460,11 @@ pub(crate) async fn clear_pending_flows_for_user(app_state: &AppState, user_id: 
         .write()
         .await
         .retain(|_, flow| flow.user_id != user_id);
+    app_state
+        .steam_setups
+        .write()
+        .await
+        .retain(|_, flow| flow.user_id != user_id);
 }
 
 pub(crate) async fn clear_auth_session_sensitive_state(

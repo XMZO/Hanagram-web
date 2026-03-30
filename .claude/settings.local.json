@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /e/gayhub/Hanagram-web/vendor/steamguard/src/*.rs /e/gayhub/Hanagram-web/example/steamguard-cli/steamguard/src/*.rs)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

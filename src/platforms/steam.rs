@@ -4,6 +4,7 @@
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use base64::Engine;
 use chrono::Utc;
+use steamguard::ExposeSecret;
 use hmac::{Hmac, Mac};
 use image::ImageReader;
 use rqrr::PreparedImage;
@@ -11,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use steamguard::accountlinker::{
+    AccountLinkError, AccountLinker, FinalizeLinkError, RemoveAuthenticatorError, TransferError,
+};
 use steamguard::approver::Challenge;
 use steamguard::protobufs::enums::ESessionPersistence;
 use steamguard::protobufs::steammessages_auth_steamclient::{
@@ -114,6 +118,12 @@ pub(crate) struct SteamGuardAccount {
     pub(crate) encrypted_at_rest: bool,
     pub(crate) created_at_unix: Option<i64>,
     pub(crate) updated_at_unix: Option<i64>,
+    pub(crate) revocation_code: Option<String>,
+    pub(crate) serial_number: Option<String>,
+    pub(crate) token_gid: Option<String>,
+    pub(crate) secret_1: Option<String>,
+    pub(crate) uri: Option<String>,
+    pub(crate) proxy_url: Option<String>,
 }
 
 impl SteamGuardAccount {
@@ -244,21 +254,33 @@ struct StoredSteamWebSession {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-struct StoredSteamAccount {
-    schema_version: u8,
-    id: String,
-    account_name: String,
+pub(crate) struct StoredSteamAccount {
+    pub(crate) schema_version: u8,
+    pub(crate) id: String,
+    pub(crate) account_name: String,
     #[serde(default)]
-    steam_username: Option<String>,
-    steam_id: Option<u64>,
-    shared_secret: String,
-    identity_secret: Option<String>,
-    device_id: Option<String>,
-    session: Option<StoredSteamWebSession>,
-    imported_from: Option<String>,
-    managed_origin: SteamManagedAccountOrigin,
-    created_at_unix: i64,
-    updated_at_unix: i64,
+    pub(crate) steam_username: Option<String>,
+    pub(crate) steam_id: Option<u64>,
+    pub(crate) shared_secret: String,
+    pub(crate) identity_secret: Option<String>,
+    pub(crate) device_id: Option<String>,
+    pub(crate) session: Option<StoredSteamWebSession>,
+    pub(crate) imported_from: Option<String>,
+    pub(crate) managed_origin: SteamManagedAccountOrigin,
+    pub(crate) created_at_unix: i64,
+    pub(crate) updated_at_unix: i64,
+    #[serde(default)]
+    pub(crate) revocation_code: Option<String>,
+    #[serde(default)]
+    pub(crate) serial_number: Option<String>,
+    #[serde(default)]
+    pub(crate) token_gid: Option<String>,
+    #[serde(default)]
+    pub(crate) secret_1: Option<String>,
+    #[serde(default)]
+    pub(crate) uri: Option<String>,
+    #[serde(default)]
+    pub(crate) proxy_url: Option<String>,
 }
 
 impl StoredSteamAccount {
@@ -287,6 +309,12 @@ impl StoredSteamAccount {
             encrypted_at_rest: true,
             created_at_unix: Some(self.created_at_unix),
             updated_at_unix: Some(self.updated_at_unix),
+            revocation_code: self.revocation_code,
+            serial_number: self.serial_number,
+            token_gid: self.token_gid,
+            secret_1: self.secret_1,
+            uri: self.uri,
+            proxy_url: self.proxy_url,
         }
     }
 }
@@ -788,6 +816,12 @@ pub(crate) async fn create_logged_in_account(
         managed_origin: SteamManagedAccountOrigin::ManualEntry,
         created_at_unix: now,
         updated_at_unix: now,
+        revocation_code: None,
+        serial_number: None,
+        token_gid: None,
+        secret_1: None,
+        uri: None,
+        proxy_url: None,
     };
     apply_credential_login_result(&mut record, &login_result);
 
@@ -1175,6 +1209,12 @@ pub(crate) async fn create_manual_account(
         managed_origin: SteamManagedAccountOrigin::ManualEntry,
         created_at_unix: now,
         updated_at_unix: now,
+        revocation_code: None,
+        serial_number: None,
+        token_gid: None,
+        secret_1: None,
+        uri: None,
+        proxy_url: None,
     };
     let storage_path = managed_account_storage_path(root_dir, &record.id);
     persist_stored_account(master_key, &storage_path, &record).await?;
@@ -1226,6 +1266,12 @@ pub(crate) async fn import_mafile_bytes(
         managed_origin: SteamManagedAccountOrigin::UploadedMaFile,
         created_at_unix: now,
         updated_at_unix: now,
+        revocation_code: None,
+        serial_number: None,
+        token_gid: None,
+        secret_1: None,
+        uri: None,
+        proxy_url: None,
     };
     let storage_path = managed_account_storage_path(root_dir, &record.id);
     persist_stored_account(master_key, &storage_path, &record).await?;
@@ -1397,6 +1443,12 @@ fn parse_account_bytes(raw_bytes: &[u8], path: &Path) -> Result<SteamGuardAccoun
         encrypted_at_rest: false,
         created_at_unix: None,
         updated_at_unix: None,
+        revocation_code: None,
+        serial_number: None,
+        token_gid: None,
+        secret_1: None,
+        uri: None,
+        proxy_url: None,
     })
 }
 
@@ -1727,7 +1779,7 @@ async fn collect_account_files_recursive(dir: PathBuf, files: &mut Vec<PathBuf>)
     Ok(())
 }
 
-async fn persist_stored_account(
+pub(crate) async fn persist_stored_account(
     master_key: &[u8],
     storage_path: &Path,
     record: &StoredSteamAccount,
@@ -1742,7 +1794,7 @@ async fn persist_stored_account(
         .with_context(|| format!("failed writing {}", storage_path.display()))
 }
 
-async fn load_stored_account(
+pub(crate) async fn load_stored_account(
     master_key: &[u8],
     storage_path: &Path,
 ) -> Result<Option<StoredSteamAccount>> {
@@ -1788,6 +1840,563 @@ fn unpack_managed_storage_bytes(raw: &[u8]) -> Result<Vec<u8>> {
     };
     zstd::stream::decode_all(Cursor::new(compressed))
         .context("failed decompressing Steam account payload")
+}
+
+// ---------------------------------------------------------------------------
+// Setup / Link authenticator
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub(crate) struct SetupLoginResult {
+    pub(crate) steam_username: String,
+    pub(crate) linker: AccountLinker<WebApiTransport>,
+}
+
+#[derive(Debug)]
+pub(crate) enum SetupLinkOutcome {
+    Linked {
+        linker: AccountLinker<WebApiTransport>,
+        vendor_account: VendorSteamGuardAccount,
+        server_time: u64,
+        phone_hint: String,
+        confirm_type: String,
+    },
+    AlreadyPresent {
+        linker: AccountLinker<WebApiTransport>,
+    },
+}
+
+/// Log in to Steam and attempt to link a new authenticator.
+pub(crate) async fn setup_login_and_link(
+    steam_username: String,
+    steam_password: String,
+) -> Result<(String, SetupLinkOutcome)> {
+    spawn_blocking(move || {
+        let username = steam_username.trim().to_owned();
+        ensure!(!username.is_empty(), "Steam username is required");
+        ensure!(!steam_password.is_empty(), "Steam password is required");
+
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+
+        let mut login = UserLogin::new(transport.clone(), build_steam_mobile_device_details());
+        let confirmation_methods = login
+            .begin_auth_via_credentials(&username, &steam_password)
+            .map_err(map_login_error)?;
+
+        // For setup, we accept the guardless flow or email-code-only accounts
+        let has_guardless = confirmation_methods.iter().any(|m| {
+            m.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_None
+        });
+        let requires_email_code = confirmation_methods.iter().any(|m| {
+            m.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
+        });
+
+        if !has_guardless && requires_email_code {
+            // Account has email guard but no mobile authenticator yet — skip email code for now,
+            // Steam will still give us tokens if we poll.
+        } else if !has_guardless {
+            let has_device_code = confirmation_methods.iter().any(|m| {
+                m.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode
+            });
+            if has_device_code {
+                // Account already has mobile auth; we'll handle with transfer.
+                // We still need to poll for tokens (the account owner might approve on the other device).
+            }
+        }
+
+        let tokens = login
+            .poll_until_tokens()
+            .context("failed polling Steam for login tokens during setup")?;
+
+        let mut linker = AccountLinker::new(transport, tokens);
+
+        match linker.link() {
+            Ok(success) => {
+                let confirm_type = match success.confirm_type() {
+                    steamguard::accountlinker::AccountLinkConfirmType::SMS => String::from("sms"),
+                    steamguard::accountlinker::AccountLinkConfirmType::Email => {
+                        String::from("email")
+                    }
+                    _ => String::from("unknown"),
+                };
+                let server_time = success.server_time();
+                let phone_hint = success.phone_number_hint().to_owned();
+                let vendor_account = success.into_account();
+                Ok((
+                    username,
+                    SetupLinkOutcome::Linked {
+                        vendor_account,
+                        server_time,
+                        phone_hint,
+                        confirm_type,
+                        linker,
+                    },
+                ))
+            }
+            Err(AccountLinkError::AuthenticatorPresent) => Ok((
+                username,
+                SetupLinkOutcome::AlreadyPresent { linker },
+            )),
+            Err(error) => Err(anyhow::Error::from(error)),
+        }
+    })
+    .await
+    .context("setup login task failed")?
+}
+
+const SETUP_FINALIZE_MAX_RETRIES: usize = 5;
+
+/// Finalize the authenticator link with the user-provided SMS/email confirmation code.
+pub(crate) fn finalize_authenticator_link(
+    linker: &mut AccountLinker<WebApiTransport>,
+    vendor_account: &mut VendorSteamGuardAccount,
+    mut server_time: u64,
+    confirm_code: String,
+) -> Result<()> {
+    for _ in 0..SETUP_FINALIZE_MAX_RETRIES {
+        match linker.finalize(server_time, vendor_account, confirm_code.clone()) {
+            Ok(()) => return Ok(()),
+            Err(FinalizeLinkError::WantMore {
+                server_time: next_time,
+            }) => {
+                server_time = next_time;
+                continue;
+            }
+            Err(FinalizeLinkError::BadSmsCode) => bail!("bad_sms_code"),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    bail!("Steam verification exhausted retries")
+}
+
+/// Begin transferring an existing authenticator to this device.
+pub(crate) fn begin_authenticator_transfer(
+    linker: &mut AccountLinker<WebApiTransport>,
+) -> Result<()> {
+    linker.transfer_start().map_err(|error| match error {
+        TransferError::GenericFailure => {
+            anyhow!("no_phone")
+        }
+        other => other.into(),
+    })
+}
+
+/// Complete the authenticator transfer with the SMS code.
+pub(crate) fn finish_authenticator_transfer(
+    linker: &mut AccountLinker<WebApiTransport>,
+    sms_code: String,
+) -> Result<VendorSteamGuardAccount> {
+    linker.transfer_finish(sms_code).map_err(|error| match error {
+        TransferError::BadSmsCode => anyhow!("bad_sms_code"),
+        other => other.into(),
+    })
+}
+
+/// Convert a vendor account from setup/link/transfer into our storage format and persist it.
+pub(crate) async fn save_setup_account(
+    root_dir: &Path,
+    master_key: &[u8],
+    vendor_account: &VendorSteamGuardAccount,
+    steam_username: &str,
+    tokens: &SteamTokens,
+) -> Result<SteamGuardAccount> {
+    ensure_managed_accounts_dir(root_dir).await?;
+
+    let shared_secret_b64 = base64::engine::general_purpose::STANDARD
+        .encode(vendor_account.shared_secret.expose_secret());
+    validate_shared_secret(&shared_secret_b64)?;
+
+    let now = Utc::now().timestamp();
+    let record = StoredSteamAccount {
+        schema_version: STEAM_MANAGED_SCHEMA_VERSION,
+        id: Uuid::new_v4().to_string(),
+        account_name: sanitize_account_name(&vendor_account.account_name),
+        steam_username: Some(steam_username.to_owned()),
+        steam_id: Some(vendor_account.steam_id),
+        shared_secret: shared_secret_b64,
+        identity_secret: Some(vendor_account.identity_secret.expose_secret().to_owned()),
+        device_id: Some(vendor_account.device_id.clone()),
+        session: Some(StoredSteamWebSession {
+            session_id: None,
+            steam_login: None,
+            steam_login_secure: None,
+            web_cookie: None,
+            oauth_token: None,
+            access_token: Some(tokens.access_token().expose_secret().to_owned()),
+            refresh_token: Some(tokens.refresh_token().expose_secret().to_owned()),
+        }),
+        imported_from: Some(String::from("authenticator-setup")),
+        managed_origin: SteamManagedAccountOrigin::ManualEntry,
+        created_at_unix: now,
+        updated_at_unix: now,
+        revocation_code: Some(vendor_account.revocation_code.expose_secret().to_owned()),
+        serial_number: Some(vendor_account.serial_number.clone()),
+        token_gid: Some(vendor_account.token_gid.clone()),
+        secret_1: Some(vendor_account.secret_1.expose_secret().to_owned()),
+        uri: Some(vendor_account.uri.expose_secret().to_owned()),
+        proxy_url: None,
+    };
+    let storage_path = managed_account_storage_path(root_dir, &record.id);
+    persist_stored_account(master_key, &storage_path, &record).await?;
+    Ok(record.into_runtime(storage_path))
+}
+
+// ---------------------------------------------------------------------------
+// Remove authenticator
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub(crate) struct RemoveAuthenticatorResult {
+    pub(crate) success: bool,
+    pub(crate) attempts_remaining: Option<u32>,
+}
+
+/// Remove the authenticator from a managed Steam account via revocation code.
+pub(crate) async fn remove_managed_authenticator(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    revocation_code: String,
+) -> Result<RemoveAuthenticatorResult> {
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let Some(record) = load_stored_account(master_key, &storage_path).await? else {
+        bail!("account not found");
+    };
+
+    let session = record.session.as_ref().context("no session on account")?;
+    let access_token = session
+        .access_token
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .context("no access token for authenticator removal")?;
+    let refresh_token = session
+        .refresh_token
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .context("no refresh token for authenticator removal")?;
+
+    let revocation_code_owned = revocation_code.clone();
+    let access_token_owned = access_token.to_owned();
+    let refresh_token_owned = refresh_token.to_owned();
+
+    let result = spawn_blocking(move || {
+        let tokens = SteamTokens::new(
+            SteamJwt::from(access_token_owned),
+            SteamJwt::from(refresh_token_owned),
+        );
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let linker = AccountLinker::new(transport, tokens);
+
+        match linker.remove_authenticator(Some(&revocation_code_owned)) {
+            Ok(()) => Ok(RemoveAuthenticatorResult {
+                success: true,
+                attempts_remaining: None,
+            }),
+            Err(RemoveAuthenticatorError::IncorrectRevocationCode {
+                attempts_remaining,
+            }) => Ok(RemoveAuthenticatorResult {
+                success: false,
+                attempts_remaining: Some(attempts_remaining),
+            }),
+            Err(RemoveAuthenticatorError::MissingRevocationCode) => {
+                bail!("missing_revocation_code")
+            }
+            Err(other) => Err(other.into()),
+        }
+    })
+    .await
+    .context("remove authenticator task failed")??;
+
+    if result.success {
+        delete_managed_account(root_dir, account_id).await?;
+    }
+
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// Query 2FA status
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct TwoFactorStatusInfo {
+    pub(crate) state: u32,
+    pub(crate) steamguard_scheme: u32,
+    pub(crate) authenticator_type: u32,
+    pub(crate) email_validated: bool,
+    pub(crate) device_identifier: String,
+    pub(crate) time_created: u32,
+    pub(crate) revocation_attempts_remaining: u32,
+    pub(crate) version: u32,
+}
+
+pub(crate) async fn query_two_factor_status(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+) -> Result<TwoFactorStatusInfo> {
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let record = load_stored_account(master_key, &storage_path)
+        .await?
+        .context("account not found")?;
+    let session = record.session.as_ref().context("no session on account")?;
+    let access_token = session
+        .access_token
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .context("no access token for status query")?;
+    let refresh_token = session
+        .refresh_token
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .context("no refresh token for status query")?;
+    let steam_id = record.steam_id.context("no steam_id on account")?;
+
+    let access_token_owned = access_token.to_owned();
+    let refresh_token_owned = refresh_token.to_owned();
+    let shared_secret = record.shared_secret.clone();
+
+    spawn_blocking(move || {
+        let tokens = SteamTokens::new(
+            SteamJwt::from(access_token_owned),
+            SteamJwt::from(refresh_token_owned),
+        );
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+
+        let mut vendor_account = VendorSteamGuardAccount::new();
+        vendor_account.steam_id = steam_id;
+        vendor_account.shared_secret =
+            TwoFactorSecret::parse_shared_secret(shared_secret).context("bad shared_secret")?;
+
+        let linker = AccountLinker::new(transport, tokens);
+        let status = linker
+            .query_status(&vendor_account)
+            .map_err(|e| anyhow!("Steam status query failed: {e:?}"))?;
+
+        Ok(TwoFactorStatusInfo {
+            state: status.state(),
+            steamguard_scheme: status.steamguard_scheme(),
+            authenticator_type: status.authenticator_type(),
+            email_validated: status.email_validated(),
+            device_identifier: status.device_identifier().to_owned(),
+            time_created: status.time_created(),
+            revocation_attempts_remaining: status.revocation_attempts_remaining(),
+            version: status.version(),
+        })
+    })
+    .await
+    .context("2FA status query task failed")?
+}
+
+// ---------------------------------------------------------------------------
+// QR code export (build otpauth URI)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn build_steam_otpauth_uri(account: &SteamGuardAccount) -> Result<String> {
+    let secret_bytes = base64::engine::general_purpose::STANDARD
+        .decode(account.shared_secret.trim())
+        .context("shared_secret is not valid base64")?;
+    let secret_b32 = data_encoding::BASE32_NOPAD.encode(&secret_bytes);
+    let label = percent_encoding::utf8_percent_encode(
+        &account.account_name,
+        percent_encoding::NON_ALPHANUMERIC,
+    );
+    Ok(format!(
+        "otpauth://totp/Steam:{label}?secret={secret_b32}&issuer=Steam&digits=5&period=30&algorithm=SHA1"
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// WinAuth import
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct WinAuthEmbeddedData {
+    #[serde(default)]
+    shared_secret: String,
+    #[serde(default)]
+    identity_secret: String,
+    #[serde(default, alias = "deviceid")]
+    device_id: String,
+    #[serde(default, alias = "steamid")]
+    steam_id: String,
+    #[serde(default)]
+    revocation_code: String,
+    #[serde(default)]
+    serial_number: String,
+    #[serde(default)]
+    token_gid: String,
+    #[serde(default)]
+    uri: String,
+    #[serde(default)]
+    secret_1: String,
+    #[serde(default)]
+    account_name: String,
+}
+
+pub(crate) async fn import_winauth_uri(
+    root_dir: &Path,
+    master_key: &[u8],
+    raw_uri: &str,
+    display_name_override: Option<&str>,
+) -> Result<SteamGuardAccount> {
+    let trimmed = raw_uri.trim();
+    ensure!(
+        trimmed.starts_with("otpauth://"),
+        "expected otpauth:// scheme"
+    );
+
+    let query_start = trimmed.find('?').context("URI has no query parameters")?;
+    let query_string = &trimmed[query_start + 1..];
+    let data_param = query_string
+        .split('&')
+        .find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            if key == "data" {
+                Some(
+                    percent_encoding::percent_decode_str(value)
+                        .decode_utf8_lossy()
+                        .into_owned(),
+                )
+            } else {
+                None
+            }
+        })
+        .context("missing data parameter in WinAuth URI")?;
+
+    let embedded: WinAuthEmbeddedData =
+        serde_json::from_str(&data_param).context("data parameter is not valid JSON")?;
+
+    ensure!(
+        !embedded.shared_secret.trim().is_empty(),
+        "embedded shared_secret is empty"
+    );
+    validate_shared_secret(embedded.shared_secret.trim())?;
+    let identity_secret = normalize_optional_string(Some(embedded.identity_secret));
+    if let Some(secret) = identity_secret.as_deref() {
+        validate_identity_secret(secret)?;
+    }
+
+    let steam_id: Option<u64> = embedded.steam_id.parse().ok();
+    let device_id = normalize_optional_string(Some(embedded.device_id)).or_else(|| {
+        steam_id.map(generate_device_id_for_steam_id)
+    });
+
+    let account_name = display_name_override
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| normalize_optional_string(Some(embedded.account_name)))
+        .unwrap_or_else(|| String::from("winauth-import"));
+
+    ensure_managed_accounts_dir(root_dir).await?;
+
+    let now = Utc::now().timestamp();
+    let record = StoredSteamAccount {
+        schema_version: STEAM_MANAGED_SCHEMA_VERSION,
+        id: Uuid::new_v4().to_string(),
+        account_name: sanitize_account_name(&account_name),
+        steam_username: None,
+        steam_id,
+        shared_secret: embedded.shared_secret.trim().to_owned(),
+        identity_secret,
+        device_id,
+        session: None,
+        imported_from: Some(String::from("winauth")),
+        managed_origin: SteamManagedAccountOrigin::UploadedMaFile,
+        created_at_unix: now,
+        updated_at_unix: now,
+        revocation_code: normalize_optional_string(Some(embedded.revocation_code)),
+        serial_number: normalize_optional_string(Some(embedded.serial_number)),
+        token_gid: normalize_optional_string(Some(embedded.token_gid)),
+        secret_1: normalize_optional_string(Some(embedded.secret_1)),
+        uri: normalize_optional_string(Some(embedded.uri)),
+        proxy_url: None,
+    };
+    let storage_path = managed_account_storage_path(root_dir, &record.id);
+    persist_stored_account(master_key, &storage_path, &record).await?;
+    Ok(record.into_runtime(storage_path))
+}
+
+// ---------------------------------------------------------------------------
+// Bulk confirmation operations
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn accept_all_confirmations(
+    http_client: &reqwest::Client,
+    account: &SteamGuardAccount,
+) -> Result<usize> {
+    let confirmations = fetch_confirmations(http_client, account).await?;
+    let mut accepted = 0usize;
+    for confirmation in &confirmations {
+        match respond_to_confirmation(
+            http_client,
+            account,
+            &confirmation.id,
+            &confirmation.nonce,
+            true,
+        )
+        .await
+        {
+            Ok(()) => accepted += 1,
+            Err(error) => warn!("failed accepting confirmation {}: {error}", confirmation.id),
+        }
+    }
+    Ok(accepted)
+}
+
+pub(crate) async fn deny_all_confirmations(
+    http_client: &reqwest::Client,
+    account: &SteamGuardAccount,
+) -> Result<usize> {
+    let confirmations = fetch_confirmations(http_client, account).await?;
+    let mut denied = 0usize;
+    for confirmation in &confirmations {
+        match respond_to_confirmation(
+            http_client,
+            account,
+            &confirmation.id,
+            &confirmation.nonce,
+            false,
+        )
+        .await
+        {
+            Ok(()) => denied += 1,
+            Err(error) => warn!("failed denying confirmation {}: {error}", confirmation.id),
+        }
+    }
+    Ok(denied)
+}
+
+// ---------------------------------------------------------------------------
+// Proxy support helper
+// ---------------------------------------------------------------------------
+
+pub(crate) fn build_steam_client_with_proxy(
+    proxy_url: Option<&str>,
+) -> Result<reqwest::blocking::Client> {
+    let mut builder = reqwest::blocking::Client::builder()
+        .user_agent(STEAM_CONFIRMATION_USER_AGENT);
+    if let Some(url) = proxy_url.filter(|v| !v.trim().is_empty()) {
+        builder = builder.proxy(
+            reqwest::Proxy::all(url.trim())
+                .with_context(|| format!("invalid proxy URL: {url}"))?,
+        );
+    }
+    builder.build().context("failed building Steam HTTP client")
+}
+
+// ---------------------------------------------------------------------------
+// Time sync check
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn check_time_sync(http_client: &reqwest::Client) -> Result<(i64, i64, i64)> {
+    let local_time = Utc::now().timestamp();
+    let server_time = query_steam_server_time(http_client).await?;
+    let drift = server_time - local_time;
+    Ok((server_time, local_time, drift))
 }
 
 #[cfg(test)]
@@ -1893,6 +2502,12 @@ mod tests {
             encrypted_at_rest: true,
             created_at_unix: Some(0),
             updated_at_unix: Some(0),
+            revocation_code: None,
+            serial_number: None,
+            token_gid: None,
+            secret_1: None,
+            uri: None,
+            proxy_url: None,
         };
 
         let cookie = build_confirmation_cookie_header(&account, 76_561_199_441_992_970)

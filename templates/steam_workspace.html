@@ -93,8 +93,32 @@
             approvalPasteLabel: {{ i18n.steam_qr_approval_paste_label | json_encode | safe }},
             approvalPastePlaceholder: {{ i18n.steam_qr_approval_paste_placeholder | json_encode | safe }},
             approvalPasteReady: {{ i18n.steam_qr_approval_paste_ready_message | json_encode | safe }},
-            approvalPasteError: {{ i18n.steam_qr_approval_paste_error_message | json_encode | safe }}
+            approvalPasteError: {{ i18n.steam_qr_approval_paste_error_message | json_encode | safe }},
+            setupRunning: {{ i18n.steam_setup_running_message | json_encode | safe }},
+            setupConfirmTypeSms: {{ i18n.steam_setup_confirm_type_sms | json_encode | safe }},
+            setupConfirmTypeEmail: {{ i18n.steam_setup_confirm_type_email | json_encode | safe }},
+            setupPhoneHint: {{ i18n.steam_setup_confirm_phone_hint_label | json_encode | safe }},
+            removeConfirm: {{ i18n.steam_remove_confirm_prompt | json_encode | safe }},
+            removeSuccess: {{ i18n.steam_remove_success_message | json_encode | safe }},
+            removeFailed: {{ i18n.steam_remove_failed_message | json_encode | safe }},
+            statusLoading: {{ i18n.steam_status_loading_message | json_encode | safe }},
+            statusActive: {{ i18n.steam_status_state_active | json_encode | safe }},
+            statusInactive: {{ i18n.steam_status_state_inactive | json_encode | safe }},
+            exportQrWarning: {{ i18n.steam_export_qr_warning | json_encode | safe }},
+            exportQrCopied: {{ i18n.steam_export_qr_copied_message | json_encode | safe }},
+            bulkAcceptConfirm: {{ i18n.steam_bulk_accept_confirm_prompt | json_encode | safe }},
+            bulkDenyConfirm: {{ i18n.steam_bulk_deny_confirm_prompt | json_encode | safe }},
+            bulkRunning: {{ i18n.steam_bulk_action_running_message | json_encode | safe }},
+            timeCheckOk: {{ i18n.steam_time_check_ok_message | json_encode | safe }},
+            timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }}
         };
+        const SETUP_BEGIN_API = {{ steam_setup_begin_action | json_encode | safe }};
+        const SETUP_FINALIZE_API = {{ steam_setup_finalize_action | json_encode | safe }};
+        const SETUP_CANCEL_API = {{ steam_setup_cancel_action | json_encode | safe }};
+        const SETUP_TRANSFER_START_API = {{ steam_setup_transfer_start_action | json_encode | safe }};
+        const SETUP_TRANSFER_FINISH_API = {{ steam_setup_transfer_finish_action | json_encode | safe }};
+        const TIME_CHECK_API = {{ steam_time_check_api | json_encode | safe }};
+        const LANG = {{ lang | json_encode | safe }};
         let steamSnapshotInFlight = false;
         let steamApprovalsInFlight = false;
         let steamApprovalsLoadedAt = 0;
@@ -1427,6 +1451,7 @@
                     <div class="mt-3 flex flex-wrap rounded-[1rem] border border-line/80 bg-paper/88 p-1">
                         <button type="button" data-tab-button="codes" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_codes_tab_label }}</button>
                         <button type="button" data-tab-button="manage" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_manage_tab_label }}</button>
+                        <button type="button" data-tab-button="setup" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_setup_tab_label }}</button>
                         <button type="button" data-tab-button="approvals" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_approvals_tab_label }}</button>
                         <button type="button" data-tab-button="confirmations" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_confirmations_tab_label }}</button>
                         <button type="button" data-tab-button="issues" class="rounded-[0.85rem] px-3 py-2 text-sm font-medium text-ink/72 transition">{{ i18n.steam_issues_tab_label }}</button>
@@ -1638,6 +1663,28 @@
                                     </div>
                                 </details>
                                 <button type="submit" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_manual_save_button }}</button>
+                            </form>
+                        </details>
+
+                        <details class="steam-disclosure mt-3 rounded-[1rem] border border-line/80 bg-paper/88 px-3.5 py-3">
+                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                <span class="inline-flex items-center gap-2">
+                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                    <span>{{ i18n.steam_import_winauth_title }}</span>
+                                </span>
+                            </summary>
+                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_import_winauth_description }}</p>
+                            <form method="post" action="{{ steam_import_winauth_action }}" class="mt-3 space-y-3">
+                                <input type="hidden" name="lang" value="{{ lang }}">
+                                <label class="block">
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_account_name_label }}</span>
+                                    <input name="account_name" type="text" maxlength="96" placeholder="{{ i18n.steam_account_name_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                </label>
+                                <label class="block">
+                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_import_winauth_uri_label }}</span>
+                                    <input name="uri" type="text" required placeholder="{{ i18n.steam_import_winauth_uri_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-xs text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                </label>
+                                <button type="submit" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_import_winauth_button }}</button>
                             </form>
                         </details>
                     </article>
@@ -1859,6 +1906,64 @@
                                                 <button type="submit" class="rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_materials_save_button }}</button>
                                             </form>
                                         </details>
+
+                                        <details class="steam-disclosure rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3">
+                                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_export_qr_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_export_qr_warning }}</p>
+                                            <button type="button" data-export-qr="{{ account.id }}" class="mt-3 rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_export_qr_generate_button }}</button>
+                                            <div id="qr-result-{{ account.id }}" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3"></div>
+                                        </details>
+
+                                        {% if account.has_session_tokens %}
+                                        <details class="steam-disclosure rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3">
+                                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_status_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <button type="button" data-status-check="{{ account.id }}" class="mt-3 rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_status_check_button }}</button>
+                                            <div id="status-result-{{ account.id }}" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
+                                        </details>
+                                        {% endif %}
+
+                                        <details class="steam-disclosure rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3">
+                                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_proxy_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_proxy_hint }}</p>
+                                            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                                                <input id="proxy-url-{{ account.id }}" type="text" value="{{ account.proxy_url | default(value='') }}" placeholder="{{ i18n.steam_proxy_url_placeholder }}" class="min-w-0 flex-1 rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                <button type="button" data-save-proxy="{{ account.id }}" class="rounded-[1rem] border border-steam/20 bg-steamMist px-4 py-2.5 text-sm font-medium text-steam transition hover:bg-[#d9e6ee]">{{ i18n.steam_proxy_save_button }}</button>
+                                            </div>
+                                        </details>
+
+                                        {% if account.has_revocation_code %}
+                                        <details class="steam-disclosure rounded-[1rem] border border-peach/30 bg-[#fdf5f2] px-3.5 py-3">
+                                            <summary class="cursor-pointer text-sm font-medium text-[#98675f]">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_remove_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <p class="mt-2 text-sm leading-6 text-[#98675f]/80">{{ i18n.steam_remove_warning }}</p>
+                                            <div class="mt-3 space-y-3">
+                                                <label class="block">
+                                                    <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_remove_revocation_code_label }}</span>
+                                                    <input id="revocation-code-{{ account.id }}" type="text" maxlength="10" placeholder="{{ i18n.steam_remove_revocation_code_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                </label>
+                                                <button type="button" data-remove-auth="{{ account.id }}" class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_remove_button }}</button>
+                                            </div>
+                                        </details>
+                                        {% endif %}
                                     </div>
                                     {% else %}
                                     <div class="mt-3 rounded-[1rem] border border-dashed border-line bg-paper/80 px-3.5 py-3 text-sm leading-6 text-ink/58">
@@ -1877,6 +1982,90 @@
                         </div>
                     </article>
                 </div>
+            </section>
+
+            <section data-tab-panel="setup">
+                <article class="paper-shadow mx-auto max-w-2xl rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
+                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_setup_tab_label }}</p>
+                    <h2 class="mt-1.5 font-display text-xl font-semibold sm:text-2xl">{{ i18n.steam_setup_title }}</h2>
+                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_setup_description }}</p>
+
+                    <!-- Step 1: Login -->
+                    <div id="setup-step-login" class="mt-4">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_login_title }}</h3>
+                        <p class="mt-1 text-sm leading-6 text-ink/66">{{ i18n.steam_setup_step_login_description }}</p>
+                        <div class="mt-3 space-y-3">
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_setup_username_label }}</span>
+                                <input id="setup-username" type="text" required autocomplete="username" placeholder="{{ i18n.steam_setup_username_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_setup_password_label }}</span>
+                                <input id="setup-password" type="password" required autocomplete="current-password" placeholder="{{ i18n.steam_setup_password_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <button id="setup-begin-btn" type="button" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_setup_begin_button }}</button>
+                        </div>
+                        <div id="setup-login-status" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm text-ink/62"></div>
+                    </div>
+
+                    <!-- Step 2a: Confirm code (new authenticator) -->
+                    <div id="setup-step-confirm" class="mt-4 hidden">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_confirm_title }}</h3>
+                        <p class="mt-1 text-sm leading-6 text-ink/66">{{ i18n.steam_setup_step_confirm_description }}</p>
+                        <div id="setup-phone-hint" class="mt-2 rounded-[1rem] border border-sage/30 bg-mint px-3.5 py-2.5 text-sm text-sageDeep"></div>
+                        <div class="mt-3 space-y-3">
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_setup_confirm_code_label }}</span>
+                                <input id="setup-confirm-code" type="text" required maxlength="10" placeholder="{{ i18n.steam_setup_confirm_code_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <div class="flex gap-2">
+                                <button id="setup-finalize-btn" type="button" class="flex-1 rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_setup_finalize_button }}</button>
+                                <button id="setup-cancel-btn-confirm" type="button" class="rounded-[1rem] border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink/72 transition hover:bg-paper">{{ i18n.steam_setup_cancel_button }}</button>
+                            </div>
+                        </div>
+                        <div id="setup-confirm-status" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm text-ink/62"></div>
+                    </div>
+
+                    <!-- Step 2b: Transfer (existing authenticator) -->
+                    <div id="setup-step-transfer" class="mt-4 hidden">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_transfer_title }}</h3>
+                        <p class="mt-1 text-sm leading-6 text-ink/66">{{ i18n.steam_setup_step_transfer_description }}</p>
+                        <div class="mt-3 space-y-3">
+                            <button id="setup-transfer-start-btn" type="button" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_setup_transfer_button }}</button>
+                        </div>
+
+                        <div id="setup-transfer-sms-section" class="mt-4 hidden">
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_setup_transfer_sms_label }}</span>
+                                <input id="setup-transfer-sms" type="text" required maxlength="10" placeholder="{{ i18n.steam_setup_transfer_sms_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <div class="mt-3 flex gap-2">
+                                <button id="setup-transfer-finish-btn" type="button" class="flex-1 rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_setup_finalize_button }}</button>
+                                <button id="setup-cancel-btn-transfer" type="button" class="rounded-[1rem] border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink/72 transition hover:bg-paper">{{ i18n.steam_setup_cancel_button }}</button>
+                            </div>
+                        </div>
+                        <div id="setup-transfer-status" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm text-ink/62"></div>
+                    </div>
+
+                    <!-- Step 3: Revocation code -->
+                    <div id="setup-step-revocation" class="mt-4 hidden">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_revocation_title }}</h3>
+                        <div class="mt-2 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm leading-6 text-[#98675f]">{{ i18n.steam_setup_step_revocation_warning }}</div>
+                        <div id="setup-revocation-code" class="mt-3 rounded-[1rem] border border-line/80 bg-paper px-4 py-3 font-mono text-base font-semibold text-ink select-all"></div>
+                        <label class="mt-3 flex items-center gap-2 text-sm text-ink/72">
+                            <input id="setup-revocation-checkbox" type="checkbox" class="rounded border-line">
+                            <span>{{ i18n.steam_setup_revocation_saved_checkbox }}</span>
+                        </label>
+                        <button id="setup-revocation-continue-btn" type="button" disabled class="mt-3 w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_setup_continue_button }}</button>
+                    </div>
+
+                    <!-- Step 4: Complete -->
+                    <div id="setup-step-complete" class="mt-4 hidden">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_complete_title }}</h3>
+                        <p class="mt-1 text-sm leading-6 text-ink/66">{{ i18n.steam_setup_step_complete_description }}</p>
+                        <button id="setup-go-to-codes-btn" type="button" class="mt-3 w-full rounded-[1rem] bg-sage px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sageDeep">{{ i18n.steam_setup_go_to_codes_button }}</button>
+                    </div>
+                </article>
             </section>
 
             <section data-tab-panel="approvals">
@@ -2078,8 +2267,17 @@
                     </article>
 
                     <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_time_source_title }}</p>
+                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.steam_time_check_title }}</p>
                         <p class="mt-3 text-sm leading-7 text-ink/72">{{ i18n.steam_time_source_description }}</p>
+                        <button id="time-check-btn" type="button" class="mt-3 rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_time_check_button }}</button>
+                        <div id="time-check-result" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm">
+                            <div class="space-y-1">
+                                <div><span class="text-ink/52">{{ i18n.steam_time_check_server_label }}:</span> <span id="time-check-server" class="font-mono text-ink"></span></div>
+                                <div><span class="text-ink/52">{{ i18n.steam_time_check_local_label }}:</span> <span id="time-check-local" class="font-mono text-ink"></span></div>
+                                <div><span class="text-ink/52">{{ i18n.steam_time_check_drift_label }}:</span> <span id="time-check-drift" class="font-mono font-semibold"></span></div>
+                            </div>
+                            <p id="time-check-verdict" class="mt-2 text-sm font-medium"></p>
+                        </div>
                     </article>
 
                     <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
@@ -2095,5 +2293,323 @@
             </section>
         </div>
     </main>
+    <script>
+    (function() {
+        // ----------- Setup wizard -----------
+        const setupSteps = {
+            login: document.getElementById("setup-step-login"),
+            confirm: document.getElementById("setup-step-confirm"),
+            transfer: document.getElementById("setup-step-transfer"),
+            revocation: document.getElementById("setup-step-revocation"),
+            complete: document.getElementById("setup-step-complete"),
+        };
+        function showSetupStep(step) {
+            Object.values(setupSteps).forEach(el => { if (el) el.classList.add("hidden"); });
+            if (setupSteps[step]) setupSteps[step].classList.remove("hidden");
+        }
+        function showStatus(el, msg, isError) {
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.remove("hidden", "border-peach/35", "bg-[#fbefec]", "text-[#98675f]", "border-sage/30", "bg-mint", "text-sageDeep");
+            if (isError) {
+                el.classList.add("border-peach/35", "bg-[#fbefec]", "text-[#98675f]");
+            } else {
+                el.classList.add("border-sage/30", "bg-mint", "text-sageDeep");
+            }
+        }
+        async function jsonPost(url, body) {
+            const resp = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            return resp.json();
+        }
+
+        const beginBtn = document.getElementById("setup-begin-btn");
+        if (beginBtn) {
+            beginBtn.addEventListener("click", async () => {
+                const username = document.getElementById("setup-username")?.value?.trim();
+                const password = document.getElementById("setup-password")?.value;
+                if (!username || !password) return;
+                const statusEl = document.getElementById("setup-login-status");
+                beginBtn.disabled = true;
+                showStatus(statusEl, I18N.setupRunning, false);
+                try {
+                    const data = await jsonPost(SETUP_BEGIN_API, { steam_username: username, steam_password: password, lang: LANG });
+                    if (data.ok && data.step === "confirm") {
+                        const hintEl = document.getElementById("setup-phone-hint");
+                        if (hintEl) hintEl.textContent = I18N.setupPhoneHint + ": " + (data.phone_hint || "") + " (" + (data.confirm_type === "sms" ? I18N.setupConfirmTypeSms : I18N.setupConfirmTypeEmail) + ")";
+                        showSetupStep("confirm");
+                    } else if (data.ok && data.step === "transfer") {
+                        showSetupStep("transfer");
+                    } else {
+                        showStatus(statusEl, data.message || "Error", true);
+                    }
+                } catch (e) {
+                    showStatus(statusEl, e.message, true);
+                } finally {
+                    beginBtn.disabled = false;
+                }
+            });
+        }
+
+        const finalizeBtn = document.getElementById("setup-finalize-btn");
+        if (finalizeBtn) {
+            finalizeBtn.addEventListener("click", async () => {
+                const code = document.getElementById("setup-confirm-code")?.value?.trim();
+                if (!code) return;
+                const statusEl = document.getElementById("setup-confirm-status");
+                finalizeBtn.disabled = true;
+                showStatus(statusEl, I18N.setupRunning, false);
+                try {
+                    const data = await jsonPost(SETUP_FINALIZE_API, { confirm_code: code, lang: LANG });
+                    if (data.ok && data.step === "complete") {
+                        document.getElementById("setup-revocation-code").textContent = data.revocation_code || "";
+                        showSetupStep("revocation");
+                    } else {
+                        showStatus(statusEl, data.message || "Error", true);
+                    }
+                } catch (e) {
+                    showStatus(statusEl, e.message, true);
+                } finally {
+                    finalizeBtn.disabled = false;
+                }
+            });
+        }
+
+        const transferStartBtn = document.getElementById("setup-transfer-start-btn");
+        if (transferStartBtn) {
+            transferStartBtn.addEventListener("click", async () => {
+                const statusEl = document.getElementById("setup-transfer-status");
+                transferStartBtn.disabled = true;
+                showStatus(statusEl, I18N.setupRunning, false);
+                try {
+                    const data = await jsonPost(SETUP_TRANSFER_START_API, { lang: LANG });
+                    if (data.ok && data.step === "transfer_sms") {
+                        document.getElementById("setup-transfer-sms-section")?.classList.remove("hidden");
+                        transferStartBtn.classList.add("hidden");
+                        statusEl.classList.add("hidden");
+                    } else {
+                        showStatus(statusEl, data.message || "Error", true);
+                    }
+                } catch (e) {
+                    showStatus(statusEl, e.message, true);
+                } finally {
+                    transferStartBtn.disabled = false;
+                }
+            });
+        }
+
+        const transferFinishBtn = document.getElementById("setup-transfer-finish-btn");
+        if (transferFinishBtn) {
+            transferFinishBtn.addEventListener("click", async () => {
+                const sms = document.getElementById("setup-transfer-sms")?.value?.trim();
+                if (!sms) return;
+                const statusEl = document.getElementById("setup-transfer-status");
+                transferFinishBtn.disabled = true;
+                showStatus(statusEl, I18N.setupRunning, false);
+                try {
+                    const data = await jsonPost(SETUP_TRANSFER_FINISH_API, { sms_code: sms, lang: LANG });
+                    if (data.ok && data.step === "complete") {
+                        document.getElementById("setup-revocation-code").textContent = data.revocation_code || "";
+                        showSetupStep("revocation");
+                    } else {
+                        showStatus(statusEl, data.message || "Error", true);
+                    }
+                } catch (e) {
+                    showStatus(statusEl, e.message, true);
+                } finally {
+                    transferFinishBtn.disabled = false;
+                }
+            });
+        }
+
+        // Cancel buttons
+        document.querySelectorAll("#setup-cancel-btn-confirm, #setup-cancel-btn-transfer").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                try { await jsonPost(SETUP_CANCEL_API, { lang: LANG }); } catch (_) {}
+                showSetupStep("login");
+            });
+        });
+
+        // Revocation checkbox + continue
+        const revCheckbox = document.getElementById("setup-revocation-checkbox");
+        const revContinueBtn = document.getElementById("setup-revocation-continue-btn");
+        if (revCheckbox && revContinueBtn) {
+            revCheckbox.addEventListener("change", () => { revContinueBtn.disabled = !revCheckbox.checked; });
+            revContinueBtn.addEventListener("click", () => { showSetupStep("complete"); });
+        }
+
+        // Go to codes
+        const goToCodesBtn = document.getElementById("setup-go-to-codes-btn");
+        if (goToCodesBtn) {
+            goToCodesBtn.addEventListener("click", () => {
+                const codesTab = document.querySelector("[data-tab-button='codes']");
+                if (codesTab) codesTab.click();
+            });
+        }
+
+        // ----------- Time check -----------
+        const timeCheckBtn = document.getElementById("time-check-btn");
+        if (timeCheckBtn) {
+            timeCheckBtn.addEventListener("click", async () => {
+                timeCheckBtn.disabled = true;
+                try {
+                    const resp = await fetch(TIME_CHECK_API + "?lang=" + LANG);
+                    const data = await resp.json();
+                    const resultEl = document.getElementById("time-check-result");
+                    if (data.ok) {
+                        document.getElementById("time-check-server").textContent = data.server_time;
+                        document.getElementById("time-check-local").textContent = data.local_time;
+                        const driftEl = document.getElementById("time-check-drift");
+                        driftEl.textContent = (data.drift_seconds >= 0 ? "+" : "") + data.drift_seconds + "s";
+                        const verdictEl = document.getElementById("time-check-verdict");
+                        if (Math.abs(data.drift_seconds) <= 30) {
+                            driftEl.classList.remove("text-[#98675f]");
+                            driftEl.classList.add("text-sageDeep");
+                            verdictEl.textContent = I18N.timeCheckOk;
+                            verdictEl.classList.remove("text-[#98675f]");
+                            verdictEl.classList.add("text-sageDeep");
+                        } else {
+                            driftEl.classList.remove("text-sageDeep");
+                            driftEl.classList.add("text-[#98675f]");
+                            verdictEl.textContent = I18N.timeCheckWarning;
+                            verdictEl.classList.remove("text-sageDeep");
+                            verdictEl.classList.add("text-[#98675f]");
+                        }
+                        resultEl.classList.remove("hidden");
+                    }
+                } catch (_) {}
+                timeCheckBtn.disabled = false;
+            });
+        }
+
+        // ----------- Remove authenticator (in manage card modals) -----------
+        document.addEventListener("click", async (e) => {
+            const removeBtn = e.target.closest("[data-remove-auth]");
+            if (!removeBtn) return;
+            const accountId = removeBtn.dataset.removeAuth;
+            if (!confirm(I18N.removeConfirm)) return;
+            const codeInput = document.getElementById("revocation-code-" + accountId);
+            const code = codeInput?.value?.trim();
+            if (!code) return;
+            removeBtn.disabled = true;
+            try {
+                const data = await jsonPost("/platforms/steam/accounts/" + accountId + "/authenticator/remove", { revocation_code: code, lang: LANG });
+                if (data.ok) {
+                    alert(I18N.removeSuccess);
+                    window.location.reload();
+                } else {
+                    alert(data.message || I18N.removeFailed);
+                }
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                removeBtn.disabled = false;
+            }
+        });
+
+        // ----------- 2FA status query -----------
+        document.addEventListener("click", async (e) => {
+            const statusBtn = e.target.closest("[data-status-check]");
+            if (!statusBtn) return;
+            const accountId = statusBtn.dataset.statusCheck;
+            const resultEl = document.getElementById("status-result-" + accountId);
+            if (!resultEl) return;
+            statusBtn.disabled = true;
+            resultEl.textContent = I18N.statusLoading;
+            resultEl.classList.remove("hidden");
+            try {
+                const resp = await fetch("/api/platforms/steam/accounts/" + accountId + "/status?lang=" + LANG);
+                const data = await resp.json();
+                if (data.ok && data.status) {
+                    const s = data.status;
+                    resultEl.innerHTML = "<div class='space-y-1 text-sm'>"
+                        + "<div><b>State:</b> " + (s.state > 0 ? I18N.statusActive : I18N.statusInactive) + "</div>"
+                        + "<div><b>Device:</b> " + (s.device_identifier || "—") + "</div>"
+                        + "<div><b>Revocation attempts:</b> " + s.revocation_attempts_remaining + "</div>"
+                        + "<div><b>Version:</b> " + s.version + "</div>"
+                        + "</div>";
+                } else {
+                    resultEl.textContent = data.message || "Error";
+                }
+            } catch (err) {
+                resultEl.textContent = err.message;
+            }
+            statusBtn.disabled = false;
+        });
+
+        // ----------- QR export -----------
+        document.addEventListener("click", async (e) => {
+            const qrBtn = e.target.closest("[data-export-qr]");
+            if (!qrBtn) return;
+            const accountId = qrBtn.dataset.exportQr;
+            const resultEl = document.getElementById("qr-result-" + accountId);
+            if (!resultEl) return;
+            qrBtn.disabled = true;
+            try {
+                const resp = await fetch("/api/platforms/steam/accounts/" + accountId + "/export/qr?lang=" + LANG);
+                const data = await resp.json();
+                if (data.ok) {
+                    resultEl.innerHTML = "<div class='flex flex-col items-center gap-3'>"
+                        + "<div class='w-48 h-48'>" + data.svg + "</div>"
+                        + "<input type='text' readonly value='" + data.uri.replace(/'/g, "&#39;") + "' class='w-full rounded-[1rem] border border-line bg-white px-3 py-2 font-mono text-xs text-ink select-all'>"
+                        + "</div>";
+                    resultEl.classList.remove("hidden");
+                } else {
+                    resultEl.textContent = data.message || "Error";
+                    resultEl.classList.remove("hidden");
+                }
+            } catch (err) {
+                resultEl.textContent = err.message;
+                resultEl.classList.remove("hidden");
+            }
+            qrBtn.disabled = false;
+        });
+
+        // ----------- Proxy save -----------
+        document.addEventListener("click", async (e) => {
+            const proxyBtn = e.target.closest("[data-save-proxy]");
+            if (!proxyBtn) return;
+            const accountId = proxyBtn.dataset.saveProxy;
+            const proxyInput = document.getElementById("proxy-url-" + accountId);
+            if (!proxyInput) return;
+            proxyBtn.disabled = true;
+            try {
+                const data = await jsonPost("/platforms/steam/accounts/" + accountId + "/proxy", { proxy_url: proxyInput.value.trim(), lang: LANG });
+                alert(data.message || (data.ok ? "OK" : "Error"));
+            } catch (err) {
+                alert(err.message);
+            }
+            proxyBtn.disabled = false;
+        });
+
+        // ----------- Bulk confirmations -----------
+        document.addEventListener("click", async (e) => {
+            const bulkBtn = e.target.closest("[data-bulk-accept], [data-bulk-deny]");
+            if (!bulkBtn) return;
+            const isAccept = bulkBtn.hasAttribute("data-bulk-accept");
+            const accountId = isAccept ? bulkBtn.dataset.bulkAccept : bulkBtn.dataset.bulkDeny;
+            const prompt = isAccept ? I18N.bulkAcceptConfirm : I18N.bulkDenyConfirm;
+            if (!confirm(prompt)) return;
+            bulkBtn.disabled = true;
+            bulkBtn.textContent = I18N.bulkRunning;
+            try {
+                const action = isAccept ? "accept-all" : "deny-all";
+                const data = await jsonPost("/api/platforms/steam/accounts/" + accountId + "/confirmations/" + action, { lang: LANG });
+                if (data.ok) {
+                    bulkBtn.textContent = data.message;
+                    setTimeout(() => { syncSteamConfirmations(); }, 1000);
+                } else {
+                    alert(data.message || "Error");
+                }
+            } catch (err) {
+                alert(err.message);
+            }
+            bulkBtn.disabled = false;
+        });
+    })();
+    </script>
 </body>
 </html>

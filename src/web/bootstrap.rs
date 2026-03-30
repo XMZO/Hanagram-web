@@ -85,6 +85,7 @@ pub(crate) async fn run() -> Result<()> {
         passkey_registrations,
         passkey_authentications,
         recovery_notices,
+        steam_setups: Default::default(),
         unlock_cache,
         user_keys,
         session_login_throttle,

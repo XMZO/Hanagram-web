@@ -34,6 +34,9 @@ struct SteamAccountView {
     rename_action: Option<String>,
     delete_action: Option<String>,
     login_action: Option<String>,
+    has_revocation_code: bool,
+    has_proxy: bool,
+    proxy_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,6 +83,8 @@ struct SteamConfirmationAccountView {
     confirmation_count: usize,
     error: Option<String>,
     confirmations: Vec<SteamConfirmationView>,
+    bulk_accept_action: String,
+    bulk_deny_action: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -193,8 +198,47 @@ struct SteamQrApprovalForm {
     lang: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct SteamSetupBeginForm {
+    steam_username: String,
+    steam_password: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamSetupFinalizeForm {
+    confirm_code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamSetupTransferFinishForm {
+    sms_code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamRemoveAuthenticatorForm {
+    revocation_code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamWinAuthImportForm {
+    uri: String,
+    account_name: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamProxyForm {
+    proxy_url: String,
+    lang: Option<String>,
+}
+
 const STEAM_CODES_TAB_ID: &str = "codes";
 const STEAM_MANAGE_TAB_ID: &str = "manage";
+const STEAM_SETUP_TAB_ID: &str = "setup";
 const STEAM_APPROVALS_TAB_ID: &str = "approvals";
 const STEAM_CONFIRMATIONS_TAB_ID: &str = "confirmations";
 const STEAM_ISSUES_TAB_ID: &str = "issues";
@@ -216,6 +260,7 @@ fn steam_accounts_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
 fn normalize_workspace_tab(tab: Option<&str>) -> &'static str {
     match tab {
         Some(STEAM_MANAGE_TAB_ID) => STEAM_MANAGE_TAB_ID,
+        Some(STEAM_SETUP_TAB_ID) => STEAM_SETUP_TAB_ID,
         Some(STEAM_APPROVALS_TAB_ID) => STEAM_APPROVALS_TAB_ID,
         Some(STEAM_CONFIRMATIONS_TAB_ID) => STEAM_CONFIRMATIONS_TAB_ID,
         Some(STEAM_ISSUES_TAB_ID) => STEAM_ISSUES_TAB_ID,
@@ -347,6 +392,14 @@ fn approval_deny_action(account_id: &str, client_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/approvals/{client_id}/deny")
 }
 
+fn bulk_accept_action(account_id: &str) -> String {
+    format!("/api/platforms/steam/accounts/{account_id}/confirmations/accept-all")
+}
+
+fn bulk_deny_action(account_id: &str) -> String {
+    format!("/api/platforms/steam/accounts/{account_id}/confirmations/deny-all")
+}
+
 async fn build_workspace_snapshot(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
@@ -453,6 +506,12 @@ async fn build_workspace_snapshot(
             rename_action,
             delete_action,
             login_action,
+            has_revocation_code: account.revocation_code.is_some(),
+            has_proxy: account
+                .proxy_url
+                .as_deref()
+                .map_or(false, |v| !v.trim().is_empty()),
+            proxy_url: account.proxy_url.clone(),
         });
     }
 
@@ -541,7 +600,10 @@ async fn build_confirmation_snapshot(
                     })
                     .collect::<Vec<_>>();
                 total_confirmations += confirmation_views.len();
+                let aid = account.id.clone();
                 account_views.push(SteamConfirmationAccountView {
+                    bulk_accept_action: bulk_accept_action(&aid),
+                    bulk_deny_action: bulk_deny_action(&aid),
                     account_id: account.id,
                     account_name: account.account_name,
                     steam_id: account.steam_id.map(|value| value.to_string()),
@@ -591,7 +653,10 @@ async fn build_confirmation_snapshot(
                                 })
                                 .collect::<Vec<_>>();
                             total_confirmations += confirmation_views.len();
+                            let aid = refreshed.id.clone();
                             account_views.push(SteamConfirmationAccountView {
+                                bulk_accept_action: bulk_accept_action(&aid),
+                                bulk_deny_action: bulk_deny_action(&aid),
                                 account_id: refreshed.id,
                                 account_name: refreshed.account_name,
                                 steam_id: refreshed.steam_id.map(|value| value.to_string()),
@@ -602,7 +667,10 @@ async fn build_confirmation_snapshot(
                             continue;
                         }
                         Err(retry_error) => {
+                            let aid = refreshed.id.clone();
                             account_views.push(SteamConfirmationAccountView {
+                                bulk_accept_action: bulk_accept_action(&aid),
+                                bulk_deny_action: bulk_deny_action(&aid),
                                 account_id: refreshed.id,
                                 account_name: refreshed.account_name,
                                 steam_id: refreshed.steam_id.map(|value| value.to_string()),
@@ -615,7 +683,10 @@ async fn build_confirmation_snapshot(
                     }
                 }
 
+                let aid = account.id.clone();
                 account_views.push(SteamConfirmationAccountView {
+                    bulk_accept_action: bulk_accept_action(&aid),
+                    bulk_deny_action: bulk_deny_action(&aid),
                     account_id: account.id,
                     account_name: account.account_name,
                     steam_id: account.steam_id.map(|value| value.to_string()),
@@ -853,6 +924,51 @@ pub(crate) fn routes() -> Router<AppState> {
             "/platforms/steam/accounts/{account_id}/approvals/{client_id}/deny",
             post(deny_login_approval_handler),
         )
+        // Setup / Link authenticator
+        .route(STEAM_SETUP_BEGIN_PATH, post(setup_begin_handler))
+        .route(STEAM_SETUP_FINALIZE_PATH, post(setup_finalize_handler))
+        .route(STEAM_SETUP_CANCEL_PATH, post(setup_cancel_handler))
+        .route(
+            STEAM_SETUP_TRANSFER_START_PATH,
+            post(setup_transfer_start_handler),
+        )
+        .route(
+            STEAM_SETUP_TRANSFER_FINISH_PATH,
+            post(setup_transfer_finish_handler),
+        )
+        // Remove authenticator
+        .route(
+            "/platforms/steam/accounts/{account_id}/authenticator/remove",
+            post(remove_authenticator_handler),
+        )
+        // 2FA status query
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/status",
+            get(account_status_handler),
+        )
+        // QR export
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/export/qr",
+            get(account_export_qr_handler),
+        )
+        // WinAuth import
+        .route(STEAM_IMPORT_WINAUTH_PATH, post(import_winauth_handler))
+        // Bulk confirmations
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/confirmations/accept-all",
+            post(bulk_accept_confirmations_handler),
+        )
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/confirmations/deny-all",
+            post(bulk_deny_confirmations_handler),
+        )
+        // Proxy settings
+        .route(
+            "/platforms/steam/accounts/{account_id}/proxy",
+            post(account_proxy_handler),
+        )
+        // Time sync check
+        .route(STEAM_TIME_CHECK_API_PATH, get(time_check_handler))
 }
 
 pub(crate) async fn render_workspace_page(
@@ -944,6 +1060,22 @@ pub(crate) async fn render_workspace_page(
     context.insert("issue_count", &snapshot.issue_count);
     context.insert("approval_ready_accounts", &approval_ready_accounts);
     context.insert("snapshot", &snapshot);
+    context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+    context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
+    context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
+    context.insert(
+        "steam_setup_transfer_start_action",
+        STEAM_SETUP_TRANSFER_START_PATH,
+    );
+    context.insert(
+        "steam_setup_transfer_finish_action",
+        STEAM_SETUP_TRANSFER_FINISH_PATH,
+    );
+    context.insert(
+        "steam_import_winauth_action",
+        &format!("{STEAM_IMPORT_WINAUTH_PATH}?lang={}", language.code()),
+    );
+    context.insert("steam_time_check_api", STEAM_TIME_CHECK_API_PATH);
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "steam_workspace.html", &context)
@@ -2395,6 +2527,1247 @@ async fn confirmation_action_handler(
                         .steam_confirmation_action_failed_message
                         .to_owned(),
                 }),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Setup / Link authenticator handlers
+// ---------------------------------------------------------------------------
+
+async fn setup_begin_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupBeginForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.steam_username.trim().is_empty() || form.steam_password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_login_missing_username_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(_master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    // Clear any previous setup for this user.
+    {
+        let mut setups = app_state.steam_setups.write().await;
+        setups.retain(|_, pending| pending.user_id != authenticated.user.id);
+    }
+
+    let username = form.steam_username.clone();
+    let password = form.steam_password.clone();
+    match steam_platform::setup_login_and_link(username, password).await {
+        Ok((steam_username, outcome)) => match outcome {
+            steam_platform::SetupLinkOutcome::Linked {
+                vendor_account,
+                server_time,
+                phone_hint,
+                confirm_type,
+                linker,
+            } => {
+                let setup_id = Uuid::new_v4().to_string();
+                let pending = PendingSteamSetup {
+                    user_id: authenticated.user.id.clone(),
+                    auth_session_id: authenticated.auth_session.id.clone(),
+                    created_at: Utc::now().timestamp(),
+                    stage: SteamSetupStage::LinkedAwaitingConfirmation {
+                        linker,
+                        vendor_account,
+                        server_time,
+                        phone_hint: phone_hint.clone(),
+                        confirm_type: confirm_type.clone(),
+                        steam_username,
+                    },
+                };
+                app_state
+                    .steam_setups
+                    .write()
+                    .await
+                    .insert(setup_id.clone(), pending);
+
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "confirm",
+                    "setup_id": setup_id,
+                    "phone_hint": phone_hint,
+                    "confirm_type": confirm_type
+                }))
+                .into_response()
+            }
+            steam_platform::SetupLinkOutcome::AlreadyPresent { linker } => {
+                let setup_id = Uuid::new_v4().to_string();
+                let pending = PendingSteamSetup {
+                    user_id: authenticated.user.id.clone(),
+                    auth_session_id: authenticated.auth_session.id.clone(),
+                    created_at: Utc::now().timestamp(),
+                    stage: SteamSetupStage::TransferAwaitingSms {
+                        linker,
+                        steam_username: form.steam_username.clone(),
+                    },
+                };
+                app_state
+                    .steam_setups
+                    .write()
+                    .await
+                    .insert(setup_id.clone(), pending);
+
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "transfer",
+                    "setup_id": setup_id
+                }))
+                .into_response()
+            }
+        },
+        Err(error) => {
+            warn!("Steam setup begin failed: {error}");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_setup_link_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn setup_finalize_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupFinalizeForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.confirm_code.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_missing_credentials_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    // Find the pending setup for this user.
+    let setup_id = {
+        let setups = app_state.steam_setups.read().await;
+        setups
+            .iter()
+            .find(|(_, pending)| pending.user_id == authenticated.user.id)
+            .map(|(id, _)| id.clone())
+    };
+
+    let Some(setup_id) = setup_id else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    // Take the setup out so we can mutate it.
+    let pending = {
+        let mut setups = app_state.steam_setups.write().await;
+        match setups.remove(&setup_id) {
+            Some(p) => p,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_setup_no_pending_message
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match pending.stage {
+        SteamSetupStage::LinkedAwaitingConfirmation {
+            mut linker,
+            mut vendor_account,
+            server_time,
+            steam_username,
+            ..
+        } => {
+            let confirm_code = form.confirm_code.trim().to_owned();
+            let username = steam_username.clone();
+
+            let finalize_result = tokio::task::spawn_blocking(move || {
+                steam_platform::finalize_authenticator_link(
+                    &mut linker,
+                    &mut vendor_account,
+                    server_time,
+                    confirm_code,
+                )?;
+                Ok::<_, anyhow::Error>(vendor_account)
+            })
+            .await;
+
+            match finalize_result {
+                Ok(Ok(finalized_account)) => {
+                    let steam_root =
+                        steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+                    match steam_platform::save_setup_account(
+                        &steam_root,
+                        master_key.as_ref().as_slice(),
+                        &finalized_account,
+                        &username,
+                        &build_dummy_tokens_for_setup(),
+                    )
+                    .await
+                    {
+                        Ok(saved) => {
+                            let revocation_code = saved
+                                .revocation_code
+                                .clone()
+                                .unwrap_or_default();
+                            let account_id = saved.id.clone();
+
+                            // Store completion state.
+                            let complete = PendingSteamSetup {
+                                user_id: authenticated.user.id.clone(),
+                                auth_session_id: authenticated.auth_session.id.clone(),
+                                created_at: Utc::now().timestamp(),
+                                stage: SteamSetupStage::Complete {
+                                    revocation_code: revocation_code.clone(),
+                                    account_id: account_id.clone(),
+                                },
+                            };
+                            app_state
+                                .steam_setups
+                                .write()
+                                .await
+                                .insert(setup_id, complete);
+
+                            Json(serde_json::json!({
+                                "ok": true,
+                                "step": "complete",
+                                "revocation_code": revocation_code,
+                                "account_id": account_id
+                            }))
+                            .into_response()
+                        }
+                        Err(error) => {
+                            warn!("Failed saving linked Steam account: {error}");
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::json!({
+                                    "ok": false,
+                                    "message": translations.steam_setup_save_failed_message
+                                })),
+                            )
+                                .into_response()
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    warn!("Steam setup finalize failed: {error}");
+                    let msg = if error.to_string().contains("bad_sms_code") {
+                        translations.steam_setup_bad_sms_code_message.to_owned()
+                    } else {
+                        format!(
+                            "{}: {error}",
+                            translations.steam_setup_finalize_failed_message
+                        )
+                    };
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                    )
+                        .into_response()
+                }
+                Err(join_error) => {
+                    warn!("Steam setup finalize task panicked: {join_error}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_setup_finalize_failed_message
+                        })),
+                    )
+                        .into_response()
+                }
+            }
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response(),
+    }
+}
+
+fn build_dummy_tokens_for_setup() -> steamguard::token::Tokens {
+    steamguard::token::Tokens::new(
+        steamguard::token::Jwt::from(String::new()),
+        steamguard::token::Jwt::from(String::new()),
+    )
+}
+
+async fn setup_transfer_start_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    let setup_id = {
+        let setups = app_state.steam_setups.read().await;
+        setups
+            .iter()
+            .find(|(_, pending)| pending.user_id == authenticated.user.id)
+            .map(|(id, _)| id.clone())
+    };
+
+    let Some(setup_id) = setup_id else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    let pending = {
+        let mut setups = app_state.steam_setups.write().await;
+        match setups.remove(&setup_id) {
+            Some(p) => p,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_setup_no_pending_message
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match pending.stage {
+        SteamSetupStage::TransferAwaitingSms {
+            mut linker,
+            steam_username,
+        } => {
+            let username = steam_username.clone();
+
+            let result = tokio::task::spawn_blocking(move || {
+                steam_platform::begin_authenticator_transfer(&mut linker)?;
+                Ok::<_, anyhow::Error>(linker)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(linker_back)) => {
+                    let ready = PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::TransferAwaitingSms {
+                            linker: linker_back,
+                            steam_username: username,
+                        },
+                    };
+                    app_state
+                        .steam_setups
+                        .write()
+                        .await
+                        .insert(setup_id, ready);
+
+                    Json(serde_json::json!({
+                        "ok": true,
+                        "step": "transfer_sms"
+                    }))
+                    .into_response()
+                }
+                Ok(Err(error)) => {
+                    warn!("Steam transfer start failed: {error}");
+                    let msg = if error.to_string().contains("no_phone") {
+                        translations
+                            .steam_setup_no_phone_message
+                            .to_owned()
+                    } else {
+                        format!(
+                            "{}: {error}",
+                            translations.steam_setup_transfer_failed_message
+                        )
+                    };
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                    )
+                        .into_response()
+                }
+                Err(join_error) => {
+                    warn!("Steam transfer start panicked: {join_error}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_setup_transfer_failed_message
+                        })),
+                    )
+                        .into_response()
+                }
+            }
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn setup_transfer_finish_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupTransferFinishForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.sms_code.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_missing_credentials_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let setup_id = {
+        let setups = app_state.steam_setups.read().await;
+        setups
+            .iter()
+            .find(|(_, pending)| pending.user_id == authenticated.user.id)
+            .map(|(id, _)| id.clone())
+    };
+
+    let Some(setup_id) = setup_id else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    let pending = {
+        let mut setups = app_state.steam_setups.write().await;
+        match setups.remove(&setup_id) {
+            Some(p) => p,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_setup_no_pending_message
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match pending.stage {
+        SteamSetupStage::TransferAwaitingSms {
+            mut linker,
+            steam_username,
+        } => {
+            let sms_code = form.sms_code.trim().to_owned();
+            let username = steam_username.clone();
+
+            let result = tokio::task::spawn_blocking(move || {
+                steam_platform::finish_authenticator_transfer(&mut linker, sms_code)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(vendor_account)) => {
+                    let steam_root =
+                        steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+                    match steam_platform::save_setup_account(
+                        &steam_root,
+                        master_key.as_ref().as_slice(),
+                        &vendor_account,
+                        &username,
+                        &build_dummy_tokens_for_setup(),
+                    )
+                    .await
+                    {
+                        Ok(saved) => {
+                            let revocation_code =
+                                saved.revocation_code.clone().unwrap_or_default();
+                            let account_id = saved.id.clone();
+
+                            let complete = PendingSteamSetup {
+                                user_id: authenticated.user.id.clone(),
+                                auth_session_id: authenticated.auth_session.id.clone(),
+                                created_at: Utc::now().timestamp(),
+                                stage: SteamSetupStage::Complete {
+                                    revocation_code: revocation_code.clone(),
+                                    account_id: account_id.clone(),
+                                },
+                            };
+                            app_state
+                                .steam_setups
+                                .write()
+                                .await
+                                .insert(setup_id, complete);
+
+                            Json(serde_json::json!({
+                                "ok": true,
+                                "step": "complete",
+                                "revocation_code": revocation_code,
+                                "account_id": account_id
+                            }))
+                            .into_response()
+                        }
+                        Err(error) => {
+                            warn!("Failed saving transferred Steam account: {error}");
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::json!({
+                                    "ok": false,
+                                    "message": translations.steam_setup_save_failed_message
+                                })),
+                            )
+                                .into_response()
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    warn!("Steam transfer finish failed: {error}");
+                    let msg = if error.to_string().contains("bad_sms_code") {
+                        translations.steam_setup_bad_sms_code_message.to_owned()
+                    } else {
+                        format!(
+                            "{}: {error}",
+                            translations.steam_setup_transfer_failed_message
+                        )
+                    };
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                    )
+                        .into_response()
+                }
+                Err(join_error) => {
+                    warn!("Steam transfer finish panicked: {join_error}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_setup_transfer_failed_message
+                        })),
+                    )
+                        .into_response()
+                }
+            }
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn setup_cancel_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    let _language = detect_language(&headers, form.lang.as_deref());
+
+    let mut setups = app_state.steam_setups.write().await;
+    let before = setups.len();
+    setups.retain(|_, pending| pending.user_id != authenticated.user.id);
+    let removed = before - setups.len();
+
+    Json(serde_json::json!({
+        "ok": true,
+        "removed": removed
+    }))
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Remove authenticator handler
+// ---------------------------------------------------------------------------
+
+async fn remove_authenticator_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamRemoveAuthenticatorForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    if form.revocation_code.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_remove_missing_code_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::remove_managed_authenticator(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+        form.revocation_code.trim().to_owned(),
+    )
+    .await
+    {
+        Ok(result) => {
+            if result.success {
+                Json(serde_json::json!({
+                    "ok": true,
+                    "message": translations.steam_remove_success_message
+                }))
+                .into_response()
+            } else {
+                let msg = if let Some(remaining) = result.attempts_remaining {
+                    format!(
+                        "{} ({})",
+                        translations.steam_remove_incorrect_code_message, remaining
+                    )
+                } else {
+                    translations.steam_remove_incorrect_code_message.to_owned()
+                };
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": msg,
+                        "attempts_remaining": result.attempts_remaining
+                    })),
+                )
+                    .into_response()
+            }
+        }
+        Err(error) => {
+            warn!(
+                "failed removing authenticator for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_remove_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 2FA status query handler
+// ---------------------------------------------------------------------------
+
+async fn account_status_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::query_two_factor_status(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok(status) => Json(serde_json::json!({
+            "ok": true,
+            "status": status
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed querying 2FA status for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_status_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QR code export handler
+// ---------------------------------------------------------------------------
+
+async fn account_export_qr_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let (accounts, _) = steam_platform::discover_accounts(
+        &steam_root,
+        Some(master_key.as_ref().as_slice()),
+    )
+    .await;
+
+    let account = match accounts.into_iter().find(|a| a.id == account_id) {
+        Some(a) => a,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_account_missing_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match steam_platform::build_steam_otpauth_uri(&account) {
+        Ok(uri) => match render_qr_svg(&uri) {
+            Ok(svg) => Json(serde_json::json!({
+                "ok": true,
+                "uri": uri,
+                "svg": svg
+            }))
+            .into_response(),
+            Err(error) => {
+                warn!("QR rendering failed for account {}: {error}", account_id);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_export_qr_failed_message
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        Err(error) => {
+            warn!(
+                "failed building otpauth URI for account {}: {error}",
+                account_id
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_export_qr_failed_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WinAuth import handler
+// ---------------------------------------------------------------------------
+
+async fn import_winauth_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Form(form): Form<SteamWinAuthImportForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.uri.trim().is_empty() {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.steam_import_winauth_invalid_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(translations.session_data_locked_message),
+            Some(STEAM_MANAGE_TAB_ID),
+        )
+        .await;
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let display_name = if form.account_name.trim().is_empty() {
+        None
+    } else {
+        Some(form.account_name.as_str())
+    };
+
+    match steam_platform::import_winauth_uri(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &form.uri,
+        display_name,
+    )
+    .await
+    {
+        Ok(_) => {
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::success(translations.steam_import_winauth_success_message),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+        Err(error) => {
+            warn!("WinAuth import failed: {error}");
+            redirect_with_workspace_banner(
+                &app_state,
+                &headers,
+                PageBanner::error(&format!(
+                    "{}: {error}",
+                    translations.steam_import_winauth_failed_message
+                )),
+                Some(STEAM_MANAGE_TAB_ID),
+            )
+            .await
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk confirmation handlers
+// ---------------------------------------------------------------------------
+
+async fn bulk_accept_confirmations_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    bulk_confirmation_action(
+        &app_state,
+        &authenticated,
+        &headers,
+        form.lang.as_deref(),
+        &account_id,
+        true,
+    )
+    .await
+}
+
+async fn bulk_deny_confirmations_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    bulk_confirmation_action(
+        &app_state,
+        &authenticated,
+        &headers,
+        form.lang.as_deref(),
+        &account_id,
+        false,
+    )
+    .await
+}
+
+async fn bulk_confirmation_action(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    headers: &HeaderMap,
+    lang: Option<&str>,
+    account_id: &str,
+    accept: bool,
+) -> Response {
+    let language = detect_language(headers, lang);
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let (accounts, _) = steam_platform::discover_accounts(
+        &steam_root,
+        Some(master_key.as_ref().as_slice()),
+    )
+    .await;
+
+    let account = match accounts.into_iter().find(|a| a.id == account_id) {
+        Some(a) => a,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_account_missing_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let result = if accept {
+        steam_platform::accept_all_confirmations(&app_state.http_client, &account).await
+    } else {
+        steam_platform::deny_all_confirmations(&app_state.http_client, &account).await
+    };
+
+    match result {
+        Ok(count) => {
+            let message = if accept {
+                format!(
+                    "{} ({})",
+                    translations.steam_bulk_accept_success_message, count
+                )
+            } else {
+                format!(
+                    "{} ({})",
+                    translations.steam_bulk_deny_success_message, count
+                )
+            };
+            Json(serde_json::json!({
+                "ok": true,
+                "count": count,
+                "message": message
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            warn!(
+                "bulk {} for account {} failed: {error}",
+                if accept { "accept" } else { "deny" },
+                account_id
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_bulk_action_failed_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Proxy configuration handler
+// ---------------------------------------------------------------------------
+
+async fn account_proxy_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamProxyForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let storage_path = steam_platform::managed_account_storage_path(&steam_root, &account_id);
+    let record =
+        match steam_platform::load_stored_account(master_key.as_ref().as_slice(), &storage_path)
+            .await
+        {
+            Ok(Some(r)) => r,
+            _ => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_account_missing_message
+                    })),
+                )
+                    .into_response();
+            }
+        };
+
+    let proxy_url = if form.proxy_url.trim().is_empty() {
+        None
+    } else {
+        Some(form.proxy_url.trim().to_owned())
+    };
+
+    let mut updated = record;
+    updated.proxy_url = proxy_url;
+    updated.updated_at_unix = Utc::now().timestamp();
+
+    match steam_platform::persist_stored_account(
+        master_key.as_ref().as_slice(),
+        &storage_path,
+        &updated,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({
+            "ok": true,
+            "message": translations.steam_proxy_saved_message
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed saving proxy for account {}: {error}",
+                account_id
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_proxy_save_failed_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Time sync check handler
+// ---------------------------------------------------------------------------
+
+async fn time_check_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+    match steam_platform::check_time_sync(&app_state.http_client).await {
+        Ok((server_time, local_time, drift)) => Json(serde_json::json!({
+            "ok": true,
+            "server_time": server_time,
+            "local_time": local_time,
+            "drift_seconds": drift
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!("Steam time check failed: {error}");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_time_check_failed_message
+                })),
             )
                 .into_response()
         }

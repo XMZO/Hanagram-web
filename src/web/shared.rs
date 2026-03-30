@@ -91,6 +91,14 @@ pub(crate) const STEAM_IMPORT_LOGIN_PATH: &str = "/platforms/steam/import/login"
 pub(crate) const STEAM_APPROVAL_CHALLENGE_PATH: &str = "/platforms/steam/approvals/challenge";
 pub(crate) const STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH: &str =
     "/platforms/steam/approvals/challenge/upload";
+pub(crate) const STEAM_SETUP_BEGIN_PATH: &str = "/platforms/steam/setup/begin";
+pub(crate) const STEAM_SETUP_FINALIZE_PATH: &str = "/platforms/steam/setup/finalize";
+pub(crate) const STEAM_SETUP_CANCEL_PATH: &str = "/platforms/steam/setup/cancel";
+pub(crate) const STEAM_SETUP_TRANSFER_START_PATH: &str = "/platforms/steam/setup/transfer/start";
+pub(crate) const STEAM_SETUP_TRANSFER_FINISH_PATH: &str =
+    "/platforms/steam/setup/transfer/finish";
+pub(crate) const STEAM_IMPORT_WINAUTH_PATH: &str = "/platforms/steam/import/winauth";
+pub(crate) const STEAM_TIME_CHECK_API_PATH: &str = "/api/platforms/steam/time-check";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
@@ -163,6 +171,7 @@ pub(crate) type PendingPasskeyRegistrations =
 pub(crate) type PendingPasskeyAuthentications =
     Arc<RwLock<HashMap<String, PendingPasskeyAuthentication>>>;
 pub(crate) type PendingRecoveryNotices = Arc<RwLock<HashMap<String, PendingRecoveryNotice>>>;
+pub(crate) type PendingSteamSetups = Arc<RwLock<HashMap<String, PendingSteamSetup>>>;
 pub(crate) type SessionWorkers = Arc<Mutex<HashMap<String, SessionWorkerHandle>>>;
 pub(crate) type MetaStoreHandle = Arc<MetaStore>;
 pub(crate) type UnlockCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
@@ -184,6 +193,7 @@ pub(crate) struct AppState {
     pub(crate) passkey_registrations: PendingPasskeyRegistrations,
     pub(crate) passkey_authentications: PendingPasskeyAuthentications,
     pub(crate) recovery_notices: PendingRecoveryNotices,
+    pub(crate) steam_setups: PendingSteamSetups,
     pub(crate) unlock_cache: UnlockCache,
     pub(crate) user_keys: UserKeyCache,
     pub(crate) session_login_throttle: SessionLoginThrottle,
@@ -260,6 +270,32 @@ pub(crate) struct PendingPasskeyAuthentication {
 pub(crate) struct PendingRecoveryNotice {
     pub(crate) user_id: String,
     pub(crate) recovery_codes: Vec<SharedSensitiveString>,
+}
+
+pub(crate) struct PendingSteamSetup {
+    pub(crate) user_id: String,
+    pub(crate) auth_session_id: String,
+    pub(crate) created_at: i64,
+    pub(crate) stage: SteamSetupStage,
+}
+
+pub(crate) enum SteamSetupStage {
+    LinkedAwaitingConfirmation {
+        linker: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        vendor_account: steamguard::SteamGuardAccount,
+        server_time: u64,
+        phone_hint: String,
+        confirm_type: String,
+        steam_username: String,
+    },
+    TransferAwaitingSms {
+        linker: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        steam_username: String,
+    },
+    Complete {
+        revocation_code: String,
+        account_id: String,
+    },
 }
 
 pub(crate) struct TelegramClientSession {
