@@ -15,13 +15,14 @@ use std::path::{Path, PathBuf};
 use steamguard::accountlinker::{
     AccountLinkError, AccountLinker, FinalizeLinkError, RemoveAuthenticatorError, TransferError,
 };
+use steamguard::phonelinker::{PhoneLinker, SetPhoneNumberError, VerifyPhoneError};
 use steamguard::approver::Challenge;
 use steamguard::protobufs::enums::ESessionPersistence;
 use steamguard::protobufs::steammessages_auth_steamclient::{
     CAuthentication_GetAuthSessionInfo_Response, EAuthSessionGuardType, EAuthTokenPlatformType,
 };
 use steamguard::refresher::TokenRefresher;
-use steamguard::steamapi::AuthenticationClient;
+use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient};
 use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens, TwoFactorSecret};
 use steamguard::transport::WebApiTransport;
 use steamguard::userlogin::UpdateAuthSessionError;
@@ -243,7 +244,7 @@ pub(crate) struct SteamLoginApproval {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-struct StoredSteamWebSession {
+pub(crate) struct StoredSteamWebSession {
     session_id: Option<String>,
     steam_login: Option<String>,
     steam_login_secure: Option<String>,
@@ -1855,8 +1856,73 @@ pub(crate) enum GuardEnrollmentResult {
         masked_phone: String,
         verify_channel: String,
     },
+    EmailConfirmationRequired {
+        registrar: AccountLinker<WebApiTransport>,
+    },
+    PhoneRequired {
+        registrar: AccountLinker<WebApiTransport>,
+    },
     DeviceConflict {
         registrar: AccountLinker<WebApiTransport>,
+    },
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct GuardPhoneLinkPrompt {
+    pub(crate) confirmation_email_address: String,
+    pub(crate) phone_number_formatted: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum GuardPhoneEmailContinuation {
+    StillWaiting { seconds_to_wait: Option<u32> },
+    SmsSent,
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardPhoneVerificationResult {
+    Advanced(GuardEnrollmentResult),
+    Retry {
+        registrar: AccountLinker<WebApiTransport>,
+        error: anyhow::Error,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardFinalizeResult {
+    Completed {
+        guard_data: VendorSteamGuardAccount,
+    },
+    Retry {
+        registrar: AccountLinker<WebApiTransport>,
+        guard_data: VendorSteamGuardAccount,
+        steam_timestamp: u64,
+        error: anyhow::Error,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardMigrationStartResult {
+    AwaitingSms {
+        registrar: AccountLinker<WebApiTransport>,
+    },
+    PhoneRequired {
+        registrar: AccountLinker<WebApiTransport>,
+    },
+    Retry {
+        registrar: AccountLinker<WebApiTransport>,
+        error: anyhow::Error,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardMigrationFinishResult {
+    Completed {
+        guard_data: VendorSteamGuardAccount,
+    },
+    Retry {
+        registrar: AccountLinker<WebApiTransport>,
+        error: anyhow::Error,
     },
 }
 
@@ -1883,11 +1949,129 @@ fn resolve_enrollment(
                 registrar,
             })
         }
+        Err(AccountLinkError::MustConfirmEmail) => {
+            Ok(GuardEnrollmentResult::EmailConfirmationRequired { registrar })
+        }
+        Err(AccountLinkError::MustProvidePhoneNumber) => {
+            Ok(GuardEnrollmentResult::PhoneRequired { registrar })
+        }
         Err(AccountLinkError::AuthenticatorPresent) => {
             Ok(GuardEnrollmentResult::DeviceConflict { registrar })
         }
         Err(e) => Err(e.into()),
     }
+}
+
+pub(crate) async fn resume_guard_enrollment(
+    registrar: AccountLinker<WebApiTransport>,
+) -> Result<GuardEnrollmentResult> {
+    spawn_blocking(move || resolve_enrollment(registrar))
+        .await
+        .context("guard enrollment resume task panicked")?
+}
+
+fn build_phone_linker(tokens: SteamTokens) -> Result<PhoneLinker<WebApiTransport>> {
+    let client = build_blocking_steam_client()?;
+    let transport = WebApiTransport::new(client);
+    Ok(PhoneLinker::new(PhoneClient::new(transport), tokens))
+}
+
+fn map_phone_set_error(error: SetPhoneNumberError) -> anyhow::Error {
+    match error {
+        SetPhoneNumberError::UnknownEResult(EResult::RateLimitExceeded) => anyhow!("rate_limited"),
+        SetPhoneNumberError::UnknownEResult(result) => {
+            anyhow!("failed setting Steam phone number: {result:?}")
+        }
+        SetPhoneNumberError::TransportError(inner) => inner.into(),
+    }
+}
+
+fn map_phone_verify_error(error: VerifyPhoneError) -> anyhow::Error {
+    match error {
+        VerifyPhoneError::UnknownEResult(EResult::SMSCodeFailed) => anyhow!("bad_sms_code"),
+        VerifyPhoneError::UnknownEResult(EResult::RateLimitExceeded) => anyhow!("rate_limited"),
+        VerifyPhoneError::UnknownEResult(result) => {
+            anyhow!("failed verifying Steam phone number: {result:?}")
+        }
+        VerifyPhoneError::TransportError(inner) => inner.into(),
+    }
+}
+
+pub(crate) async fn start_guard_phone_link(
+    registrar: &AccountLinker<WebApiTransport>,
+    phone_number_raw: String,
+) -> Result<GuardPhoneLinkPrompt> {
+    let tokens = registrar.tokens().clone();
+    spawn_blocking(move || {
+        let trimmed = phone_number_raw.trim();
+        ensure!(!trimmed.is_empty(), "phone_number_required");
+        let parsed = phonenumber::parse(None, trimmed).map_err(|_| anyhow!("invalid_phone_number"))?;
+        let linker = build_phone_linker(tokens)?;
+        let response = linker
+            .set_account_phone_number(parsed)
+            .map_err(map_phone_set_error)?;
+        Ok::<GuardPhoneLinkPrompt, anyhow::Error>(GuardPhoneLinkPrompt {
+            confirmation_email_address: response.confirmation_email_address().to_owned(),
+            phone_number_formatted: response.phone_number_formatted().to_owned(),
+        })
+    })
+    .await
+    .context("Steam phone setup task panicked")?
+}
+
+pub(crate) async fn continue_guard_phone_link(
+    registrar: &AccountLinker<WebApiTransport>,
+) -> Result<GuardPhoneEmailContinuation> {
+    let tokens = registrar.tokens().clone();
+    spawn_blocking(move || {
+        let linker = build_phone_linker(tokens)?;
+        let waiting = linker.is_account_waiting_for_email_confirmation()?;
+        if waiting.is_some() {
+            return Ok::<GuardPhoneEmailContinuation, anyhow::Error>(
+                GuardPhoneEmailContinuation::StillWaiting {
+                    seconds_to_wait: waiting,
+                },
+            );
+        }
+        linker
+            .send_phone_verification_code(0)
+            .map_err(|error| match error.downcast::<steamguard::transport::TransportError>() {
+                Ok(transport_error) => anyhow!(transport_error.to_string()),
+                Err(other) => {
+                    let message = other.to_string();
+                    if message.contains("RateLimitExceeded") {
+                        anyhow!("rate_limited")
+                    } else {
+                        anyhow!("failed sending Steam phone verification code: {message}")
+                    }
+                }
+            })?;
+        Ok::<GuardPhoneEmailContinuation, anyhow::Error>(GuardPhoneEmailContinuation::SmsSent)
+    })
+    .await
+    .context("Steam phone email confirmation task panicked")?
+}
+
+pub(crate) async fn verify_guard_phone_link(
+    registrar: AccountLinker<WebApiTransport>,
+    verification_code: String,
+) -> Result<GuardPhoneVerificationResult> {
+    spawn_blocking(move || {
+        let code = verification_code.trim().to_owned();
+        ensure!(!code.is_empty(), "phone_verification_code_required");
+        let linker = build_phone_linker(registrar.tokens().clone())?;
+        if let Err(error) = linker
+            .verify_account_phone_with_code(code)
+            .map_err(map_phone_verify_error)
+        {
+            return Ok(GuardPhoneVerificationResult::Retry { registrar, error });
+        }
+        Ok(GuardPhoneVerificationResult::Advanced(resolve_enrollment(
+            registrar,
+        )?))
+    })
+    .await
+    .context("Steam phone verification task panicked")?
 }
 
 /// Authenticate to Steam and request a new guard enrollment.
@@ -1980,47 +2164,77 @@ const GUARD_VERIFY_ATTEMPTS: usize = 5;
 
 /// Submit the user-provided verification code to complete the guard enrollment.
 pub(crate) fn confirm_guard_enrollment(
-    registrar: &mut AccountLinker<WebApiTransport>,
-    guard_data: &mut VendorSteamGuardAccount,
+    mut registrar: AccountLinker<WebApiTransport>,
+    mut guard_data: VendorSteamGuardAccount,
     mut steam_timestamp: u64,
     verification_code: String,
-) -> Result<()> {
+) -> GuardFinalizeResult {
     let mut remaining = GUARD_VERIFY_ATTEMPTS;
     loop {
-        match registrar.finalize(steam_timestamp, guard_data, verification_code.clone()) {
-            Ok(()) => return Ok(()),
+        match registrar.finalize(steam_timestamp, &mut guard_data, verification_code.clone()) {
+            Ok(()) => return GuardFinalizeResult::Completed { guard_data },
             Err(FinalizeLinkError::WantMore { server_time }) if remaining > 1 => {
                 steam_timestamp = server_time;
                 remaining -= 1;
             }
             Err(FinalizeLinkError::WantMore { .. }) => {
-                bail!("guard enrollment verification exhausted")
+                return GuardFinalizeResult::Retry {
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    error: anyhow!("guard enrollment verification exhausted"),
+                };
             }
-            Err(FinalizeLinkError::BadSmsCode) => bail!("bad_sms_code"),
-            Err(e) => return Err(e.into()),
+            Err(FinalizeLinkError::BadSmsCode) => {
+                return GuardFinalizeResult::Retry {
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    error: anyhow!("bad_sms_code"),
+                };
+            }
+            Err(error) => {
+                return GuardFinalizeResult::Retry {
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    error: error.into(),
+                };
+            }
         }
     }
 }
 
 /// Request Steam to start migrating an existing guard to this device.
 pub(crate) fn initiate_guard_migration(
-    registrar: &mut AccountLinker<WebApiTransport>,
-) -> Result<()> {
-    registrar.transfer_start().map_err(|e| match e {
-        TransferError::GenericFailure => anyhow!("no_phone"),
-        other => other.into(),
-    })
+    mut registrar: AccountLinker<WebApiTransport>,
+) -> GuardMigrationStartResult {
+    match registrar.transfer_start() {
+        Ok(()) => GuardMigrationStartResult::AwaitingSms { registrar },
+        Err(TransferError::GenericFailure) => GuardMigrationStartResult::PhoneRequired { registrar },
+        Err(error) => GuardMigrationStartResult::Retry {
+            registrar,
+            error: error.into(),
+        },
+    }
 }
 
 /// Finish the guard migration by providing the SMS verification code.
 pub(crate) fn complete_guard_migration(
-    registrar: &mut AccountLinker<WebApiTransport>,
+    mut registrar: AccountLinker<WebApiTransport>,
     code: String,
-) -> Result<VendorSteamGuardAccount> {
-    registrar.transfer_finish(code).map_err(|e| match e {
-        TransferError::BadSmsCode => anyhow!("bad_sms_code"),
-        other => other.into(),
-    })
+) -> GuardMigrationFinishResult {
+    match registrar.transfer_finish(code) {
+        Ok(guard_data) => GuardMigrationFinishResult::Completed { guard_data },
+        Err(TransferError::BadSmsCode) => GuardMigrationFinishResult::Retry {
+            registrar,
+            error: anyhow!("bad_sms_code"),
+        },
+        Err(error) => GuardMigrationFinishResult::Retry {
+            registrar,
+            error: error.into(),
+        },
+    }
 }
 
 /// Persist a newly enrolled/migrated guard into our encrypted storage format.
@@ -2029,13 +2243,17 @@ pub(crate) async fn persist_enrolled_guard(
     master_key: &[u8],
     guard_data: &VendorSteamGuardAccount,
     steam_username: &str,
-    tokens: &SteamTokens,
 ) -> Result<SteamGuardAccount> {
     ensure_managed_accounts_dir(root_dir).await?;
 
     let secret_b64 = base64::engine::general_purpose::STANDARD
         .encode(guard_data.shared_secret.expose_secret());
     validate_shared_secret(&secret_b64)?;
+
+    let tokens = guard_data
+        .tokens
+        .as_ref()
+        .context("guard enrollment did not provide usable Steam session tokens")?;
 
     let now = Utc::now().timestamp();
     let record = StoredSteamAccount {
@@ -2379,6 +2597,7 @@ pub(crate) async fn batch_reject_trades(
 // Proxied HTTP client helper
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub(crate) fn create_proxied_http_client(
     proxy_url: Option<&str>,
 ) -> Result<reqwest::blocking::Client> {
@@ -2684,6 +2903,62 @@ mod tests {
                 .as_ref()
                 .and_then(|session| session.refresh_token.as_deref()),
             Some("imported-refresh-token")
+        );
+
+        fs::remove_dir_all(&temp_root)
+            .await
+            .expect("temporary steam dir should be deleted");
+    }
+
+    #[tokio::test]
+    async fn persist_enrolled_guard_keeps_real_tokens() {
+        let temp_root = std::env::temp_dir().join(format!("hanagram-steam-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_root)
+            .await
+            .expect("temporary steam dir should be created");
+        let master_key = [3u8; 32];
+
+        let mut guard = VendorSteamGuardAccount::new();
+        guard.account_name = String::from("linked-account");
+        guard.steam_id = 76_561_199_441_992_970;
+        guard.serial_number = String::from("serial");
+        guard.revocation_code = String::from("R12345").into();
+        guard.shared_secret =
+            TwoFactorSecret::parse_shared_secret(String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="))
+                .expect("shared_secret should parse");
+        guard.token_gid = String::from("token-gid");
+        guard.identity_secret = String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=").into();
+        guard.uri = String::from("otpauth://totp/Steam:linked-account?secret=ASDF&issuer=Steam")
+            .into();
+        guard.device_id = String::from("android:63e01aa8-e99c-42c4-ef4c-e78bd041f129");
+        guard.secret_1 = String::from("secret-1").into();
+        guard.set_tokens(SteamTokens::new(
+            SteamJwt::from(String::from("access-token")),
+            SteamJwt::from(String::from("refresh-token")),
+        ));
+
+        let persisted = persist_enrolled_guard(&temp_root, &master_key, &guard, "linked_login")
+            .await
+            .expect("enrolled guard should persist");
+        let loaded = load_managed_account(&temp_root, &master_key, &persisted.id)
+            .await
+            .expect("managed account should load")
+            .expect("managed account should exist");
+
+        assert_eq!(loaded.steam_username.as_deref(), Some("linked_login"));
+        assert_eq!(
+            loaded
+                .session
+                .as_ref()
+                .and_then(|session| session.access_token.as_deref()),
+            Some("access-token")
+        );
+        assert_eq!(
+            loaded
+                .session
+                .as_ref()
+                .and_then(|session| session.refresh_token.as_deref()),
+            Some("refresh-token")
         );
 
         fs::remove_dir_all(&temp_root)

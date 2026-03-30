@@ -206,6 +206,18 @@ struct SteamSetupBeginForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct SteamSetupPhoneNumberForm {
+    phone_number: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamSetupPhoneVerifyForm {
+    verification_code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct SteamSetupFinalizeForm {
     confirm_code: String,
     lang: Option<String>,
@@ -926,6 +938,9 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         // Setup / Link authenticator
         .route(STEAM_SETUP_BEGIN_PATH, post(setup_begin_handler))
+        .route(STEAM_SETUP_RESUME_PATH, post(setup_resume_handler))
+        .route(STEAM_SETUP_PHONE_BEGIN_PATH, post(setup_phone_begin_handler))
+        .route(STEAM_SETUP_PHONE_VERIFY_PATH, post(setup_phone_verify_handler))
         .route(STEAM_SETUP_FINALIZE_PATH, post(setup_finalize_handler))
         .route(STEAM_SETUP_CANCEL_PATH, post(setup_cancel_handler))
         .route(
@@ -1066,6 +1081,12 @@ pub(crate) async fn render_workspace_page(
     context.insert("approval_ready_accounts", &approval_ready_accounts);
     context.insert("snapshot", &snapshot);
     context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+    context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
+    context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
+    context.insert(
+        "steam_setup_phone_verify_action",
+        STEAM_SETUP_PHONE_VERIFY_PATH,
+    );
     context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
     context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
     context.insert(
@@ -1243,6 +1264,155 @@ fn steam_qr_failure_message(
         translations.steam_qr_approval_invalid_message.to_owned()
     } else {
         translations.steam_qr_approval_failed_message.to_owned()
+    }
+}
+
+fn steam_setup_failure_message(
+    language: Language,
+    error: &anyhow::Error,
+    fallback: &'static str,
+) -> String {
+    let translations = language.translations();
+    let message = error.to_string();
+    if message.contains("rate_limited") || message.contains("RateLimitExceeded") {
+        translations.steam_setup_rate_limited_message.to_owned()
+    } else if message.contains("bad_sms_code") {
+        translations.steam_setup_bad_sms_code_message.to_owned()
+    } else if message.contains("invalid_phone_number") {
+        translations.steam_setup_invalid_phone_message.to_owned()
+    } else if message.contains("phone_number_required") {
+        translations
+            .steam_setup_phone_number_missing_message
+            .to_owned()
+    } else if message.contains("no_phone") {
+        translations.steam_setup_no_phone_message.to_owned()
+    } else {
+        fallback.to_owned()
+    }
+}
+
+async fn find_pending_setup_id_for_user(app_state: &AppState, user_id: &str) -> Option<String> {
+    let setups = app_state.steam_setups.read().await;
+    setups
+        .iter()
+        .find(|(_, pending)| pending.user_id == user_id)
+        .map(|(id, _)| id.clone())
+}
+
+async fn take_pending_setup_for_user(
+    app_state: &AppState,
+    user_id: &str,
+) -> Option<(String, PendingSteamSetup)> {
+    let setup_id = find_pending_setup_id_for_user(app_state, user_id).await?;
+    let mut setups = app_state.steam_setups.write().await;
+    let pending = setups.remove(&setup_id)?;
+    Some((setup_id, pending))
+}
+
+async fn store_pending_setup(
+    app_state: &AppState,
+    setup_id: String,
+    pending: PendingSteamSetup,
+) {
+    app_state.steam_setups.write().await.insert(setup_id, pending);
+}
+
+async fn store_setup_outcome(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    setup_id: String,
+    steam_username: String,
+    outcome: steam_platform::GuardEnrollmentResult,
+) -> Response {
+    match outcome {
+        steam_platform::GuardEnrollmentResult::Provisioned {
+            guard_data,
+            steam_timestamp,
+            masked_phone,
+            verify_channel,
+            registrar,
+        } => {
+            let pending = PendingSteamSetup {
+                user_id: authenticated.user.id.clone(),
+                auth_session_id: authenticated.auth_session.id.clone(),
+                created_at: Utc::now().timestamp(),
+                stage: SteamSetupStage::AwaitingVerification {
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    masked_phone: masked_phone.clone(),
+                    verify_channel: verify_channel.clone(),
+                    steam_username,
+                },
+            };
+            store_pending_setup(app_state, setup_id.clone(), pending).await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "step": "confirm",
+                "setup_id": setup_id,
+                "masked_phone": masked_phone,
+                "verify_channel": verify_channel
+            }))
+            .into_response()
+        }
+        steam_platform::GuardEnrollmentResult::EmailConfirmationRequired { registrar } => {
+            let pending = PendingSteamSetup {
+                user_id: authenticated.user.id.clone(),
+                auth_session_id: authenticated.auth_session.id.clone(),
+                created_at: Utc::now().timestamp(),
+                stage: SteamSetupStage::AwaitingAccountEmailConfirmation {
+                    registrar,
+                    steam_username,
+                },
+            };
+            store_pending_setup(app_state, setup_id.clone(), pending).await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "step": "email",
+                "setup_id": setup_id
+            }))
+            .into_response()
+        }
+        steam_platform::GuardEnrollmentResult::PhoneRequired { registrar } => {
+            let pending = PendingSteamSetup {
+                user_id: authenticated.user.id.clone(),
+                auth_session_id: authenticated.auth_session.id.clone(),
+                created_at: Utc::now().timestamp(),
+                stage: SteamSetupStage::AwaitingPhoneNumber {
+                    registrar,
+                    steam_username,
+                },
+            };
+            store_pending_setup(app_state, setup_id.clone(), pending).await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "step": "phone_number",
+                "setup_id": setup_id
+            }))
+            .into_response()
+        }
+        steam_platform::GuardEnrollmentResult::DeviceConflict { registrar } => {
+            let pending = PendingSteamSetup {
+                user_id: authenticated.user.id.clone(),
+                auth_session_id: authenticated.auth_session.id.clone(),
+                created_at: Utc::now().timestamp(),
+                stage: SteamSetupStage::AwaitingMigrationCode {
+                    registrar,
+                    steam_username,
+                },
+            };
+            store_pending_setup(app_state, setup_id.clone(), pending).await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "step": "transfer",
+                "setup_id": setup_id
+            }))
+            .into_response()
+        }
     }
 }
 
@@ -2589,68 +2759,17 @@ async fn link_authenticator_for_account_handler(
     )
     .await
     {
-        Ok((steam_username, outcome)) => match outcome {
-            steam_platform::GuardEnrollmentResult::Provisioned {
-                guard_data,
-                steam_timestamp,
-                masked_phone,
-                verify_channel,
-                registrar,
-            } => {
-                let setup_id = Uuid::new_v4().to_string();
-                let pending = PendingSteamSetup {
-                    user_id: authenticated.user.id.clone(),
-                    auth_session_id: authenticated.auth_session.id.clone(),
-                    created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::AwaitingVerification {
-                        registrar,
-                        guard_data,
-                        steam_timestamp,
-                        masked_phone: masked_phone.clone(),
-                        verify_channel: verify_channel.clone(),
-                        steam_username,
-                    },
-                };
-                app_state
-                    .steam_setups
-                    .write()
-                    .await
-                    .insert(setup_id.clone(), pending);
-
-                Json(serde_json::json!({
-                    "ok": true,
-                    "step": "confirm",
-                    "setup_id": setup_id,
-                    "masked_phone": masked_phone,
-                    "verify_channel": verify_channel
-                }))
-                .into_response()
-            }
-            steam_platform::GuardEnrollmentResult::DeviceConflict { registrar } => {
-                let setup_id = Uuid::new_v4().to_string();
-                let pending = PendingSteamSetup {
-                    user_id: authenticated.user.id.clone(),
-                    auth_session_id: authenticated.auth_session.id.clone(),
-                    created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::AwaitingMigrationCode {
-                        registrar,
-                        steam_username: String::new(),
-                    },
-                };
-                app_state
-                    .steam_setups
-                    .write()
-                    .await
-                    .insert(setup_id.clone(), pending);
-
-                Json(serde_json::json!({
-                    "ok": true,
-                    "step": "transfer",
-                    "setup_id": setup_id
-                }))
-                .into_response()
-            }
-        },
+        Ok((steam_username, outcome)) => {
+            let setup_id = Uuid::new_v4().to_string();
+            store_setup_outcome(
+                &app_state,
+                &authenticated,
+                setup_id,
+                steam_username,
+                outcome,
+            )
+            .await
+        }
         Err(error) => {
             warn!(
                 "failed linking authenticator for account {}: {}",
@@ -2713,68 +2832,17 @@ async fn setup_begin_handler(
     let username = form.steam_username.clone();
     let password = form.steam_password.clone();
     match steam_platform::enroll_new_guard(username, password).await {
-        Ok((steam_username, outcome)) => match outcome {
-            steam_platform::GuardEnrollmentResult::Provisioned {
-                guard_data,
-                steam_timestamp,
-                masked_phone,
-                verify_channel,
-                registrar,
-            } => {
-                let setup_id = Uuid::new_v4().to_string();
-                let pending = PendingSteamSetup {
-                    user_id: authenticated.user.id.clone(),
-                    auth_session_id: authenticated.auth_session.id.clone(),
-                    created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::AwaitingVerification {
-                        registrar,
-                        guard_data,
-                        steam_timestamp,
-                        masked_phone: masked_phone.clone(),
-                        verify_channel: verify_channel.clone(),
-                        steam_username,
-                    },
-                };
-                app_state
-                    .steam_setups
-                    .write()
-                    .await
-                    .insert(setup_id.clone(), pending);
-
-                Json(serde_json::json!({
-                    "ok": true,
-                    "step": "confirm",
-                    "setup_id": setup_id,
-                    "masked_phone": masked_phone,
-                    "verify_channel": verify_channel
-                }))
-                .into_response()
-            }
-            steam_platform::GuardEnrollmentResult::DeviceConflict { registrar } => {
-                let setup_id = Uuid::new_v4().to_string();
-                let pending = PendingSteamSetup {
-                    user_id: authenticated.user.id.clone(),
-                    auth_session_id: authenticated.auth_session.id.clone(),
-                    created_at: Utc::now().timestamp(),
-                    stage: SteamSetupStage::AwaitingMigrationCode {
-                        registrar,
-                        steam_username: form.steam_username.clone(),
-                    },
-                };
-                app_state
-                    .steam_setups
-                    .write()
-                    .await
-                    .insert(setup_id.clone(), pending);
-
-                Json(serde_json::json!({
-                    "ok": true,
-                    "step": "transfer",
-                    "setup_id": setup_id
-                }))
-                .into_response()
-            }
-        },
+        Ok((steam_username, outcome)) => {
+            let setup_id = Uuid::new_v4().to_string();
+            store_setup_outcome(
+                &app_state,
+                &authenticated,
+                setup_id,
+                steam_username,
+                outcome,
+            )
+            .await
+        }
         Err(error) => {
             warn!("Steam setup begin failed: {error}");
             (
@@ -2782,6 +2850,446 @@ async fn setup_begin_handler(
                 Json(serde_json::json!({
                     "ok": false,
                     "message": format!("{}: {error}", translations.steam_setup_link_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn setup_resume_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    match pending.stage {
+        SteamSetupStage::AwaitingAccountEmailConfirmation {
+            registrar,
+            steam_username,
+        } => match steam_platform::resume_guard_enrollment(registrar).await {
+            Ok(steam_platform::GuardEnrollmentResult::EmailConfirmationRequired { registrar }) => {
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingAccountEmailConfirmation {
+                            registrar,
+                            steam_username,
+                        },
+                    },
+                )
+                .await;
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_setup_email_confirm_pending_message
+                    })),
+                )
+                    .into_response()
+            }
+            Ok(outcome) => {
+                store_setup_outcome(
+                    &app_state,
+                    &authenticated,
+                    setup_id,
+                    steam_username,
+                    outcome,
+                )
+                .await
+            }
+            Err(error) => {
+                warn!("Steam setup email resume failed: {error}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_link_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        SteamSetupStage::AwaitingPhoneEmailConfirmation {
+            registrar,
+            steam_username,
+            confirmation_email_address,
+            phone_number_formatted,
+        } => match steam_platform::continue_guard_phone_link(&registrar).await {
+            Ok(steam_platform::GuardPhoneEmailContinuation::StillWaiting {
+                seconds_to_wait,
+            }) => {
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneEmailConfirmation {
+                            registrar,
+                            steam_username,
+                            confirmation_email_address,
+                            phone_number_formatted,
+                        },
+                    },
+                )
+                .await;
+                let mut message = translations.steam_setup_phone_email_pending_message.to_owned();
+                if let Some(wait_seconds) = seconds_to_wait {
+                    message.push_str(" (");
+                    message.push_str(&format_duration_for_display(language, i64::from(wait_seconds)));
+                    message.push(')');
+                }
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": message
+                    })),
+                )
+                    .into_response()
+            }
+            Ok(steam_platform::GuardPhoneEmailContinuation::SmsSent) => {
+                store_pending_setup(
+                    &app_state,
+                    setup_id.clone(),
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneCode {
+                            registrar,
+                            steam_username,
+                            phone_number_formatted: phone_number_formatted.clone(),
+                        },
+                    },
+                )
+                .await;
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "phone_code",
+                    "setup_id": setup_id,
+                    "phone_number": phone_number_formatted
+                }))
+                .into_response()
+            }
+            Err(error) => {
+                warn!("Steam phone email resume failed: {error}");
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneEmailConfirmation {
+                            registrar,
+                            steam_username,
+                            confirmation_email_address,
+                            phone_number_formatted,
+                        },
+                    },
+                )
+                .await;
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_phone_begin_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn setup_phone_begin_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupPhoneNumberForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.phone_number.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_phone_number_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    match pending.stage {
+        SteamSetupStage::AwaitingPhoneNumber {
+            registrar,
+            steam_username,
+        } => match steam_platform::start_guard_phone_link(&registrar, form.phone_number).await {
+            Ok(prompt) => {
+                store_pending_setup(
+                    &app_state,
+                    setup_id.clone(),
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneEmailConfirmation {
+                            registrar,
+                            steam_username,
+                            confirmation_email_address: prompt
+                                .confirmation_email_address
+                                .clone(),
+                            phone_number_formatted: prompt.phone_number_formatted.clone(),
+                        },
+                    },
+                )
+                .await;
+                Json(serde_json::json!({
+                    "ok": true,
+                    "step": "phone_email",
+                    "setup_id": setup_id,
+                    "phone_number": prompt.phone_number_formatted,
+                    "confirmation_email": prompt.confirmation_email_address
+                }))
+                .into_response()
+            }
+            Err(error) => {
+                warn!("Steam phone setup begin failed: {error}");
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneNumber {
+                            registrar,
+                            steam_username,
+                        },
+                    },
+                )
+                .await;
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_phone_begin_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn setup_phone_verify_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupPhoneVerifyForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.verification_code.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_bad_sms_code_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    match pending.stage {
+        SteamSetupStage::AwaitingPhoneCode {
+            registrar,
+            steam_username,
+            phone_number_formatted,
+        } => match steam_platform::verify_guard_phone_link(registrar, form.verification_code).await
+        {
+            Ok(steam_platform::GuardPhoneVerificationResult::Advanced(outcome)) => {
+                store_setup_outcome(
+                    &app_state,
+                    &authenticated,
+                    setup_id,
+                    steam_username,
+                    outcome,
+                )
+                .await
+            }
+            Ok(steam_platform::GuardPhoneVerificationResult::Retry {
+                registrar,
+                error,
+            }) => {
+                warn!("Steam phone verification failed: {error}");
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingPhoneCode {
+                            registrar,
+                            steam_username,
+                            phone_number_formatted,
+                        },
+                    },
+                )
+                .await;
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_phone_code_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+            Err(error) => {
+                warn!("Steam phone verification failed: {error}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_phone_code_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
                 })),
             )
                 .into_response()
@@ -2821,16 +3329,9 @@ async fn setup_finalize_handler(
             .into_response();
     };
 
-    // Find the pending setup for this user.
-    let setup_id = {
-        let setups = app_state.steam_setups.read().await;
-        setups
-            .iter()
-            .find(|(_, pending)| pending.user_id == authenticated.user.id)
-            .map(|(id, _)| id.clone())
-    };
-
-    let Some(setup_id) = setup_id else {
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
@@ -2841,48 +3342,26 @@ async fn setup_finalize_handler(
             .into_response();
     };
 
-    // Take the setup out so we can mutate it.
-    let pending = {
-        let mut setups = app_state.steam_setups.write().await;
-        match setups.remove(&setup_id) {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({
-                        "ok": false,
-                        "message": translations.steam_setup_no_pending_message
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    };
-
     match pending.stage {
         SteamSetupStage::AwaitingVerification {
-            mut registrar,
-            mut guard_data,
+            registrar,
+            guard_data,
             steam_timestamp,
             steam_username,
+            masked_phone,
+            verify_channel,
             ..
         } => {
             let code = form.confirm_code.trim().to_owned();
             let username = steam_username.clone();
 
             let enrollment_result = tokio::task::spawn_blocking(move || {
-                steam_platform::confirm_guard_enrollment(
-                    &mut registrar,
-                    &mut guard_data,
-                    steam_timestamp,
-                    code,
-                )?;
-                Ok::<_, anyhow::Error>(guard_data)
+                steam_platform::confirm_guard_enrollment(registrar, guard_data, steam_timestamp, code)
             })
             .await;
 
             match enrollment_result {
-                Ok(Ok(enrolled_data)) => {
+                Ok(steam_platform::GuardFinalizeResult::Completed { guard_data: enrolled_data }) => {
                     let steam_root =
                         steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
                     match steam_platform::persist_enrolled_guard(
@@ -2890,7 +3369,6 @@ async fn setup_finalize_handler(
                         master_key.as_ref().as_slice(),
                         &enrolled_data,
                         &username,
-                        &build_dummy_tokens_for_setup(),
                     )
                     .await
                     {
@@ -2906,10 +3384,7 @@ async fn setup_finalize_handler(
                                 user_id: authenticated.user.id.clone(),
                                 auth_session_id: authenticated.auth_session.id.clone(),
                                 created_at: Utc::now().timestamp(),
-                                stage: SteamSetupStage::Complete {
-                                    revocation_code: revocation_code.clone(),
-                                    account_id: account_id.clone(),
-                                },
+                                stage: SteamSetupStage::Complete,
                             };
                             app_state
                                 .steam_setups
@@ -2938,19 +3413,41 @@ async fn setup_finalize_handler(
                         }
                     }
                 }
-                Ok(Err(error)) => {
+                Ok(steam_platform::GuardFinalizeResult::Retry {
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    error,
+                }) => {
                     warn!("Steam setup finalize failed: {error}");
-                    let msg = if error.to_string().contains("bad_sms_code") {
-                        translations.steam_setup_bad_sms_code_message.to_owned()
-                    } else {
-                        format!(
-                            "{}: {error}",
-                            translations.steam_setup_finalize_failed_message
-                        )
-                    };
+                    store_pending_setup(
+                        &app_state,
+                        setup_id,
+                        PendingSteamSetup {
+                            user_id: authenticated.user.id.clone(),
+                            auth_session_id: authenticated.auth_session.id.clone(),
+                            created_at: Utc::now().timestamp(),
+                            stage: SteamSetupStage::AwaitingVerification {
+                                registrar,
+                                guard_data,
+                                steam_timestamp,
+                                masked_phone,
+                                verify_channel,
+                                steam_username,
+                            },
+                        },
+                    )
+                    .await;
                     (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": steam_setup_failure_message(
+                                language,
+                                &error,
+                                translations.steam_setup_finalize_failed_message,
+                            )
+                        })),
                     )
                         .into_response()
                 }
@@ -2967,22 +3464,28 @@ async fn setup_finalize_handler(
                 }
             }
         }
-        _ => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "ok": false,
-                "message": translations.steam_setup_no_pending_message
-            })),
-        )
-            .into_response(),
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
+                })),
+            )
+                .into_response()
+        }
     }
-}
-
-fn build_dummy_tokens_for_setup() -> steamguard::token::Tokens {
-    steamguard::token::Tokens::new(
-        steamguard::token::Jwt::from(String::new()),
-        steamguard::token::Jwt::from(String::new()),
-    )
 }
 
 async fn setup_transfer_start_handler(
@@ -2994,15 +3497,9 @@ async fn setup_transfer_start_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-    let setup_id = {
-        let setups = app_state.steam_setups.read().await;
-        setups
-            .iter()
-            .find(|(_, pending)| pending.user_id == authenticated.user.id)
-            .map(|(id, _)| id.clone())
-    };
-
-    let Some(setup_id) = setup_id else {
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
@@ -3013,38 +3510,22 @@ async fn setup_transfer_start_handler(
             .into_response();
     };
 
-    let pending = {
-        let mut setups = app_state.steam_setups.write().await;
-        match setups.remove(&setup_id) {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({
-                        "ok": false,
-                        "message": translations.steam_setup_no_pending_message
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    };
-
     match pending.stage {
         SteamSetupStage::AwaitingMigrationCode {
-            mut registrar,
+            registrar,
             steam_username,
         } => {
             let username = steam_username.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                steam_platform::initiate_guard_migration(&mut registrar)?;
-                Ok::<_, anyhow::Error>(registrar)
+                steam_platform::initiate_guard_migration(registrar)
             })
             .await;
 
             match result {
-                Ok(Ok(registrar_back)) => {
+                Ok(steam_platform::GuardMigrationStartResult::AwaitingSms {
+                    registrar: registrar_back,
+                }) => {
                     let ready = PendingSteamSetup {
                         user_id: authenticated.user.id.clone(),
                         auth_session_id: authenticated.auth_session.id.clone(),
@@ -3066,21 +3547,59 @@ async fn setup_transfer_start_handler(
                     }))
                     .into_response()
                 }
-                Ok(Err(error)) => {
+                Ok(steam_platform::GuardMigrationStartResult::PhoneRequired {
+                    registrar: registrar_back,
+                }) => {
+                    store_pending_setup(
+                        &app_state,
+                        setup_id,
+                        PendingSteamSetup {
+                            user_id: authenticated.user.id.clone(),
+                            auth_session_id: authenticated.auth_session.id.clone(),
+                            created_at: Utc::now().timestamp(),
+                            stage: SteamSetupStage::AwaitingPhoneNumber {
+                                registrar: registrar_back,
+                                steam_username: username,
+                            },
+                        },
+                    )
+                    .await;
+
+                    Json(serde_json::json!({
+                        "ok": true,
+                        "step": "phone_number"
+                    }))
+                    .into_response()
+                }
+                Ok(steam_platform::GuardMigrationStartResult::Retry {
+                    registrar: registrar_back,
+                    error,
+                }) => {
                     warn!("Steam transfer start failed: {error}");
-                    let msg = if error.to_string().contains("no_phone") {
-                        translations
-                            .steam_setup_no_phone_message
-                            .to_owned()
-                    } else {
-                        format!(
-                            "{}: {error}",
-                            translations.steam_setup_transfer_failed_message
-                        )
-                    };
+                    store_pending_setup(
+                        &app_state,
+                        setup_id,
+                        PendingSteamSetup {
+                            user_id: authenticated.user.id.clone(),
+                            auth_session_id: authenticated.auth_session.id.clone(),
+                            created_at: Utc::now().timestamp(),
+                            stage: SteamSetupStage::AwaitingMigrationCode {
+                                registrar: registrar_back,
+                                steam_username: username,
+                            },
+                        },
+                    )
+                    .await;
                     (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": steam_setup_failure_message(
+                                language,
+                                &error,
+                                translations.steam_setup_transfer_failed_message,
+                            )
+                        })),
                     )
                         .into_response()
                 }
@@ -3097,14 +3616,27 @@ async fn setup_transfer_start_handler(
                 }
             }
         }
-        _ => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "ok": false,
-                "message": translations.steam_setup_no_pending_message
-            })),
-        )
-            .into_response(),
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -3140,15 +3672,9 @@ async fn setup_transfer_finish_handler(
             .into_response();
     };
 
-    let setup_id = {
-        let setups = app_state.steam_setups.read().await;
-        setups
-            .iter()
-            .find(|(_, pending)| pending.user_id == authenticated.user.id)
-            .map(|(id, _)| id.clone())
-    };
-
-    let Some(setup_id) = setup_id else {
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
@@ -3159,38 +3685,23 @@ async fn setup_transfer_finish_handler(
             .into_response();
     };
 
-    let pending = {
-        let mut setups = app_state.steam_setups.write().await;
-        match setups.remove(&setup_id) {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({
-                        "ok": false,
-                        "message": translations.steam_setup_no_pending_message
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    };
-
     match pending.stage {
         SteamSetupStage::AwaitingMigrationCode {
-            mut registrar,
+            registrar,
             steam_username,
         } => {
             let migration_code = form.sms_code.trim().to_owned();
             let username = steam_username.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                steam_platform::complete_guard_migration(&mut registrar, migration_code)
+                steam_platform::complete_guard_migration(registrar, migration_code)
             })
             .await;
 
             match result {
-                Ok(Ok(migrated_guard)) => {
+                Ok(steam_platform::GuardMigrationFinishResult::Completed {
+                    guard_data: migrated_guard,
+                }) => {
                     let steam_root =
                         steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
                     match steam_platform::persist_enrolled_guard(
@@ -3198,7 +3709,6 @@ async fn setup_transfer_finish_handler(
                         master_key.as_ref().as_slice(),
                         &migrated_guard,
                         &username,
-                        &build_dummy_tokens_for_setup(),
                     )
                     .await
                     {
@@ -3211,10 +3721,7 @@ async fn setup_transfer_finish_handler(
                                 user_id: authenticated.user.id.clone(),
                                 auth_session_id: authenticated.auth_session.id.clone(),
                                 created_at: Utc::now().timestamp(),
-                                stage: SteamSetupStage::Complete {
-                                    revocation_code: revocation_code.clone(),
-                                    account_id: account_id.clone(),
-                                },
+                                stage: SteamSetupStage::Complete,
                             };
                             app_state
                                 .steam_setups
@@ -3243,19 +3750,35 @@ async fn setup_transfer_finish_handler(
                         }
                     }
                 }
-                Ok(Err(error)) => {
+                Ok(steam_platform::GuardMigrationFinishResult::Retry {
+                    registrar,
+                    error,
+                }) => {
                     warn!("Steam transfer finish failed: {error}");
-                    let msg = if error.to_string().contains("bad_sms_code") {
-                        translations.steam_setup_bad_sms_code_message.to_owned()
-                    } else {
-                        format!(
-                            "{}: {error}",
-                            translations.steam_setup_transfer_failed_message
-                        )
-                    };
+                    store_pending_setup(
+                        &app_state,
+                        setup_id,
+                        PendingSteamSetup {
+                            user_id: authenticated.user.id.clone(),
+                            auth_session_id: authenticated.auth_session.id.clone(),
+                            created_at: Utc::now().timestamp(),
+                            stage: SteamSetupStage::AwaitingMigrationCode {
+                                registrar,
+                                steam_username,
+                            },
+                        },
+                    )
+                    .await;
                     (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "ok": false, "message": msg })),
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": steam_setup_failure_message(
+                                language,
+                                &error,
+                                translations.steam_setup_transfer_failed_message,
+                            )
+                        })),
                     )
                         .into_response()
                 }
@@ -3272,14 +3795,27 @@ async fn setup_transfer_finish_handler(
                 }
             }
         }
-        _ => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "ok": false,
-                "message": translations.steam_setup_no_pending_message
-            })),
-        )
-            .into_response(),
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -3880,7 +4416,7 @@ async fn account_proxy_handler(
 
 async fn time_check_handler(
     State(app_state): State<AppState>,
-    Extension(authenticated): Extension<AuthenticatedSession>,
+    Extension(_authenticated): Extension<AuthenticatedSession>,
     headers: HeaderMap,
     Query(query): Query<LangQuery>,
 ) -> Response {

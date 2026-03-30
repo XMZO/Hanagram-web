@@ -92,6 +92,9 @@ pub(crate) const STEAM_APPROVAL_CHALLENGE_PATH: &str = "/platforms/steam/approva
 pub(crate) const STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH: &str =
     "/platforms/steam/approvals/challenge/upload";
 pub(crate) const STEAM_SETUP_BEGIN_PATH: &str = "/platforms/steam/setup/begin";
+pub(crate) const STEAM_SETUP_RESUME_PATH: &str = "/platforms/steam/setup/resume";
+pub(crate) const STEAM_SETUP_PHONE_BEGIN_PATH: &str = "/platforms/steam/setup/phone/begin";
+pub(crate) const STEAM_SETUP_PHONE_VERIFY_PATH: &str = "/platforms/steam/setup/phone/verify";
 pub(crate) const STEAM_SETUP_FINALIZE_PATH: &str = "/platforms/steam/setup/finalize";
 pub(crate) const STEAM_SETUP_CANCEL_PATH: &str = "/platforms/steam/setup/cancel";
 pub(crate) const STEAM_SETUP_TRANSFER_START_PATH: &str = "/platforms/steam/setup/transfer/start";
@@ -280,6 +283,25 @@ pub(crate) struct PendingSteamSetup {
 }
 
 pub(crate) enum SteamSetupStage {
+    AwaitingAccountEmailConfirmation {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        steam_username: String,
+    },
+    AwaitingPhoneNumber {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        steam_username: String,
+    },
+    AwaitingPhoneEmailConfirmation {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        steam_username: String,
+        confirmation_email_address: String,
+        phone_number_formatted: String,
+    },
+    AwaitingPhoneCode {
+        registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
+        steam_username: String,
+        phone_number_formatted: String,
+    },
     AwaitingVerification {
         registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
         guard_data: steamguard::SteamGuardAccount,
@@ -292,10 +314,7 @@ pub(crate) enum SteamSetupStage {
         registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
         steam_username: String,
     },
-    Complete {
-        revocation_code: String,
-        account_id: String,
-    },
+    Complete,
 }
 
 pub(crate) struct TelegramClientSession {
@@ -1693,6 +1712,21 @@ mod tests {
         context.insert("banner", &Option::<PageBanner>::None);
         context.insert("platforms", &platforms);
         context.insert("now", "2026-03-14 09:00:00 UTC");
+        context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+        context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
+        context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
+        context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);
+        context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
+        context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
+        context.insert(
+            "steam_setup_transfer_start_action",
+            STEAM_SETUP_TRANSFER_START_PATH,
+        );
+        context.insert(
+            "steam_setup_transfer_finish_action",
+            STEAM_SETUP_TRANSFER_FINISH_PATH,
+        );
+        context.insert("steam_time_check_api", STEAM_TIME_CHECK_API_PATH);
         context.insert(
             "transport_warning",
             &Option::<TransportSecurityWarning>::None,
@@ -1754,6 +1788,7 @@ mod tests {
             "steam_approval_challenge_upload_action",
             STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH,
         );
+        context.insert("steam_import_winauth_action", STEAM_IMPORT_WINAUTH_PATH);
         context.insert("steam_accounts_dir", "users/alice/steam");
         context.insert("steam_managed_dir", "users/alice/steam/accounts");
         context.insert("total_accounts", &1);
@@ -1815,6 +1850,21 @@ mod tests {
             }),
         );
         context.insert("now", "2026-03-14 09:00:00 UTC");
+        context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+        context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
+        context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
+        context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);
+        context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
+        context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
+        context.insert(
+            "steam_setup_transfer_start_action",
+            STEAM_SETUP_TRANSFER_START_PATH,
+        );
+        context.insert(
+            "steam_setup_transfer_finish_action",
+            STEAM_SETUP_TRANSFER_FINISH_PATH,
+        );
+        context.insert("steam_time_check_api", STEAM_TIME_CHECK_API_PATH);
         context.insert(
             "transport_warning",
             &Option::<TransportSecurityWarning>::None,

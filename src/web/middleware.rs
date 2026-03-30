@@ -418,6 +418,11 @@ pub(crate) async fn clear_pending_flows_for_auth_session(
 ) {
     app_state.totp_setups.write().await.remove(auth_session_id);
     app_state
+        .steam_setups
+        .write()
+        .await
+        .retain(|_, flow| flow.auth_session_id != auth_session_id);
+    app_state
         .passkey_registrations
         .write()
         .await
