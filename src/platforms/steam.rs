@@ -677,7 +677,8 @@ fn map_guard_submit_error(error: UpdateAuthSessionError) -> anyhow::Error {
 enum GuardSetupLoginGate {
     CanContinue,
     RequiresTrustedDeviceConfirmation,
-    RequiresEmail,
+    RequiresEmailConfirmation,
+    RequiresEmailCode,
     RequiresExistingGuardCode,
     Unsupported,
 }
@@ -689,7 +690,8 @@ where
     let mut has_guardless_flow = false;
     let mut has_device_code = false;
     let mut requires_device_confirmation = false;
-    let mut requires_email = false;
+    let mut requires_email_code = false;
+    let mut requires_email_confirmation = false;
     let mut saw_any = false;
 
     for confirmation_type in confirmation_types {
@@ -704,9 +706,11 @@ where
             EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceConfirmation => {
                 requires_device_confirmation = true;
             }
-            EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
-            | EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation => {
-                requires_email = true;
+            EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode => {
+                requires_email_code = true;
+            }
+            EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation => {
+                requires_email_confirmation = true;
             }
             _ => {}
         }
@@ -721,25 +725,47 @@ where
     if requires_device_confirmation {
         return GuardSetupLoginGate::RequiresTrustedDeviceConfirmation;
     }
-    if requires_email {
-        return GuardSetupLoginGate::RequiresEmail;
+    if requires_email_code {
+        return GuardSetupLoginGate::RequiresEmailCode;
+    }
+    if requires_email_confirmation {
+        return GuardSetupLoginGate::RequiresEmailConfirmation;
     }
     GuardSetupLoginGate::Unsupported
 }
 
-fn ensure_guard_setup_login_can_continue<I>(confirmation_types: I) -> Result<()>
+fn resolve_guard_setup_login_prompt<I>(confirmation_methods: I) -> Result<Option<GuardLoginCodePrompt>>
 where
-    I: IntoIterator<Item = EAuthSessionGuardType>,
+    I: IntoIterator<Item = (EAuthSessionGuardType, String)>,
 {
-    match classify_guard_setup_login_gate(confirmation_types) {
-        GuardSetupLoginGate::CanContinue => Ok(()),
+    let mut gate_inputs = Vec::new();
+    let mut email_hint = None;
+
+    for (confirmation_type, associated_message) in confirmation_methods {
+        if confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
+            && email_hint.is_none()
+        {
+            email_hint = normalize_optional_string(Some(associated_message));
+        }
+        gate_inputs.push(confirmation_type);
+    }
+
+    match classify_guard_setup_login_gate(gate_inputs) {
+        GuardSetupLoginGate::CanContinue => Ok(None),
         GuardSetupLoginGate::RequiresTrustedDeviceConfirmation => {
             bail!("requires_trusted_device_confirmation")
         }
-        GuardSetupLoginGate::RequiresEmail => bail!("requires_email_login_confirmation"),
-        GuardSetupLoginGate::RequiresExistingGuardCode => {
-            bail!("requires_existing_guard_code")
+        GuardSetupLoginGate::RequiresEmailConfirmation => {
+            bail!("requires_email_login_confirmation")
         }
+        GuardSetupLoginGate::RequiresEmailCode => Ok(Some(GuardLoginCodePrompt {
+            kind: GuardLoginCodeKind::EmailCode,
+            hint: email_hint,
+        })),
+        GuardSetupLoginGate::RequiresExistingGuardCode => Ok(Some(GuardLoginCodePrompt {
+            kind: GuardLoginCodeKind::ExistingGuardCode,
+            hint: None,
+        })),
         GuardSetupLoginGate::Unsupported => bail!("unsupported_login_confirmation_method"),
     }
 }
@@ -1938,6 +1964,32 @@ pub(crate) enum GuardEnrollmentResult {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GuardLoginCodeKind {
+    ExistingGuardCode,
+    EmailCode,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GuardLoginCodePrompt {
+    pub(crate) kind: GuardLoginCodeKind,
+    pub(crate) hint: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardEnrollmentStartResult {
+    Ready {
+        steam_username: String,
+        outcome: GuardEnrollmentResult,
+    },
+    LoginCodeRequired {
+        steam_username: String,
+        login: UserLogin<WebApiTransport>,
+        transport: WebApiTransport,
+        prompt: GuardLoginCodePrompt,
+    },
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct GuardPhoneLinkPrompt {
     pub(crate) confirmation_email_address: String,
@@ -1955,6 +2007,17 @@ pub(crate) enum GuardPhoneVerificationResult {
     Advanced(GuardEnrollmentResult),
     Retry {
         registrar: AccountLinker<WebApiTransport>,
+        error: anyhow::Error,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum GuardLoginCodeSubmitResult {
+    Advanced(GuardEnrollmentResult),
+    Retry {
+        login: UserLogin<WebApiTransport>,
+        transport: WebApiTransport,
+        prompt: GuardLoginCodePrompt,
         error: anyhow::Error,
     },
 }
@@ -2039,6 +2102,60 @@ pub(crate) async fn resume_guard_enrollment(
     spawn_blocking(move || resolve_enrollment(registrar))
         .await
         .context("guard enrollment resume task panicked")?
+}
+
+fn login_code_guard_type(kind: GuardLoginCodeKind) -> EAuthSessionGuardType {
+    match kind {
+        GuardLoginCodeKind::ExistingGuardCode => {
+            EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode
+        }
+        GuardLoginCodeKind::EmailCode => EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode,
+    }
+}
+
+pub(crate) async fn continue_guard_enrollment_with_login_code(
+    mut login: UserLogin<WebApiTransport>,
+    transport: WebApiTransport,
+    prompt: GuardLoginCodePrompt,
+    code: String,
+) -> Result<GuardLoginCodeSubmitResult> {
+    spawn_blocking(move || {
+        let trimmed = code.trim().to_owned();
+        ensure!(!trimmed.is_empty(), "login_code_required");
+        match login.submit_steam_guard_code(login_code_guard_type(prompt.kind), trimmed) {
+            Ok(_) | Err(UpdateAuthSessionError::DuplicateRequest) => {}
+            Err(error) => {
+                return Ok::<GuardLoginCodeSubmitResult, anyhow::Error>(
+                    GuardLoginCodeSubmitResult::Retry {
+                        login,
+                        transport,
+                        prompt,
+                        error: map_guard_submit_error(error),
+                    },
+                );
+            }
+        }
+
+        let tokens = match login.poll_until_tokens() {
+            Ok(tokens) => tokens,
+            Err(error) => {
+                return Ok::<GuardLoginCodeSubmitResult, anyhow::Error>(
+                    GuardLoginCodeSubmitResult::Retry {
+                        login,
+                        transport,
+                        prompt,
+                        error: error.context("could not obtain session tokens during guard enrollment"),
+                    },
+                );
+            }
+        };
+
+        Ok::<GuardLoginCodeSubmitResult, anyhow::Error>(GuardLoginCodeSubmitResult::Advanced(
+            resolve_enrollment(AccountLinker::new(transport, tokens))?,
+        ))
+    })
+    .await
+    .context("guard enrollment login-code task panicked")?
 }
 
 fn build_phone_linker(tokens: SteamTokens) -> Result<PhoneLinker<WebApiTransport>> {
@@ -2149,7 +2266,7 @@ pub(crate) async fn verify_guard_phone_link(
 pub(crate) async fn enroll_new_guard(
     steam_username: String,
     steam_password: String,
-) -> Result<(String, GuardEnrollmentResult)> {
+) -> Result<GuardEnrollmentStartResult> {
     spawn_blocking(move || {
         let username = steam_username.trim().to_owned();
         ensure!(!username.is_empty(), "Steam username is required");
@@ -2162,9 +2279,20 @@ pub(crate) async fn enroll_new_guard(
         let guard_methods = login
             .begin_auth_via_credentials(&username, &steam_password)
             .map_err(map_login_error)?;
-        ensure_guard_setup_login_can_continue(
-            guard_methods.iter().map(|method| method.confirmation_type),
-        )?;
+        if let Some(prompt) = resolve_guard_setup_login_prompt(
+            guard_methods
+                .iter()
+                .map(|method| (method.confirmation_type, method.associated_messsage.clone())),
+        )? {
+            return Ok::<GuardEnrollmentStartResult, anyhow::Error>(
+                GuardEnrollmentStartResult::LoginCodeRequired {
+                    steam_username: username,
+                    login,
+                    transport,
+                    prompt,
+                },
+            );
+        }
 
         let tokens = login
             .poll_until_tokens()
@@ -2172,7 +2300,10 @@ pub(crate) async fn enroll_new_guard(
 
         let registrar = AccountLinker::new(transport, tokens);
         let outcome = resolve_enrollment(registrar)?;
-        Ok((username, outcome))
+        Ok(GuardEnrollmentStartResult::Ready {
+            steam_username: username,
+            outcome,
+        })
     })
     .await
     .context("guard enrollment task panicked")?
@@ -2724,12 +2855,22 @@ mod tests {
     }
 
     #[test]
+    fn guard_setup_login_gate_blocks_email_code_requirement() {
+        assert_eq!(
+            classify_guard_setup_login_gate([
+                EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode,
+            ]),
+            GuardSetupLoginGate::RequiresEmailCode
+        );
+    }
+
+    #[test]
     fn guard_setup_login_gate_blocks_email_confirmation_requirement() {
         assert_eq!(
             classify_guard_setup_login_gate([
                 EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation,
             ]),
-            GuardSetupLoginGate::RequiresEmail
+            GuardSetupLoginGate::RequiresEmailConfirmation
         );
     }
 

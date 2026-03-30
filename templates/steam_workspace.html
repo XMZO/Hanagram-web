@@ -95,6 +95,13 @@
             approvalPasteReady: {{ i18n.steam_qr_approval_paste_ready_message | json_encode | safe }},
             approvalPasteError: {{ i18n.steam_qr_approval_paste_error_message | json_encode | safe }},
             setupRunning: {{ i18n.steam_setup_running_message | json_encode | safe }},
+            setupLoginCodeDeviceDescription: {{ i18n.steam_setup_login_code_device_description | json_encode | safe }},
+            setupLoginCodeEmailDescription: {{ i18n.steam_setup_login_code_email_description | json_encode | safe }},
+            setupLoginCodeLabel: {{ i18n.steam_setup_login_code_label | json_encode | safe }},
+            setupLoginCodePlaceholder: {{ i18n.steam_setup_login_code_placeholder | json_encode | safe }},
+            setupLoginCodeHintLabel: {{ i18n.steam_setup_login_code_hint_label | json_encode | safe }},
+            setupLoginCodeKindDevice: {{ i18n.steam_setup_login_code_kind_device | json_encode | safe }},
+            setupLoginCodeKindEmail: {{ i18n.steam_setup_login_code_kind_email | json_encode | safe }},
             setupConfirmTypeSms: {{ i18n.steam_setup_confirm_type_sms | json_encode | safe }},
             setupConfirmTypeEmail: {{ i18n.steam_setup_confirm_type_email | json_encode | safe }},
             setupPhoneHint: {{ i18n.steam_setup_confirm_phone_hint_label | json_encode | safe }},
@@ -115,6 +122,7 @@
             timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }}
         };
         const SETUP_BEGIN_API = {{ steam_setup_begin_action | json_encode | safe }};
+        const SETUP_LOGIN_CODE_API = {{ steam_setup_login_code_action | json_encode | safe }};
         const SETUP_RESUME_API = {{ steam_setup_resume_action | json_encode | safe }};
         const SETUP_PHONE_BEGIN_API = {{ steam_setup_phone_begin_action | json_encode | safe }};
         const SETUP_PHONE_VERIFY_API = {{ steam_setup_phone_verify_action | json_encode | safe }};
@@ -1973,6 +1981,32 @@
                         <div id="setup-login-status" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm text-ink/62"></div>
                     </div>
 
+                    <!-- Step 1.25: Steam login code -->
+                    <div id="setup-step-login-code" class="mt-4 hidden">
+                        <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_login_code_title }}</h3>
+                        <p id="setup-login-code-description" class="mt-1 text-sm leading-6 text-ink/66">{{ i18n.steam_setup_login_code_email_description }}</p>
+                        <div id="setup-login-code-hint-box" class="mt-3 hidden rounded-[1rem] border border-sage/30 bg-mint px-3.5 py-2.5 text-sm text-sageDeep">
+                            <div>
+                                <span id="setup-login-code-kind" class="font-medium text-sageDeep"></span>
+                            </div>
+                            <div id="setup-login-code-hint-row" class="mt-2 hidden">
+                                <span class="text-ink/72" id="setup-login-code-hint-label">{{ i18n.steam_setup_login_code_hint_label }}:</span>
+                                <span id="setup-login-code-hint" class="font-medium text-sageDeep"></span>
+                            </div>
+                        </div>
+                        <div class="mt-3 space-y-3">
+                            <label class="block">
+                                <span id="setup-login-code-label" class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_setup_login_code_label }}</span>
+                                <input id="setup-login-code-input" type="text" required maxlength="10" placeholder="{{ i18n.steam_setup_login_code_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <div class="flex gap-2">
+                                <button id="setup-login-code-btn" type="button" class="flex-1 rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_setup_login_code_submit_button }}</button>
+                                <button id="setup-cancel-btn-login-code" type="button" class="rounded-[1rem] border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink/72 transition hover:bg-paper">{{ i18n.steam_setup_cancel_button }}</button>
+                            </div>
+                        </div>
+                        <div id="setup-login-code-status" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-paper px-4 py-3 text-sm text-ink/62"></div>
+                    </div>
+
                     <!-- Step 1.5a: Account email confirmation -->
                     <div id="setup-step-email" class="mt-4 hidden">
                         <h3 class="text-sm font-semibold text-ink">{{ i18n.steam_setup_step_email_title }}</h3>
@@ -2274,6 +2308,7 @@
         // ----------- Setup wizard -----------
         const setupSteps = {
             login: document.getElementById("setup-step-login"),
+            loginCode: document.getElementById("setup-step-login-code"),
             email: document.getElementById("setup-step-email"),
             phone: document.getElementById("setup-step-phone"),
             confirm: document.getElementById("setup-step-confirm"),
@@ -2293,6 +2328,45 @@
         function showSetupPhoneMode(mode) {
             Object.values(setupPhoneSections).forEach(el => { if (el) el.classList.add("hidden"); });
             if (setupPhoneSections[mode]) setupPhoneSections[mode].classList.remove("hidden");
+        }
+        function configureSetupLoginCodePrompt(data) {
+            const kind = data?.code_kind === "email" ? "email" : "device";
+            const descriptionEl = document.getElementById("setup-login-code-description");
+            const labelEl = document.getElementById("setup-login-code-label");
+            const inputEl = document.getElementById("setup-login-code-input");
+            const kindEl = document.getElementById("setup-login-code-kind");
+            const hintBoxEl = document.getElementById("setup-login-code-hint-box");
+            const hintRowEl = document.getElementById("setup-login-code-hint-row");
+            const hintEl = document.getElementById("setup-login-code-hint");
+
+            if (descriptionEl) {
+                descriptionEl.textContent = kind === "email"
+                    ? I18N.setupLoginCodeEmailDescription
+                    : I18N.setupLoginCodeDeviceDescription;
+            }
+            if (labelEl) {
+                labelEl.textContent = I18N.setupLoginCodeLabel;
+            }
+            if (inputEl) {
+                inputEl.placeholder = I18N.setupLoginCodePlaceholder;
+                inputEl.value = "";
+            }
+            if (kindEl) {
+                kindEl.textContent = kind === "email"
+                    ? I18N.setupLoginCodeKindEmail
+                    : I18N.setupLoginCodeKindDevice;
+            }
+
+            const hint = (data?.hint || "").trim();
+            if (hintBoxEl) {
+                hintBoxEl.classList.toggle("hidden", !hint);
+            }
+            if (hintRowEl) {
+                hintRowEl.classList.toggle("hidden", !hint);
+            }
+            if (hintEl) {
+                hintEl.textContent = hint;
+            }
         }
         function showStatus(el, msg, isError) {
             if (!el) return;
@@ -2314,6 +2388,11 @@
         }
         function handleSetupStepResponse(data) {
             if (!data || !data.ok) return false;
+            if (data.step === "login_code") {
+                configureSetupLoginCodePrompt(data);
+                showSetupStep("loginCode");
+                return true;
+            }
             if (data.step === "email") {
                 showSetupStep("email");
                 return true;
@@ -2377,6 +2456,29 @@
                     showStatus(statusEl, e.message, true);
                 } finally {
                     beginBtn.disabled = false;
+                }
+            });
+        }
+
+        const loginCodeBtn = document.getElementById("setup-login-code-btn");
+        if (loginCodeBtn) {
+            loginCodeBtn.addEventListener("click", async () => {
+                const code = document.getElementById("setup-login-code-input")?.value?.trim();
+                if (!code) return;
+                const statusEl = document.getElementById("setup-login-code-status");
+                loginCodeBtn.disabled = true;
+                showStatus(statusEl, I18N.setupRunning, false);
+                try {
+                    const data = await jsonPost(SETUP_LOGIN_CODE_API, { code, lang: LANG });
+                    if (!handleSetupStepResponse(data)) {
+                        showStatus(statusEl, data.message || "Error", true);
+                    } else {
+                        statusEl.classList.add("hidden");
+                    }
+                } catch (e) {
+                    showStatus(statusEl, e.message, true);
+                } finally {
+                    loginCodeBtn.disabled = false;
                 }
             });
         }
@@ -2535,7 +2637,7 @@
         }
 
         // Cancel buttons
-        document.querySelectorAll("#setup-cancel-btn-email, #setup-cancel-btn-phone-number, #setup-cancel-btn-phone-email, #setup-cancel-btn-phone-code, #setup-cancel-btn-confirm, #setup-cancel-btn-transfer").forEach(btn => {
+        document.querySelectorAll("#setup-cancel-btn-login-code, #setup-cancel-btn-email, #setup-cancel-btn-phone-number, #setup-cancel-btn-phone-email, #setup-cancel-btn-phone-code, #setup-cancel-btn-confirm, #setup-cancel-btn-transfer").forEach(btn => {
             btn.addEventListener("click", async () => {
                 try { await jsonPost(SETUP_CANCEL_API, { lang: LANG }); } catch (_) {}
                 showSetupStep("login");

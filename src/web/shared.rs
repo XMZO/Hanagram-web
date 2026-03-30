@@ -92,6 +92,7 @@ pub(crate) const STEAM_APPROVAL_CHALLENGE_PATH: &str = "/platforms/steam/approva
 pub(crate) const STEAM_APPROVAL_CHALLENGE_UPLOAD_PATH: &str =
     "/platforms/steam/approvals/challenge/upload";
 pub(crate) const STEAM_SETUP_BEGIN_PATH: &str = "/platforms/steam/setup/begin";
+pub(crate) const STEAM_SETUP_LOGIN_CODE_PATH: &str = "/platforms/steam/setup/login-code";
 pub(crate) const STEAM_SETUP_RESUME_PATH: &str = "/platforms/steam/setup/resume";
 pub(crate) const STEAM_SETUP_PHONE_BEGIN_PATH: &str = "/platforms/steam/setup/phone/begin";
 pub(crate) const STEAM_SETUP_PHONE_VERIFY_PATH: &str = "/platforms/steam/setup/phone/verify";
@@ -283,6 +284,12 @@ pub(crate) struct PendingSteamSetup {
 }
 
 pub(crate) enum SteamSetupStage {
+    AwaitingLoginCode {
+        login: steamguard::UserLogin<steamguard::transport::WebApiTransport>,
+        transport: steamguard::transport::WebApiTransport,
+        steam_username: String,
+        prompt: crate::platforms::steam::GuardLoginCodePrompt,
+    },
     AwaitingAccountEmailConfirmation {
         registrar: steamguard::accountlinker::AccountLinker<steamguard::transport::WebApiTransport>,
         steam_username: String,
@@ -1713,6 +1720,7 @@ mod tests {
         context.insert("platforms", &platforms);
         context.insert("now", "2026-03-14 09:00:00 UTC");
         context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+        context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
         context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
         context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
         context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);
@@ -1851,6 +1859,7 @@ mod tests {
         );
         context.insert("now", "2026-03-14 09:00:00 UTC");
         context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+        context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
         context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
         context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
         context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);

@@ -206,6 +206,12 @@ struct SteamSetupBeginForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct SteamSetupLoginCodeForm {
+    code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct SteamSetupPhoneNumberForm {
     phone_number: String,
     lang: Option<String>,
@@ -938,6 +944,7 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         // Setup / Link authenticator
         .route(STEAM_SETUP_BEGIN_PATH, post(setup_begin_handler))
+        .route(STEAM_SETUP_LOGIN_CODE_PATH, post(setup_login_code_handler))
         .route(STEAM_SETUP_RESUME_PATH, post(setup_resume_handler))
         .route(STEAM_SETUP_PHONE_BEGIN_PATH, post(setup_phone_begin_handler))
         .route(STEAM_SETUP_PHONE_VERIFY_PATH, post(setup_phone_verify_handler))
@@ -1081,6 +1088,7 @@ pub(crate) async fn render_workspace_page(
     context.insert("approval_ready_accounts", &approval_ready_accounts);
     context.insert("snapshot", &snapshot);
     context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
+    context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
     context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
     context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
     context.insert(
@@ -1278,6 +1286,12 @@ fn steam_setup_failure_message(
         translations.steam_setup_rate_limited_message.to_owned()
     } else if message.contains("bad_sms_code") {
         translations.steam_setup_bad_sms_code_message.to_owned()
+    } else if message.contains("login_code_required") {
+        translations.steam_setup_login_code_missing_message.to_owned()
+    } else if message.contains("Steam Guard code was rejected")
+        || message.contains("sign-in code was rejected")
+    {
+        translations.steam_setup_login_code_failed_message.to_owned()
     } else if message.contains("requires_email_login_confirmation") {
         translations.steam_login_requires_email_message.to_owned()
     } else if message.contains("requires_trusted_device_confirmation") {
@@ -1325,6 +1339,47 @@ async fn store_pending_setup(
     pending: PendingSteamSetup,
 ) {
     app_state.steam_setups.write().await.insert(setup_id, pending);
+}
+
+async fn store_setup_login_code_prompt(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+    setup_id: String,
+    steam_username: String,
+    login: steamguard::UserLogin<steamguard::transport::WebApiTransport>,
+    transport: steamguard::transport::WebApiTransport,
+    prompt: steam_platform::GuardLoginCodePrompt,
+) -> Response {
+    let code_kind = match prompt.kind {
+        steam_platform::GuardLoginCodeKind::ExistingGuardCode => "device",
+        steam_platform::GuardLoginCodeKind::EmailCode => "email",
+    };
+    let hint = prompt.hint.clone();
+    store_pending_setup(
+        app_state,
+        setup_id.clone(),
+        PendingSteamSetup {
+            user_id: authenticated.user.id.clone(),
+            auth_session_id: authenticated.auth_session.id.clone(),
+            created_at: Utc::now().timestamp(),
+            stage: SteamSetupStage::AwaitingLoginCode {
+                login,
+                transport,
+                steam_username,
+                prompt,
+            },
+        },
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "step": "login_code",
+        "setup_id": setup_id,
+        "code_kind": code_kind,
+        "hint": hint,
+    }))
+    .into_response()
 }
 
 async fn store_setup_outcome(
@@ -2842,7 +2897,10 @@ async fn setup_begin_handler(
     let username = form.steam_username.clone();
     let password = form.steam_password.clone();
     match steam_platform::enroll_new_guard(username, password).await {
-        Ok((steam_username, outcome)) => {
+        Ok(steam_platform::GuardEnrollmentStartResult::Ready {
+            steam_username,
+            outcome,
+        }) => {
             let setup_id = Uuid::new_v4().to_string();
             store_setup_outcome(
                 &app_state,
@@ -2853,6 +2911,24 @@ async fn setup_begin_handler(
             )
             .await
         }
+        Ok(steam_platform::GuardEnrollmentStartResult::LoginCodeRequired {
+            steam_username,
+            login,
+            transport,
+            prompt,
+        }) => {
+            let setup_id = Uuid::new_v4().to_string();
+            store_setup_login_code_prompt(
+                &app_state,
+                &authenticated,
+                setup_id,
+                steam_username,
+                login,
+                transport,
+                prompt,
+            )
+            .await
+        }
         Err(error) => {
             warn!("Steam setup begin failed: {error}");
             (
@@ -2860,6 +2936,139 @@ async fn setup_begin_handler(
                 Json(serde_json::json!({
                     "ok": false,
                     "message": format!("{}: {error}", translations.steam_setup_link_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn setup_login_code_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSetupLoginCodeForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if form.code.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_login_code_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some((setup_id, pending)) =
+        take_pending_setup_for_user(&app_state, &authenticated.user.id).await
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_setup_no_pending_message
+            })),
+        )
+            .into_response();
+    };
+
+    match pending.stage {
+        SteamSetupStage::AwaitingLoginCode {
+            login,
+            transport,
+            steam_username,
+            prompt,
+        } => match steam_platform::continue_guard_enrollment_with_login_code(
+            login,
+            transport,
+            prompt,
+            form.code,
+        )
+        .await
+        {
+            Ok(steam_platform::GuardLoginCodeSubmitResult::Advanced(outcome)) => {
+                store_setup_outcome(
+                    &app_state,
+                    &authenticated,
+                    setup_id,
+                    steam_username,
+                    outcome,
+                )
+                .await
+            }
+            Ok(steam_platform::GuardLoginCodeSubmitResult::Retry {
+                login,
+                transport,
+                prompt,
+                error,
+            }) => {
+                warn!("Steam setup login-code verification failed: {error}");
+                store_pending_setup(
+                    &app_state,
+                    setup_id,
+                    PendingSteamSetup {
+                        user_id: authenticated.user.id.clone(),
+                        auth_session_id: authenticated.auth_session.id.clone(),
+                        created_at: Utc::now().timestamp(),
+                        stage: SteamSetupStage::AwaitingLoginCode {
+                            login,
+                            transport,
+                            steam_username,
+                            prompt,
+                        },
+                    },
+                )
+                .await;
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_login_code_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+            Err(error) => {
+                warn!("Steam setup login-code task failed: {error}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": steam_setup_failure_message(
+                            language,
+                            &error,
+                            translations.steam_setup_login_code_failed_message,
+                        )
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        other_stage => {
+            store_pending_setup(
+                &app_state,
+                setup_id,
+                PendingSteamSetup {
+                    user_id: pending.user_id,
+                    auth_session_id: pending.auth_session_id,
+                    created_at: pending.created_at,
+                    stage: other_stage,
+                },
+            )
+            .await;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_setup_no_pending_message
                 })),
             )
                 .into_response()
