@@ -1278,6 +1278,16 @@ fn steam_setup_failure_message(
         translations.steam_setup_rate_limited_message.to_owned()
     } else if message.contains("bad_sms_code") {
         translations.steam_setup_bad_sms_code_message.to_owned()
+    } else if message.contains("requires_email_login_confirmation") {
+        translations.steam_login_requires_email_message.to_owned()
+    } else if message.contains("requires_trusted_device_confirmation") {
+        translations
+            .steam_login_requires_other_confirmation_message
+            .to_owned()
+    } else if message.contains("requires_existing_guard_code") {
+        translations
+            .steam_setup_requires_existing_guard_code_message
+            .to_owned()
     } else if message.contains("invalid_phone_number") {
         translations.steam_setup_invalid_phone_message.to_owned()
     } else if message.contains("phone_number_required") {

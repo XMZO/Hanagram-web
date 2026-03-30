@@ -673,6 +673,77 @@ fn map_guard_submit_error(error: UpdateAuthSessionError) -> anyhow::Error {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GuardSetupLoginGate {
+    CanContinue,
+    RequiresTrustedDeviceConfirmation,
+    RequiresEmail,
+    RequiresExistingGuardCode,
+    Unsupported,
+}
+
+fn classify_guard_setup_login_gate<I>(confirmation_types: I) -> GuardSetupLoginGate
+where
+    I: IntoIterator<Item = EAuthSessionGuardType>,
+{
+    let mut has_guardless_flow = false;
+    let mut has_device_code = false;
+    let mut requires_device_confirmation = false;
+    let mut requires_email = false;
+    let mut saw_any = false;
+
+    for confirmation_type in confirmation_types {
+        saw_any = true;
+        match confirmation_type {
+            EAuthSessionGuardType::k_EAuthSessionGuardType_None => {
+                has_guardless_flow = true;
+            }
+            EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode => {
+                has_device_code = true;
+            }
+            EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceConfirmation => {
+                requires_device_confirmation = true;
+            }
+            EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
+            | EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation => {
+                requires_email = true;
+            }
+            _ => {}
+        }
+    }
+
+    if has_guardless_flow || !saw_any {
+        return GuardSetupLoginGate::CanContinue;
+    }
+    if has_device_code {
+        return GuardSetupLoginGate::RequiresExistingGuardCode;
+    }
+    if requires_device_confirmation {
+        return GuardSetupLoginGate::RequiresTrustedDeviceConfirmation;
+    }
+    if requires_email {
+        return GuardSetupLoginGate::RequiresEmail;
+    }
+    GuardSetupLoginGate::Unsupported
+}
+
+fn ensure_guard_setup_login_can_continue<I>(confirmation_types: I) -> Result<()>
+where
+    I: IntoIterator<Item = EAuthSessionGuardType>,
+{
+    match classify_guard_setup_login_gate(confirmation_types) {
+        GuardSetupLoginGate::CanContinue => Ok(()),
+        GuardSetupLoginGate::RequiresTrustedDeviceConfirmation => {
+            bail!("requires_trusted_device_confirmation")
+        }
+        GuardSetupLoginGate::RequiresEmail => bail!("requires_email_login_confirmation"),
+        GuardSetupLoginGate::RequiresExistingGuardCode => {
+            bail!("requires_existing_guard_code")
+        }
+        GuardSetupLoginGate::Unsupported => bail!("unsupported_login_confirmation_method"),
+    }
+}
+
 async fn perform_credential_login(
     shared_secret: String,
     steam_username: String,
@@ -2091,20 +2162,9 @@ pub(crate) async fn enroll_new_guard(
         let guard_methods = login
             .begin_auth_via_credentials(&username, &steam_password)
             .map_err(map_login_error)?;
-
-        // Determine what guard types the account currently has so we can proceed accordingly.
-        let is_unprotected = guard_methods.iter().any(|m| {
-            m.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_None
-        });
-        let has_email_guard = guard_methods.iter().any(|m| {
-            m.confirmation_type == EAuthSessionGuardType::k_EAuthSessionGuardType_EmailCode
-        });
-
-        if !is_unprotected && has_email_guard {
-            // Email-only guard; tokens will be granted after polling without extra input.
-        } else if !is_unprotected {
-            // Possibly has a device guard already — we may need to migrate rather than enroll fresh.
-        }
+        ensure_guard_setup_login_can_continue(
+            guard_methods.iter().map(|method| method.confirmation_type),
+        )?;
 
         let tokens = login
             .poll_until_tokens()
@@ -2641,6 +2701,36 @@ mod tests {
         let key = generate_confirmation_key("GQP46b73Ws7gr8GmZFR0sDuau5c=", 1_617_591_917, "conf")
             .expect("confirmation key should generate");
         assert_eq!(key, "NaL8EIMhfy/7vBounJ0CvpKbrPk=");
+    }
+
+    #[test]
+    fn guard_setup_login_gate_allows_guardless_sign_in() {
+        assert_eq!(
+            classify_guard_setup_login_gate([
+                EAuthSessionGuardType::k_EAuthSessionGuardType_None,
+            ]),
+            GuardSetupLoginGate::CanContinue
+        );
+    }
+
+    #[test]
+    fn guard_setup_login_gate_blocks_existing_guard_code_requirement() {
+        assert_eq!(
+            classify_guard_setup_login_gate([
+                EAuthSessionGuardType::k_EAuthSessionGuardType_DeviceCode,
+            ]),
+            GuardSetupLoginGate::RequiresExistingGuardCode
+        );
+    }
+
+    #[test]
+    fn guard_setup_login_gate_blocks_email_confirmation_requirement() {
+        assert_eq!(
+            classify_guard_setup_login_gate([
+                EAuthSessionGuardType::k_EAuthSessionGuardType_EmailConfirmation,
+            ]),
+            GuardSetupLoginGate::RequiresEmail
+        );
     }
 
     #[test]

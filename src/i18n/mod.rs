@@ -767,6 +767,7 @@ pub struct TranslationSet {
     pub steam_setup_no_phone_message: &'static str,
     pub steam_setup_rate_limited_message: &'static str,
     pub steam_setup_bad_sms_code_message: &'static str,
+    pub steam_setup_requires_existing_guard_code_message: &'static str,
     pub steam_setup_missing_credentials_message: &'static str,
     pub steam_setup_phone_number_missing_message: &'static str,
     pub steam_setup_invalid_phone_message: &'static str,

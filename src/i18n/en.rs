@@ -757,6 +757,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_setup_no_phone_message: "A phone number is required on this account. Please add one via Steam settings first.",
     steam_setup_rate_limited_message: "Too many requests. Please wait a few hours before trying again.",
     steam_setup_bad_sms_code_message: "The confirmation code is incorrect. Please try again.",
+    steam_setup_requires_existing_guard_code_message: "Steam asked for a Steam Guard code from an existing device for this sign-in, so the authenticator cannot be linked automatically yet. Complete that login on the original device first, or use an already managed session to start the transfer.",
     steam_setup_missing_credentials_message: "Please enter both username and password.",
     steam_setup_phone_number_missing_message: "Enter the phone number that should be linked to this Steam account first.",
     steam_setup_invalid_phone_message: "That phone number format was not accepted. Include the country code, for example +1 415 555 0132.",

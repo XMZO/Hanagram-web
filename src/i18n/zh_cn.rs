@@ -757,6 +757,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_setup_no_phone_message: "此账号需要先绑定手机号。请在 Steam 设置中添加手机号后再试。",
     steam_setup_rate_limited_message: "请求过于频繁，请等待几小时后再试。",
     steam_setup_bad_sms_code_message: "验证码不正确，请重试。",
+    steam_setup_requires_existing_guard_code_message: "这次登录被 Steam 要求输入旧设备上的 Steam Guard 动态码，因此现在还不能自动绑定认证器。请先在原设备上完成这次登录，或者改用已经受管的会话来发起转移。",
     steam_setup_missing_credentials_message: "请输入用户名和密码。",
     steam_setup_phone_number_missing_message: "请先输入要绑定到这个 Steam 账号上的手机号。",
     steam_setup_invalid_phone_message: "手机号格式不正确，请带上国家区号，例如 +86 138 0000 0000。",
