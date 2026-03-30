@@ -69,6 +69,21 @@ where
         Ok(resp)
     }
 
+    pub fn enumerate_tokens(
+        &self,
+        req: CAuthentication_RefreshToken_Enumerate_Request,
+        access_token: &Jwt,
+    ) -> Result<ApiResponse<CAuthentication_RefreshToken_Enumerate_Response>, TransportError> {
+        let req =
+            ApiRequest::new(SERVICE_NAME, "EnumerateTokens", 1u32, req).with_access_token(access_token);
+        let resp = self
+			.transport
+			.send_request::<CAuthentication_RefreshToken_Enumerate_Request, CAuthentication_RefreshToken_Enumerate_Response>(
+				req,
+			)?;
+        Ok(resp)
+    }
+
     pub fn fetch_rsa_key(
         &mut self,
         account_name: String,
@@ -145,8 +160,10 @@ where
     pub fn revoke_refresh_token(
         &mut self,
         req: CAuthentication_RefreshToken_Revoke_Request,
+        access_token: &Jwt,
     ) -> Result<ApiResponse<CAuthentication_RefreshToken_Revoke_Response>, TransportError> {
-        let req = ApiRequest::new(SERVICE_NAME, "RevokeRefreshToken", 1u32, req);
+        let req =
+            ApiRequest::new(SERVICE_NAME, "RevokeRefreshToken", 1u32, req).with_access_token(access_token);
         let resp = self
 			.transport
 			.send_request::<CAuthentication_RefreshToken_Revoke_Request, CAuthentication_RefreshToken_Revoke_Response>(
@@ -158,8 +175,10 @@ where
     pub fn revoke_access_token(
         &mut self,
         req: CAuthenticationSupport_RevokeToken_Request,
+        access_token: &Jwt,
     ) -> Result<ApiResponse<CAuthenticationSupport_RevokeToken_Response>, TransportError> {
-        let req = ApiRequest::new(SERVICE_NAME, "RevokeToken", 1u32, req);
+        let req = ApiRequest::new(SERVICE_NAME, "RevokeToken", 1u32, req)
+            .with_access_token(access_token);
         let resp = self
 			.transport
 			.send_request::<CAuthenticationSupport_RevokeToken_Request, CAuthenticationSupport_RevokeToken_Response>(
@@ -237,6 +256,7 @@ impl_buildable_req!(
 );
 impl_buildable_req!(CAuthentication_BeginAuthSessionViaQR_Request, false);
 impl_buildable_req!(CAuthentication_AccessToken_GenerateForApp_Request, true);
+impl_buildable_req!(CAuthentication_RefreshToken_Enumerate_Request, true);
 
 impl BuildableRequest for CAuthentication_GetPasswordRSAPublicKey_Request {
     fn method() -> reqwest::Method {

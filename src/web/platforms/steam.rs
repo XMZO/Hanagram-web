@@ -37,6 +37,8 @@ struct SteamAccountView {
     has_revocation_code: bool,
     has_proxy: bool,
     proxy_url: Option<String>,
+    session_devices_api: Option<String>,
+    session_device_revoke_api: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -126,6 +128,24 @@ struct SteamApprovalSnapshot {
     approval_count: usize,
     generated_at: String,
     accounts: Vec<SteamApprovalAccountView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SteamSessionDeviceView {
+    token_id: String,
+    device_label: String,
+    platform_label: String,
+    location_label: Option<String>,
+    first_seen_at: Option<String>,
+    last_seen_at: Option<String>,
+    is_current: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SteamSessionDeviceSnapshot {
+    current_token_id: Option<String>,
+    device_count: usize,
+    devices: Vec<SteamSessionDeviceView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -254,6 +274,13 @@ struct SteamProxyForm {
     lang: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct SteamSessionDeviceRevokeForm {
+    scope: String,
+    token_id: Option<String>,
+    lang: Option<String>,
+}
+
 const STEAM_CODES_TAB_ID: &str = "codes";
 const STEAM_MANAGE_TAB_ID: &str = "manage";
 const STEAM_SETUP_TAB_ID: &str = "setup";
@@ -357,6 +384,14 @@ fn account_update_material_action(account_id: &str) -> String {
 
 fn account_login_action(account_id: &str) -> String {
     format!("{STEAM_WORKSPACE_PATH}/accounts/{account_id}/login")
+}
+
+fn account_session_devices_api(account_id: &str) -> String {
+    format!("/api/platforms/steam/accounts/{account_id}/devices")
+}
+
+fn account_session_device_revoke_api(account_id: &str) -> String {
+    format!("/api/platforms/steam/accounts/{account_id}/devices/revoke")
 }
 
 async fn refresh_account_confirmation_session_if_needed(
@@ -494,6 +529,10 @@ async fn build_workspace_snapshot(
         let rename_action = can_manage.then(|| account_rename_action(&account.id));
         let delete_action = can_manage.then(|| account_delete_action(&account.id));
         let login_action = can_manage.then(|| account_login_action(&account.id));
+        let session_devices_api =
+            (can_manage && has_session_tokens).then(|| account_session_devices_api(&account.id));
+        let session_device_revoke_api = (can_manage && has_session_tokens)
+            .then(|| account_session_device_revoke_api(&account.id));
         let code_started_at_unix_view = current_code.as_ref().map(|_| code_started_at_unix);
         let code_expires_at_unix_view = current_code.as_ref().map(|_| code_expires_at_unix);
         account_views.push(SteamAccountView {
@@ -530,6 +569,8 @@ async fn build_workspace_snapshot(
                 .as_deref()
                 .map_or(false, |v| !v.trim().is_empty()),
             proxy_url: account.proxy_url.clone(),
+            session_devices_api,
+            session_device_revoke_api,
         });
     }
 
@@ -946,8 +987,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(STEAM_SETUP_BEGIN_PATH, post(setup_begin_handler))
         .route(STEAM_SETUP_LOGIN_CODE_PATH, post(setup_login_code_handler))
         .route(STEAM_SETUP_RESUME_PATH, post(setup_resume_handler))
-        .route(STEAM_SETUP_PHONE_BEGIN_PATH, post(setup_phone_begin_handler))
-        .route(STEAM_SETUP_PHONE_VERIFY_PATH, post(setup_phone_verify_handler))
+        .route(
+            STEAM_SETUP_PHONE_BEGIN_PATH,
+            post(setup_phone_begin_handler),
+        )
+        .route(
+            STEAM_SETUP_PHONE_VERIFY_PATH,
+            post(setup_phone_verify_handler),
+        )
         .route(STEAM_SETUP_FINALIZE_PATH, post(setup_finalize_handler))
         .route(STEAM_SETUP_CANCEL_PATH, post(setup_cancel_handler))
         .route(
@@ -972,6 +1019,14 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/api/platforms/steam/accounts/{account_id}/status",
             get(account_status_handler),
+        )
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/devices",
+            get(account_session_devices_handler),
+        )
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/devices/revoke",
+            post(revoke_account_session_devices_handler),
         )
         // QR export
         .route(
@@ -1090,7 +1145,10 @@ pub(crate) async fn render_workspace_page(
     context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
     context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
     context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
-    context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
+    context.insert(
+        "steam_setup_phone_begin_action",
+        STEAM_SETUP_PHONE_BEGIN_PATH,
+    );
     context.insert(
         "steam_setup_phone_verify_action",
         STEAM_SETUP_PHONE_VERIFY_PATH,
@@ -1287,11 +1345,15 @@ fn steam_setup_failure_message(
     } else if message.contains("bad_sms_code") {
         translations.steam_setup_bad_sms_code_message.to_owned()
     } else if message.contains("login_code_required") {
-        translations.steam_setup_login_code_missing_message.to_owned()
+        translations
+            .steam_setup_login_code_missing_message
+            .to_owned()
     } else if message.contains("Steam Guard code was rejected")
         || message.contains("sign-in code was rejected")
     {
-        translations.steam_setup_login_code_failed_message.to_owned()
+        translations
+            .steam_setup_login_code_failed_message
+            .to_owned()
     } else if message.contains("requires_email_login_confirmation") {
         translations.steam_login_requires_email_message.to_owned()
     } else if message.contains("requires_trusted_device_confirmation") {
@@ -1333,12 +1395,12 @@ async fn take_pending_setup_for_user(
     Some((setup_id, pending))
 }
 
-async fn store_pending_setup(
-    app_state: &AppState,
-    setup_id: String,
-    pending: PendingSteamSetup,
-) {
-    app_state.steam_setups.write().await.insert(setup_id, pending);
+async fn store_pending_setup(app_state: &AppState, setup_id: String, pending: PendingSteamSetup) {
+    app_state
+        .steam_setups
+        .write()
+        .await
+        .insert(setup_id, pending);
 }
 
 async fn store_setup_login_code_prompt(
@@ -2983,10 +3045,7 @@ async fn setup_login_code_handler(
             steam_username,
             prompt,
         } => match steam_platform::continue_guard_enrollment_with_login_code(
-            login,
-            transport,
-            prompt,
-            form.code,
+            login, transport, prompt, form.code,
         )
         .await
         {
@@ -3159,9 +3218,7 @@ async fn setup_resume_handler(
             confirmation_email_address,
             phone_number_formatted,
         } => match steam_platform::continue_guard_phone_link(&registrar).await {
-            Ok(steam_platform::GuardPhoneEmailContinuation::StillWaiting {
-                seconds_to_wait,
-            }) => {
+            Ok(steam_platform::GuardPhoneEmailContinuation::StillWaiting { seconds_to_wait }) => {
                 store_pending_setup(
                     &app_state,
                     setup_id,
@@ -3178,10 +3235,15 @@ async fn setup_resume_handler(
                     },
                 )
                 .await;
-                let mut message = translations.steam_setup_phone_email_pending_message.to_owned();
+                let mut message = translations
+                    .steam_setup_phone_email_pending_message
+                    .to_owned();
                 if let Some(wait_seconds) = seconds_to_wait {
                     message.push_str(" (");
-                    message.push_str(&format_duration_for_display(language, i64::from(wait_seconds)));
+                    message.push_str(&format_duration_for_display(
+                        language,
+                        i64::from(wait_seconds),
+                    ));
                     message.push(')');
                 }
                 (
@@ -3322,9 +3384,7 @@ async fn setup_phone_begin_handler(
                         stage: SteamSetupStage::AwaitingPhoneEmailConfirmation {
                             registrar,
                             steam_username,
-                            confirmation_email_address: prompt
-                                .confirmation_email_address
-                                .clone(),
+                            confirmation_email_address: prompt.confirmation_email_address.clone(),
                             phone_number_formatted: prompt.phone_number_formatted.clone(),
                         },
                     },
@@ -3443,10 +3503,7 @@ async fn setup_phone_verify_handler(
                 )
                 .await
             }
-            Ok(steam_platform::GuardPhoneVerificationResult::Retry {
-                registrar,
-                error,
-            }) => {
+            Ok(steam_platform::GuardPhoneVerificationResult::Retry { registrar, error }) => {
                 warn!("Steam phone verification failed: {error}");
                 store_pending_setup(
                     &app_state,
@@ -3575,14 +3632,20 @@ async fn setup_finalize_handler(
             let username = steam_username.clone();
 
             let enrollment_result = tokio::task::spawn_blocking(move || {
-                steam_platform::confirm_guard_enrollment(registrar, guard_data, steam_timestamp, code)
+                steam_platform::confirm_guard_enrollment(
+                    registrar,
+                    guard_data,
+                    steam_timestamp,
+                    code,
+                )
             })
             .await;
 
             match enrollment_result {
-                Ok(steam_platform::GuardFinalizeResult::Completed { guard_data: enrolled_data }) => {
-                    let steam_root =
-                        steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+                Ok(steam_platform::GuardFinalizeResult::Completed {
+                    guard_data: enrolled_data,
+                }) => {
+                    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
                     match steam_platform::persist_enrolled_guard(
                         &steam_root,
                         master_key.as_ref().as_slice(),
@@ -3592,10 +3655,7 @@ async fn setup_finalize_handler(
                     .await
                     {
                         Ok(saved) => {
-                            let revocation_code = saved
-                                .revocation_code
-                                .clone()
-                                .unwrap_or_default();
+                            let revocation_code = saved.revocation_code.clone().unwrap_or_default();
                             let account_id = saved.id.clone();
 
                             // Store completion state.
@@ -3754,11 +3814,7 @@ async fn setup_transfer_start_handler(
                             steam_username: username,
                         },
                     };
-                    app_state
-                        .steam_setups
-                        .write()
-                        .await
-                        .insert(setup_id, ready);
+                    app_state.steam_setups.write().await.insert(setup_id, ready);
 
                     Json(serde_json::json!({
                         "ok": true,
@@ -3921,8 +3977,7 @@ async fn setup_transfer_finish_handler(
                 Ok(steam_platform::GuardMigrationFinishResult::Completed {
                     guard_data: migrated_guard,
                 }) => {
-                    let steam_root =
-                        steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+                    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
                     match steam_platform::persist_enrolled_guard(
                         &steam_root,
                         master_key.as_ref().as_slice(),
@@ -3932,8 +3987,7 @@ async fn setup_transfer_finish_handler(
                     .await
                     {
                         Ok(saved) => {
-                            let revocation_code =
-                                saved.revocation_code.clone().unwrap_or_default();
+                            let revocation_code = saved.revocation_code.clone().unwrap_or_default();
                             let account_id = saved.id.clone();
 
                             let complete = PendingSteamSetup {
@@ -3969,10 +4023,7 @@ async fn setup_transfer_finish_handler(
                         }
                     }
                 }
-                Ok(steam_platform::GuardMigrationFinishResult::Retry {
-                    registrar,
-                    error,
-                }) => {
+                Ok(steam_platform::GuardMigrationFinishResult::Retry { registrar, error }) => {
                     warn!("Steam transfer finish failed: {error}");
                     store_pending_setup(
                         &app_state,
@@ -4160,6 +4211,304 @@ async fn remove_authenticator_handler(
 }
 
 // ---------------------------------------------------------------------------
+// Logged-in device handlers
+// ---------------------------------------------------------------------------
+
+fn build_session_device_snapshot(
+    inventory: steam_platform::SteamSessionDeviceInventory,
+) -> SteamSessionDeviceSnapshot {
+    let devices = inventory
+        .devices
+        .into_iter()
+        .map(|device| SteamSessionDeviceView {
+            token_id: device.token_id.to_string(),
+            device_label: device.device_label,
+            platform_label: device.platform_label,
+            location_label: device.location_label,
+            first_seen_at: device.first_seen_at_unix.map(format_unix_timestamp),
+            last_seen_at: device.last_seen_at_unix.map(format_unix_timestamp),
+            is_current: device.is_current,
+        })
+        .collect::<Vec<_>>();
+
+    SteamSessionDeviceSnapshot {
+        current_token_id: inventory
+            .current_token_id
+            .map(|token_id| token_id.to_string()),
+        device_count: devices.len(),
+        devices,
+    }
+}
+
+async fn account_session_devices_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let account = match steam_platform::refresh_confirmation_session_if_needed(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+        false,
+    )
+    .await
+    {
+        Ok(Some(account)) => account,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_account_missing_message
+                })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            warn!(
+                "failed preparing Steam login device inventory for account {}: {}",
+                account_id, error
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_session_devices_load_failed_message)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if !account.has_session_tokens() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_session_devices_unavailable_message
+            })),
+        )
+            .into_response();
+    }
+
+    let inventory = match steam_platform::list_logged_in_devices(&account).await {
+        Ok(inventory) => inventory,
+        Err(error) if account.has_refreshable_session() => {
+            warn!(
+                "Steam login device inventory failed for account {}; retrying after refresh: {}",
+                account_id, error
+            );
+            let refreshed = match steam_platform::refresh_confirmation_session_if_needed(
+                &steam_root,
+                master_key.as_ref().as_slice(),
+                &account_id,
+                true,
+            )
+            .await
+            {
+                Ok(Some(account)) => account,
+                Ok(None) => {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_account_missing_message
+                        })),
+                    )
+                        .into_response();
+                }
+                Err(refresh_error) => {
+                    warn!(
+                        "failed refreshing Steam login device session for account {}: {}",
+                        account_id, refresh_error
+                    );
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": format!("{}: {refresh_error}", translations.steam_session_devices_load_failed_message)
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+
+            match steam_platform::list_logged_in_devices(&refreshed).await {
+                Ok(inventory) => inventory,
+                Err(retry_error) => {
+                    warn!(
+                        "failed listing Steam login devices for account {} after refresh: {}",
+                        account_id, retry_error
+                    );
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": format!("{}: {retry_error}", translations.steam_session_devices_load_failed_message)
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+        Err(error) => {
+            warn!(
+                "failed listing Steam login devices for account {}: {}",
+                account_id, error
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_session_devices_load_failed_message)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    Json(serde_json::json!({
+        "ok": true,
+        "snapshot": build_session_device_snapshot(inventory)
+    }))
+    .into_response()
+}
+
+async fn revoke_account_session_devices_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamSessionDeviceRevokeForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let selection = match form.scope.trim() {
+        "token" => match form
+            .token_id
+            .as_deref()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+        {
+            Some(token_id) => steam_platform::SteamSessionDeviceSelection::Token(token_id),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_session_revoke_failed_message
+                    })),
+                )
+                    .into_response();
+            }
+        },
+        "others" => steam_platform::SteamSessionDeviceSelection::Others,
+        "all" => steam_platform::SteamSessionDeviceSelection::All,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_session_revoke_failed_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::revoke_logged_in_devices(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+        selection,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            let base_message = if outcome.current_device_revoked {
+                translations.steam_session_revoke_current_success_message
+            } else {
+                translations.steam_session_revoke_success_message
+            };
+            Json(serde_json::json!({
+                "ok": true,
+                "message": format!("{base_message} ({})", outcome.revoked_count),
+                "current_device_revoked": outcome.current_device_revoked,
+                "revoked_count": outcome.revoked_count
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            warn!(
+                "failed revoking Steam login devices for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_session_revoke_failed_message)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Security profile handler
 // ---------------------------------------------------------------------------
 
@@ -4264,11 +4613,8 @@ async fn account_export_qr_handler(
     };
 
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    let (accounts, _) = steam_platform::discover_accounts(
-        &steam_root,
-        Some(master_key.as_ref().as_slice()),
-    )
-    .await;
+    let (accounts, _) =
+        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())).await;
 
     let account = match accounts.into_iter().find(|a| a.id == account_id) {
         Some(a) => a,
@@ -4470,11 +4816,8 @@ async fn bulk_confirmation_action(
     };
 
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    let (accounts, _) = steam_platform::discover_accounts(
-        &steam_root,
-        Some(master_key.as_ref().as_slice()),
-    )
-    .await;
+    let (accounts, _) =
+        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())).await;
 
     let account = match accounts.into_iter().find(|a| a.id == account_id) {
         Some(a) => a,
@@ -4613,10 +4956,7 @@ async fn account_proxy_handler(
         }))
         .into_response(),
         Err(error) => {
-            warn!(
-                "failed saving proxy for account {}: {error}",
-                account_id
-            );
+            warn!("failed saving proxy for account {}: {error}", account_id);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({

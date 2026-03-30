@@ -99,8 +99,7 @@ pub(crate) const STEAM_SETUP_PHONE_VERIFY_PATH: &str = "/platforms/steam/setup/p
 pub(crate) const STEAM_SETUP_FINALIZE_PATH: &str = "/platforms/steam/setup/finalize";
 pub(crate) const STEAM_SETUP_CANCEL_PATH: &str = "/platforms/steam/setup/cancel";
 pub(crate) const STEAM_SETUP_TRANSFER_START_PATH: &str = "/platforms/steam/setup/transfer/start";
-pub(crate) const STEAM_SETUP_TRANSFER_FINISH_PATH: &str =
-    "/platforms/steam/setup/transfer/finish";
+pub(crate) const STEAM_SETUP_TRANSFER_FINISH_PATH: &str = "/platforms/steam/setup/transfer/finish";
 pub(crate) const STEAM_IMPORT_WINAUTH_PATH: &str = "/platforms/steam/import/winauth";
 pub(crate) const STEAM_TIME_CHECK_API_PATH: &str = "/api/platforms/steam/time-check";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
@@ -1722,8 +1721,14 @@ mod tests {
         context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
         context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
         context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
-        context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
-        context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);
+        context.insert(
+            "steam_setup_phone_begin_action",
+            STEAM_SETUP_PHONE_BEGIN_PATH,
+        );
+        context.insert(
+            "steam_setup_phone_verify_action",
+            STEAM_SETUP_PHONE_VERIFY_PATH,
+        );
         context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
         context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
         context.insert(
@@ -1861,8 +1866,14 @@ mod tests {
         context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);
         context.insert("steam_setup_login_code_action", STEAM_SETUP_LOGIN_CODE_PATH);
         context.insert("steam_setup_resume_action", STEAM_SETUP_RESUME_PATH);
-        context.insert("steam_setup_phone_begin_action", STEAM_SETUP_PHONE_BEGIN_PATH);
-        context.insert("steam_setup_phone_verify_action", STEAM_SETUP_PHONE_VERIFY_PATH);
+        context.insert(
+            "steam_setup_phone_begin_action",
+            STEAM_SETUP_PHONE_BEGIN_PATH,
+        );
+        context.insert(
+            "steam_setup_phone_verify_action",
+            STEAM_SETUP_PHONE_VERIFY_PATH,
+        );
         context.insert("steam_setup_finalize_action", STEAM_SETUP_FINALIZE_PATH);
         context.insert("steam_setup_cancel_action", STEAM_SETUP_CANCEL_PATH);
         context.insert(

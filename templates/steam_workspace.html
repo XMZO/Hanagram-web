@@ -111,6 +111,22 @@
             statusLoading: {{ i18n.steam_status_loading_message | json_encode | safe }},
             statusActive: {{ i18n.steam_status_state_active | json_encode | safe }},
             statusInactive: {{ i18n.steam_status_state_inactive | json_encode | safe }},
+            sessionDevicesLoading: {{ i18n.steam_session_devices_loading_message | json_encode | safe }},
+            sessionDevicesEmpty: {{ i18n.steam_session_devices_empty_message | json_encode | safe }},
+            sessionDevicesLoadFailed: {{ i18n.steam_session_devices_load_failed_message | json_encode | safe }},
+            sessionDeviceCurrent: {{ i18n.steam_session_device_current_label | json_encode | safe }},
+            sessionDeviceFirstSeen: {{ i18n.steam_session_device_first_seen_label | json_encode | safe }},
+            sessionDeviceLastSeen: {{ i18n.steam_session_device_last_seen_label | json_encode | safe }},
+            sessionDeviceLocation: {{ i18n.steam_session_device_location_label | json_encode | safe }},
+            sessionDeviceUnknownLocation: {{ i18n.steam_session_device_unknown_location | json_encode | safe }},
+            sessionDeviceRevoke: {{ i18n.steam_session_device_revoke_button | json_encode | safe }},
+            sessionRevokeOthers: {{ i18n.steam_session_revoke_others_button | json_encode | safe }},
+            sessionRevokeAll: {{ i18n.steam_session_revoke_all_button | json_encode | safe }},
+            sessionRevokePrompt: {{ i18n.steam_session_revoke_prompt | json_encode | safe }},
+            sessionRevokeOthersPrompt: {{ i18n.steam_session_revoke_others_prompt | json_encode | safe }},
+            sessionRevokeAllPrompt: {{ i18n.steam_session_revoke_all_prompt | json_encode | safe }},
+            sessionRevokeRunning: {{ i18n.steam_session_revoke_running_message | json_encode | safe }},
+            sessionRevokeFailed: {{ i18n.steam_session_revoke_failed_message | json_encode | safe }},
             exportQrWarning: {{ i18n.steam_export_qr_warning | json_encode | safe }},
             exportQrCopied: {{ i18n.steam_export_qr_copied_message | json_encode | safe }},
             bulkAcceptBtn: {{ i18n.steam_bulk_accept_all_button | json_encode | safe }},
@@ -1249,6 +1265,194 @@
             }
         }
 
+        function setSteamSessionDevicesStatus(root, kind, message) {
+            if (!root) { return; }
+            const status = root.querySelector("[data-session-devices-status]");
+            if (!status) { return; }
+
+            if (!message) {
+                status.className = "mt-3 hidden rounded-[1rem] border px-4 py-3 text-sm leading-6";
+                status.textContent = "";
+                return;
+            }
+
+            const classMap = {
+                loading: "mt-3 rounded-[1rem] border border-butter/35 bg-[#fff7df] px-4 py-3 text-sm leading-6 text-[#8a6b24]",
+                success: "mt-3 rounded-[1rem] border border-sage/35 bg-[#eef4ee] px-4 py-3 text-sm leading-6 text-sageDeep",
+                error: "mt-3 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm leading-6 text-[#98675f]"
+            };
+
+            status.className = classMap[kind] || classMap.error;
+            status.textContent = message;
+        }
+
+        function setSteamSessionDeviceActionState(root, disabled) {
+            if (!root) { return; }
+            root.querySelectorAll("[data-session-device-action]").forEach((button) => {
+                button.disabled = disabled;
+            });
+        }
+
+        function renderSteamSessionDeviceCard(device) {
+            const lastSeen = device.last_seen_at || "—";
+            const firstSeen = device.first_seen_at || "—";
+            const location = device.location_label || I18N.sessionDeviceUnknownLocation;
+
+            return `<article class="rounded-[0.95rem] border border-line/80 bg-white/96 p-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <p class="min-w-0 truncate text-sm font-semibold text-ink">${escapeHtml(device.device_label)}</p>
+                            ${device.is_current
+                                ? `<span class="inline-flex rounded-full border border-sage/30 bg-mint px-2 py-1 text-[0.64rem] font-medium uppercase tracking-[0.16em] text-sageDeep">${escapeHtml(I18N.sessionDeviceCurrent)}</span>`
+                                : ""}
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-2">
+                            <span class="inline-flex rounded-full border border-steam/18 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(device.platform_label)}</span>
+                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">${escapeHtml(device.token_id)}</span>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        data-session-device-action
+                        data-session-device-revoke-token="${escapeHtml(device.token_id)}"
+                        class="rounded-[0.95rem] border border-line bg-white px-3 py-2 text-sm font-medium text-ink/76 transition hover:border-steam/25 hover:bg-steamMist/45"
+                    >${escapeHtml(I18N.sessionDeviceRevoke)}</button>
+                </div>
+                <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
+                        <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceLastSeen)}</p>
+                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(lastSeen)}</p>
+                    </div>
+                    <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
+                        <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceFirstSeen)}</p>
+                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(firstSeen)}</p>
+                    </div>
+                    <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
+                        <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceLocation)}</p>
+                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(location)}</p>
+                    </div>
+                </div>
+            </article>`;
+        }
+
+        function applySteamSessionDeviceSnapshot(root, snapshot) {
+            if (!root) { return; }
+            root.dataset.sessionDevicesLoaded = "true";
+            root.dataset.currentTokenId = snapshot.current_token_id || "";
+
+            const list = root.querySelector("[data-session-devices-list]");
+            if (list) {
+                list.innerHTML = snapshot.devices.length > 0
+                    ? `<div class="space-y-2.5">${snapshot.devices.map(renderSteamSessionDeviceCard).join("")}</div>`
+                    : `<div class="rounded-[0.95rem] border border-dashed border-line bg-paper/72 px-4 py-6 text-sm text-ink/56">${escapeHtml(I18N.sessionDevicesEmpty)}</div>`;
+            }
+
+            const othersButton = root.querySelector("[data-session-devices-bulk='others']");
+            if (othersButton) {
+                const hasOtherDevices = snapshot.devices.some((device) => !device.is_current);
+                othersButton.disabled = !snapshot.current_token_id || !hasOtherDevices;
+            }
+
+            const allButton = root.querySelector("[data-session-devices-bulk='all']");
+            if (allButton) {
+                allButton.disabled = snapshot.devices.length === 0;
+            }
+        }
+
+        async function loadSteamSessionDevices(root, force = false) {
+            if (!root || root.dataset.sessionDevicesLoading === "true") { return; }
+            const api = root.dataset.sessionDevicesApi;
+            if (!api) { return; }
+
+            root.dataset.sessionDevicesLoading = "true";
+            setSteamSessionDevicesStatus(root, "loading", I18N.sessionDevicesLoading);
+            setSteamSessionDeviceActionState(root, true);
+
+            try {
+                const url = new URL(api, window.location.origin);
+                url.searchParams.set("lang", LANG);
+                if (force) {
+                    url.searchParams.set("_", String(Date.now()));
+                }
+
+                const response = await fetch(`${url.pathname}${url.search}`, {
+                    headers: { "Accept": "application/json" },
+                    cache: "no-store"
+                });
+                const data = await response.json();
+                if (!response.ok || !data?.ok) {
+                    setSteamSessionDevicesStatus(root, "error", data?.message || I18N.sessionDevicesLoadFailed);
+                    return;
+                }
+
+                applySteamSessionDeviceSnapshot(root, data.snapshot || { current_token_id: null, devices: [] });
+                setSteamSessionDevicesStatus(root, "", "");
+            } catch (error) {
+                setSteamSessionDevicesStatus(root, "error", error?.message || I18N.sessionDevicesLoadFailed);
+            } finally {
+                root.dataset.sessionDevicesLoading = "false";
+                setSteamSessionDeviceActionState(root, false);
+            }
+        }
+
+        async function revokeSteamSessionDevices(root, payload, promptMessage) {
+            if (!root) { return; }
+            const api = root.dataset.sessionDeviceRevokeApi;
+            if (!api) { return; }
+            if (promptMessage && !window.confirm(promptMessage)) { return; }
+
+            setSteamSessionDevicesStatus(root, "loading", I18N.sessionRevokeRunning);
+            setSteamSessionDeviceActionState(root, true);
+
+            try {
+                const response = await fetch(api, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...payload, lang: LANG })
+                });
+                const data = await response.json();
+                if (!response.ok || !data?.ok) {
+                    setSteamSessionDevicesStatus(root, "error", data?.message || I18N.sessionRevokeFailed);
+                    return;
+                }
+
+                const successMessage = data.message || "";
+                if (data.current_device_revoked) {
+                    setSteamSessionDevicesStatus(root, "success", successMessage);
+                    window.setTimeout(() => window.location.reload(), 900);
+                    return;
+                }
+
+                await loadSteamSessionDevices(root, true);
+                setSteamSessionDevicesStatus(root, "success", successMessage);
+            } catch (error) {
+                setSteamSessionDevicesStatus(root, "error", error?.message || I18N.sessionRevokeFailed);
+            } finally {
+                setSteamSessionDeviceActionState(root, false);
+            }
+        }
+
+        function bindSteamSessionDevicePanels() {
+            document.querySelectorAll("[data-session-devices-root]").forEach((root) => {
+                if (root.dataset.sessionDevicesBound === "true") { return; }
+                root.dataset.sessionDevicesBound = "true";
+
+                root.addEventListener("toggle", () => {
+                    if (root.open && root.dataset.sessionDevicesLoaded !== "true") {
+                        loadSteamSessionDevices(root);
+                    }
+                });
+
+                const refreshButton = root.querySelector("[data-session-devices-refresh]");
+                if (refreshButton) {
+                    refreshButton.addEventListener("click", () => {
+                        loadSteamSessionDevices(root, true);
+                    });
+                }
+            });
+        }
+
         function closeActiveSteamManageModal(restoreFocus = true) {
             if (!activeSteamManageModal) { return; }
 
@@ -1355,6 +1559,7 @@
             }
             applyManageFilter();
             bindSteamApprovalPasteForms();
+            bindSteamSessionDevicePanels();
 
             refreshSteamCountdowns();
             window.setInterval(() => refreshSteamCountdowns(), 1000);
@@ -1817,6 +2022,31 @@
                                                 <button type="submit" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_login_existing_button }}</button>
                                             </form>
                                         </div>
+
+                                        {% if account.session_devices_api and account.session_device_revoke_api %}
+                                        <details
+                                            class="steam-disclosure rounded-[1rem] border border-line/80 bg-paper/86 px-3.5 py-3"
+                                            data-session-devices-root
+                                            data-session-devices-api="{{ account.session_devices_api }}"
+                                            data-session-device-revoke-api="{{ account.session_device_revoke_api }}"
+                                            data-session-devices-loaded="false"
+                                        >
+                                            <summary class="cursor-pointer text-sm font-medium text-ink">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                                    <span>{{ i18n.steam_session_devices_title }}</span>
+                                                </span>
+                                            </summary>
+                                            <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_session_devices_description }}</p>
+                                            <div class="mt-3 flex flex-wrap gap-2">
+                                                <button type="button" data-session-devices-refresh data-session-device-action class="rounded-[0.95rem] border border-steam/20 bg-white px-3 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_session_devices_refresh_button }}</button>
+                                                <button type="button" data-session-devices-bulk="others" data-session-device-action class="rounded-[0.95rem] border border-line bg-white px-3 py-2 text-sm font-medium text-ink/76 transition hover:border-steam/25 hover:bg-steamMist/45">{{ i18n.steam_session_revoke_others_button }}</button>
+                                                <button type="button" data-session-devices-bulk="all" data-session-device-action class="rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_session_revoke_all_button }}</button>
+                                            </div>
+                                            <div data-session-devices-status class="mt-3 hidden rounded-[1rem] border px-4 py-3 text-sm leading-6"></div>
+                                            <div data-session-devices-list class="mt-3 max-h-[23rem] overflow-y-auto rounded-[1rem] border border-line/80 bg-white/88 p-2.5"></div>
+                                        </details>
+                                        {% endif %}
 
                                         {% if account.has_session_tokens and not account.has_revocation_code %}
                                         <div class="rounded-[1rem] border border-sage/25 bg-mint/60 px-3.5 py-3">
@@ -2695,6 +2925,32 @@
                 timeCheckBtn.disabled = false;
             });
         }
+
+        // ----------- Signed-in Steam devices -----------
+        document.addEventListener("click", async (event) => {
+            const deviceButton = event.target.closest("[data-session-device-revoke-token]");
+            if (deviceButton) {
+                const root = deviceButton.closest("[data-session-devices-root]");
+                const tokenId = deviceButton.dataset.sessionDeviceRevokeToken || "";
+                if (!tokenId) { return; }
+                await revokeSteamSessionDevices(
+                    root,
+                    { scope: "token", token_id: tokenId },
+                    I18N.sessionRevokePrompt
+                );
+                return;
+            }
+
+            const bulkButton = event.target.closest("[data-session-devices-bulk]");
+            if (!bulkButton) { return; }
+
+            const root = bulkButton.closest("[data-session-devices-root]");
+            const scope = bulkButton.dataset.sessionDevicesBulk || "";
+            const promptMessage = scope === "others"
+                ? I18N.sessionRevokeOthersPrompt
+                : I18N.sessionRevokeAllPrompt;
+            await revokeSteamSessionDevices(root, { scope }, promptMessage);
+        });
 
         // ----------- Remove authenticator (in manage card modals) -----------
         document.addEventListener("click", async (e) => {

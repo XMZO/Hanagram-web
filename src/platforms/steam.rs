@@ -4,7 +4,6 @@
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use base64::Engine;
 use chrono::Utc;
-use steamguard::ExposeSecret;
 use hmac::{Hmac, Mac};
 use image::ImageReader;
 use rqrr::PreparedImage;
@@ -12,14 +11,17 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use steamguard::ExposeSecret;
 use steamguard::accountlinker::{
     AccountLinkError, AccountLinker, FinalizeLinkError, RemoveAuthenticatorError, TransferError,
 };
-use steamguard::phonelinker::{PhoneLinker, SetPhoneNumberError, VerifyPhoneError};
 use steamguard::approver::Challenge;
+use steamguard::phonelinker::{PhoneLinker, SetPhoneNumberError, VerifyPhoneError};
 use steamguard::protobufs::enums::ESessionPersistence;
 use steamguard::protobufs::steammessages_auth_steamclient::{
-    CAuthentication_GetAuthSessionInfo_Response, EAuthSessionGuardType, EAuthTokenPlatformType,
+    CAuthentication_GetAuthSessionInfo_Response, CAuthentication_RefreshToken_Enumerate_Request,
+    CAuthentication_RefreshToken_Revoke_Request, EAuthSessionGuardType, EAuthTokenPlatformType,
+    EAuthTokenRevokeAction,
 };
 use steamguard::refresher::TokenRefresher;
 use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient};
@@ -241,6 +243,36 @@ pub(crate) struct SteamLoginApproval {
     pub(crate) country: Option<String>,
     pub(crate) platform_label: String,
     pub(crate) device_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SteamSessionDevice {
+    pub(crate) token_id: u64,
+    pub(crate) device_label: String,
+    pub(crate) platform_label: String,
+    pub(crate) location_label: Option<String>,
+    pub(crate) first_seen_at_unix: Option<i64>,
+    pub(crate) last_seen_at_unix: Option<i64>,
+    pub(crate) is_current: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SteamSessionDeviceInventory {
+    pub(crate) current_token_id: Option<u64>,
+    pub(crate) devices: Vec<SteamSessionDevice>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SteamSessionDeviceSelection {
+    Token(u64),
+    Others,
+    All,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SteamSessionRevokeOutcome {
+    pub(crate) revoked_count: usize,
+    pub(crate) current_device_revoked: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -624,6 +656,19 @@ fn stored_web_session_mut(record: &mut StoredSteamAccount) -> &mut StoredSteamWe
         .get_or_insert_with(default_stored_web_session)
 }
 
+fn clear_stored_session_material(record: &mut StoredSteamAccount) {
+    if let Some(session) = record.session.as_mut() {
+        session.session_id = None;
+        session.steam_login = None;
+        session.steam_login_secure = None;
+        session.web_cookie = None;
+        session.oauth_token = None;
+        session.access_token = None;
+        session.refresh_token = None;
+    }
+    record.session = None;
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SteamCredentialLoginResult {
     steam_username: String,
@@ -734,7 +779,9 @@ where
     GuardSetupLoginGate::Unsupported
 }
 
-fn resolve_guard_setup_login_prompt<I>(confirmation_methods: I) -> Result<Option<GuardLoginCodePrompt>>
+fn resolve_guard_setup_login_prompt<I>(
+    confirmation_methods: I,
+) -> Result<Option<GuardLoginCodePrompt>>
 where
     I: IntoIterator<Item = (EAuthSessionGuardType, String)>,
 {
@@ -1073,6 +1120,220 @@ pub(crate) async fn respond_to_login_approval(
     })
     .await
     .context("Steam login approval action task failed")?
+}
+
+fn ordered_selected_session_tokens(
+    inventory: &SteamSessionDeviceInventory,
+    selection: SteamSessionDeviceSelection,
+) -> Result<Vec<u64>> {
+    let mut token_ids = match selection {
+        SteamSessionDeviceSelection::Token(token_id) => {
+            ensure!(
+                inventory
+                    .devices
+                    .iter()
+                    .any(|device| device.token_id == token_id),
+                "requested Steam login device was not found"
+            );
+            vec![token_id]
+        }
+        SteamSessionDeviceSelection::Others => {
+            let current_token_id = inventory
+                .current_token_id
+                .context("current Steam login device is unknown")?;
+            inventory
+                .devices
+                .iter()
+                .filter(|device| device.token_id != current_token_id)
+                .map(|device| device.token_id)
+                .collect::<Vec<_>>()
+        }
+        SteamSessionDeviceSelection::All => inventory
+            .devices
+            .iter()
+            .map(|device| device.token_id)
+            .collect::<Vec<_>>(),
+    };
+
+    if let Some(current_token_id) = inventory.current_token_id {
+        if let Some(index) = token_ids
+            .iter()
+            .position(|token_id| *token_id == current_token_id)
+        {
+            let current = token_ids.remove(index);
+            token_ids.push(current);
+        }
+    }
+
+    Ok(token_ids)
+}
+
+pub(crate) async fn list_logged_in_devices(
+    account: &SteamGuardAccount,
+) -> Result<SteamSessionDeviceInventory> {
+    let vendor_tokens = build_vendor_tokens(account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let auth_client = AuthenticationClient::new(transport);
+        let request = CAuthentication_RefreshToken_Enumerate_Request::new();
+        let response = auth_client
+            .enumerate_tokens(request, vendor_tokens.access_token())
+            .context("failed listing Steam login devices")?;
+        let payload = response.into_response_data();
+        let current_token_id = match payload.requesting_token() {
+            0 => None,
+            token_id => Some(token_id),
+        };
+
+        let mut devices = payload
+            .refresh_tokens
+            .iter()
+            .filter(|device| device.logged_in())
+            .map(|device| {
+                let platform_label =
+                    login_approval_platform_label(device.platform_type()).to_owned();
+                let device_label =
+                    normalize_optional_string(Some(device.token_description().to_owned()))
+                        .unwrap_or_else(|| platform_label.clone());
+
+                let last_seen = device.last_seen.as_ref();
+                let first_seen = device.first_seen.as_ref();
+                let location_source = last_seen.or(first_seen);
+                let location_label = location_source.and_then(|event| {
+                    let mut parts = Vec::new();
+                    if let Some(city) = normalize_optional_string(Some(event.city().to_owned())) {
+                        parts.push(city);
+                    }
+                    if let Some(state) = normalize_optional_string(Some(event.state().to_owned())) {
+                        parts.push(state);
+                    }
+                    if let Some(country) =
+                        normalize_optional_string(Some(event.country().to_owned()))
+                    {
+                        parts.push(country);
+                    }
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(parts.join(", "))
+                    }
+                });
+
+                SteamSessionDevice {
+                    token_id: device.token_id(),
+                    device_label,
+                    platform_label,
+                    location_label,
+                    first_seen_at_unix: first_seen
+                        .map(|event| event.time() as i64)
+                        .filter(|time| *time > 0),
+                    last_seen_at_unix: last_seen
+                        .map(|event| event.time() as i64)
+                        .filter(|time| *time > 0),
+                    is_current: current_token_id == Some(device.token_id()),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        devices.sort_by(|left, right| {
+            right
+                .is_current
+                .cmp(&left.is_current)
+                .then_with(|| {
+                    right
+                        .last_seen_at_unix
+                        .unwrap_or(0)
+                        .cmp(&left.last_seen_at_unix.unwrap_or(0))
+                })
+                .then_with(|| left.device_label.cmp(&right.device_label))
+                .then_with(|| left.token_id.cmp(&right.token_id))
+        });
+
+        Ok::<SteamSessionDeviceInventory, anyhow::Error>(SteamSessionDeviceInventory {
+            current_token_id,
+            devices,
+        })
+    })
+    .await
+    .context("Steam login device listing task failed")?
+}
+
+pub(crate) async fn revoke_logged_in_devices(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    selection: SteamSessionDeviceSelection,
+) -> Result<SteamSessionRevokeOutcome> {
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let Some(mut record) = load_stored_account(master_key, &storage_path).await? else {
+        bail!("account not found");
+    };
+
+    let mut account =
+        refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false)
+            .await?
+            .context("account not found")?;
+    let inventory = match list_logged_in_devices(&account).await {
+        Ok(inventory) => inventory,
+        Err(error) if account.has_refreshable_session() => {
+            warn!(
+                "Steam login device listing failed for account {}; retrying after refresh: {}",
+                account_id, error
+            );
+            account =
+                refresh_confirmation_session_if_needed(root_dir, master_key, account_id, true)
+                    .await?
+                    .context("account not found")?;
+            list_logged_in_devices(&account)
+                .await
+                .context("failed listing Steam login devices after refreshing the session")?
+        }
+        Err(error) => return Err(error),
+    };
+
+    let token_ids = ordered_selected_session_tokens(&inventory, selection)?;
+    ensure!(
+        !token_ids.is_empty(),
+        "no matching Steam login devices are currently online"
+    );
+
+    let vendor_tokens = build_vendor_tokens(&account)?;
+    let current_device_revoked = inventory
+        .current_token_id
+        .is_some_and(|token_id| token_ids.contains(&token_id));
+    let revoked_count = token_ids.len();
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let mut auth_client = AuthenticationClient::new(transport);
+
+        for token_id in token_ids {
+            let mut request = CAuthentication_RefreshToken_Revoke_Request::new();
+            request.set_token_id(token_id);
+            request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
+            auth_client
+                .revoke_refresh_token(request, vendor_tokens.access_token())
+                .with_context(|| format!("failed revoking Steam login device token {token_id}"))?;
+        }
+
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .context("Steam login device revoke task failed")??;
+
+    if current_device_revoked {
+        clear_stored_session_material(&mut record);
+        record.updated_at_unix = Utc::now().timestamp();
+        persist_stored_account(master_key, &storage_path, &record).await?;
+    }
+
+    Ok(SteamSessionRevokeOutcome {
+        revoked_count,
+        current_device_revoked,
+    })
 }
 
 pub(crate) async fn approve_login_challenge(
@@ -2144,7 +2405,8 @@ pub(crate) async fn continue_guard_enrollment_with_login_code(
                         login,
                         transport,
                         prompt,
-                        error: error.context("could not obtain session tokens during guard enrollment"),
+                        error: error
+                            .context("could not obtain session tokens during guard enrollment"),
                     },
                 );
             }
@@ -2193,7 +2455,8 @@ pub(crate) async fn start_guard_phone_link(
     spawn_blocking(move || {
         let trimmed = phone_number_raw.trim();
         ensure!(!trimmed.is_empty(), "phone_number_required");
-        let parsed = phonenumber::parse(None, trimmed).map_err(|_| anyhow!("invalid_phone_number"))?;
+        let parsed =
+            phonenumber::parse(None, trimmed).map_err(|_| anyhow!("invalid_phone_number"))?;
         let linker = build_phone_linker(tokens)?;
         let response = linker
             .set_account_phone_number(parsed)
@@ -2221,9 +2484,8 @@ pub(crate) async fn continue_guard_phone_link(
                 },
             );
         }
-        linker
-            .send_phone_verification_code(0)
-            .map_err(|error| match error.downcast::<steamguard::transport::TransportError>() {
+        linker.send_phone_verification_code(0).map_err(|error| {
+            match error.downcast::<steamguard::transport::TransportError>() {
                 Ok(transport_error) => anyhow!(transport_error.to_string()),
                 Err(other) => {
                     let message = other.to_string();
@@ -2233,7 +2495,8 @@ pub(crate) async fn continue_guard_phone_link(
                         anyhow!("failed sending Steam phone verification code: {message}")
                     }
                 }
-            })?;
+            }
+        })?;
         Ok::<GuardPhoneEmailContinuation, anyhow::Error>(GuardPhoneEmailContinuation::SmsSent)
     })
     .await
@@ -2402,7 +2665,9 @@ pub(crate) fn initiate_guard_migration(
 ) -> GuardMigrationStartResult {
     match registrar.transfer_start() {
         Ok(()) => GuardMigrationStartResult::AwaitingSms { registrar },
-        Err(TransferError::GenericFailure) => GuardMigrationStartResult::PhoneRequired { registrar },
+        Err(TransferError::GenericFailure) => {
+            GuardMigrationStartResult::PhoneRequired { registrar }
+        }
         Err(error) => GuardMigrationStartResult::Retry {
             registrar,
             error: error.into(),
@@ -2437,8 +2702,8 @@ pub(crate) async fn persist_enrolled_guard(
 ) -> Result<SteamGuardAccount> {
     ensure_managed_accounts_dir(root_dir).await?;
 
-    let secret_b64 = base64::engine::general_purpose::STANDARD
-        .encode(guard_data.shared_secret.expose_secret());
+    let secret_b64 =
+        base64::engine::general_purpose::STANDARD.encode(guard_data.shared_secret.expose_secret());
     validate_shared_secret(&secret_b64)?;
 
     let tokens = guard_data
@@ -2528,12 +2793,12 @@ pub(crate) async fn revoke_account_guard(
                 revoked: true,
                 tries_left: None,
             }),
-            Err(RemoveAuthenticatorError::IncorrectRevocationCode {
-                attempts_remaining,
-            }) => Ok(GuardRevocationOutcome {
-                revoked: false,
-                tries_left: Some(attempts_remaining),
-            }),
+            Err(RemoveAuthenticatorError::IncorrectRevocationCode { attempts_remaining }) => {
+                Ok(GuardRevocationOutcome {
+                    revoked: false,
+                    tries_left: Some(attempts_remaining),
+                })
+            }
             Err(RemoveAuthenticatorError::MissingRevocationCode) => {
                 bail!("missing_revocation_code")
             }
@@ -2678,7 +2943,10 @@ pub(crate) async fn ingest_third_party_guard(
     display_name_override: Option<&str>,
 ) -> Result<SteamGuardAccount> {
     let input = raw_uri.trim();
-    ensure!(input.starts_with("otpauth://"), "expected otpauth:// scheme");
+    ensure!(
+        input.starts_with("otpauth://"),
+        "expected otpauth:// scheme"
+    );
 
     // Extract the `data` query param which holds a percent-encoded JSON blob.
     let qs = input
@@ -2710,8 +2978,8 @@ pub(crate) async fn ingest_third_party_guard(
     }
 
     let sid: Option<u64> = payload.steam_id.parse().ok();
-    let dev_id =
-        normalize_optional_string(Some(payload.device_id)).or_else(|| sid.map(generate_device_id_for_steam_id));
+    let dev_id = normalize_optional_string(Some(payload.device_id))
+        .or_else(|| sid.map(generate_device_id_for_steam_id));
 
     let name = display_name_override
         .filter(|v| !v.trim().is_empty())
@@ -2808,9 +3076,7 @@ pub(crate) fn create_proxied_http_client(
 // ---------------------------------------------------------------------------
 
 /// Query the Steam server clock and compare with local time. Returns `(remote, local, drift)`.
-pub(crate) async fn measure_clock_drift(
-    http_client: &reqwest::Client,
-) -> Result<(i64, i64, i64)> {
+pub(crate) async fn measure_clock_drift(http_client: &reqwest::Client) -> Result<(i64, i64, i64)> {
     let local = Utc::now().timestamp();
     let remote = query_steam_server_time(http_client).await?;
     Ok((remote, local, remote - local))
@@ -2837,9 +3103,7 @@ mod tests {
     #[test]
     fn guard_setup_login_gate_allows_guardless_sign_in() {
         assert_eq!(
-            classify_guard_setup_login_gate([
-                EAuthSessionGuardType::k_EAuthSessionGuardType_None,
-            ]),
+            classify_guard_setup_login_gate([EAuthSessionGuardType::k_EAuthSessionGuardType_None,]),
             GuardSetupLoginGate::CanContinue
         );
     }
@@ -3159,8 +3423,8 @@ mod tests {
                 .expect("shared_secret should parse");
         guard.token_gid = String::from("token-gid");
         guard.identity_secret = String::from("GQP46b73Ws7gr8GmZFR0sDuau5c=").into();
-        guard.uri = String::from("otpauth://totp/Steam:linked-account?secret=ASDF&issuer=Steam")
-            .into();
+        guard.uri =
+            String::from("otpauth://totp/Steam:linked-account?secret=ASDF&issuer=Steam").into();
         guard.device_id = String::from("android:63e01aa8-e99c-42c4-ef4c-e78bd041f129");
         guard.secret_1 = String::from("secret-1").into();
         guard.set_tokens(SteamTokens::new(
@@ -3195,5 +3459,86 @@ mod tests {
         fs::remove_dir_all(&temp_root)
             .await
             .expect("temporary steam dir should be deleted");
+    }
+
+    #[test]
+    fn ordered_selected_session_tokens_keeps_current_last() {
+        let inventory = SteamSessionDeviceInventory {
+            current_token_id: Some(22),
+            devices: vec![
+                SteamSessionDevice {
+                    token_id: 11,
+                    device_label: String::from("Browser"),
+                    platform_label: String::from("Web Browser"),
+                    location_label: None,
+                    first_seen_at_unix: None,
+                    last_seen_at_unix: Some(200),
+                    is_current: false,
+                },
+                SteamSessionDevice {
+                    token_id: 22,
+                    device_label: String::from("Current"),
+                    platform_label: String::from("Mobile App"),
+                    location_label: None,
+                    first_seen_at_unix: None,
+                    last_seen_at_unix: Some(300),
+                    is_current: true,
+                },
+                SteamSessionDevice {
+                    token_id: 33,
+                    device_label: String::from("Desktop"),
+                    platform_label: String::from("Steam Client"),
+                    location_label: None,
+                    first_seen_at_unix: None,
+                    last_seen_at_unix: Some(100),
+                    is_current: false,
+                },
+            ],
+        };
+
+        let all = ordered_selected_session_tokens(&inventory, SteamSessionDeviceSelection::All)
+            .expect("all devices should be selectable");
+        assert_eq!(all, vec![11, 33, 22]);
+
+        let others =
+            ordered_selected_session_tokens(&inventory, SteamSessionDeviceSelection::Others)
+                .expect("other devices should be selectable");
+        assert_eq!(others, vec![11, 33]);
+    }
+
+    #[test]
+    fn clear_stored_session_material_removes_saved_tokens() {
+        let mut record = StoredSteamAccount {
+            schema_version: STEAM_MANAGED_SCHEMA_VERSION,
+            id: String::from("demo"),
+            account_name: String::from("Demo"),
+            steam_username: Some(String::from("demo_login")),
+            steam_id: Some(76_561_197_960_265_728),
+            shared_secret: String::from("zvIayp3JPvtvX/QGHqsqKBk/44s="),
+            identity_secret: None,
+            device_id: None,
+            session: Some(StoredSteamWebSession {
+                session_id: Some(String::from("session-id")),
+                steam_login: Some(String::from("steam-login")),
+                steam_login_secure: Some(String::from("steam-login-secure")),
+                web_cookie: Some(String::from("web-cookie")),
+                oauth_token: Some(String::from("oauth-token")),
+                access_token: Some(String::from("access-token")),
+                refresh_token: Some(String::from("refresh-token")),
+            }),
+            imported_from: None,
+            managed_origin: SteamManagedAccountOrigin::ManualEntry,
+            created_at_unix: 0,
+            updated_at_unix: 0,
+            revocation_code: None,
+            serial_number: None,
+            token_gid: None,
+            secret_1: None,
+            uri: None,
+            proxy_url: None,
+        };
+
+        clear_stored_session_material(&mut record);
+        assert!(record.session.is_none());
     }
 }
