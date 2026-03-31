@@ -9,6 +9,7 @@ use image::ImageReader;
 use rqrr::PreparedImage;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use steamguard::ExposeSecret;
@@ -34,7 +35,7 @@ use steamguard::{
 };
 use tokio::fs;
 use tokio::task::spawn_blocking;
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use hanagram_web::security::{EncryptedBlob, decrypt_bytes, encrypt_bytes};
@@ -1181,6 +1182,14 @@ pub(crate) async fn list_logged_in_devices(
         let response = auth_client
             .enumerate_tokens(request, vendor_tokens.access_token())
             .context("failed listing Steam login devices")?;
+        let result = response.result();
+        if result != EResult::OK {
+            let error_detail = response
+                .error_message()
+                .cloned()
+                .unwrap_or_else(|| format!("{result:?}"));
+            bail!("Steam refused to enumerate login devices: {error_detail}");
+        }
         let payload = response.into_response_data();
         let current_token_id = match payload.requesting_token() {
             0 => None,
@@ -1300,10 +1309,20 @@ pub(crate) async fn revoke_logged_in_devices(
     );
 
     let vendor_tokens = build_vendor_tokens(&account)?;
+    let shared_secret_bytes: [u8; 20] = base64::engine::general_purpose::STANDARD
+        .decode(account.shared_secret.trim())
+        .context("failed to decode shared_secret as base64 for device revoke signature")?
+        .try_into()
+        .map_err(|_| anyhow!("shared_secret must decode to exactly 20 bytes"))?;
     let current_device_revoked = inventory
         .current_token_id
         .is_some_and(|token_id| token_ids.contains(&token_id));
     let revoked_count = token_ids.len();
+
+    info!(
+        "Revoking {} Steam login device(s) for account {}: token_ids={:?}, current_token={:?}, current_will_be_revoked={}",
+        revoked_count, account_id, token_ids, inventory.current_token_id, current_device_revoked
+    );
 
     spawn_blocking(move || {
         let client = build_blocking_steam_client()?;
@@ -1311,12 +1330,32 @@ pub(crate) async fn revoke_logged_in_devices(
         let mut auth_client = AuthenticationClient::new(transport);
 
         for token_id in token_ids {
+            let mut mac = Hmac::<Sha256>::new_from_slice(&shared_secret_bytes)
+                .context("failed to initialize HMAC for Steam device revoke signature")?;
+            mac.update(&token_id.to_le_bytes());
+            let signature = mac.finalize().into_bytes().to_vec();
+
             let mut request = CAuthentication_RefreshToken_Revoke_Request::new();
             request.set_token_id(token_id);
             request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
-            auth_client
+            request.set_signature(signature);
+            let response = auth_client
                 .revoke_refresh_token(request, vendor_tokens.access_token())
                 .with_context(|| format!("failed revoking Steam login device token {token_id}"))?;
+            let result = response.result();
+            info!(
+                "Steam RevokeRefreshToken for token {}: result={:?}, error_message={:?}",
+                token_id, result, response.error_message()
+            );
+            if result != EResult::OK {
+                let error_detail = response
+                    .error_message()
+                    .cloned()
+                    .unwrap_or_else(|| format!("{result:?}"));
+                bail!(
+                    "Steam refused to revoke login device token {token_id}: {error_detail}"
+                );
+            }
         }
 
         Ok::<(), anyhow::Error>(())
