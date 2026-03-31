@@ -282,11 +282,13 @@ struct SteamSessionDeviceRevokeForm {
 }
 
 const STEAM_CODES_TAB_ID: &str = "codes";
-const STEAM_MANAGE_TAB_ID: &str = "manage";
+const STEAM_ACCOUNTS_TAB_ID: &str = "accounts";
+const STEAM_IMPORT_TAB_ID: &str = "import";
+const STEAM_SECURITY_TAB_ID: &str = "security";
+const STEAM_DEVICES_TAB_ID: &str = "devices";
 const STEAM_SETUP_TAB_ID: &str = "setup";
 const STEAM_APPROVALS_TAB_ID: &str = "approvals";
 const STEAM_CONFIRMATIONS_TAB_ID: &str = "confirmations";
-const STEAM_ISSUES_TAB_ID: &str = "issues";
 const STEAM_ABOUT_TAB_ID: &str = "about";
 const STEAM_FLASH_COOKIE_NAME: &str = "hanagram_steam_flash";
 const STEAM_FLASH_COOKIE_MAX_AGE_SECONDS: i64 = 15;
@@ -304,12 +306,17 @@ fn steam_accounts_dir(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
 
 fn normalize_workspace_tab(tab: Option<&str>) -> &'static str {
     match tab {
-        Some(STEAM_MANAGE_TAB_ID) => STEAM_MANAGE_TAB_ID,
+        Some(STEAM_ACCOUNTS_TAB_ID) => STEAM_ACCOUNTS_TAB_ID,
+        Some(STEAM_IMPORT_TAB_ID) => STEAM_IMPORT_TAB_ID,
+        Some(STEAM_SECURITY_TAB_ID) => STEAM_SECURITY_TAB_ID,
+        Some(STEAM_DEVICES_TAB_ID) => STEAM_DEVICES_TAB_ID,
         Some(STEAM_SETUP_TAB_ID) => STEAM_SETUP_TAB_ID,
         Some(STEAM_APPROVALS_TAB_ID) => STEAM_APPROVALS_TAB_ID,
         Some(STEAM_CONFIRMATIONS_TAB_ID) => STEAM_CONFIRMATIONS_TAB_ID,
-        Some(STEAM_ISSUES_TAB_ID) => STEAM_ISSUES_TAB_ID,
         Some(STEAM_ABOUT_TAB_ID) => STEAM_ABOUT_TAB_ID,
+        // Backward compat: old tab IDs redirect to new locations
+        Some("manage") => STEAM_ACCOUNTS_TAB_ID,
+        Some("issues") => STEAM_ABOUT_TAB_ID,
         _ => STEAM_CODES_TAB_ID,
     }
 }
@@ -920,8 +927,8 @@ pub(crate) async fn build_workspace_card(
         connected_count: snapshot.ready_count,
         attention_count: snapshot.issue_count,
         workspace_href: steam_workspace_href(language),
-        secondary_href: format!("{}#manage", steam_workspace_href(language)),
-        secondary_label: translations.steam_manage_tab_label.to_owned(),
+        secondary_href: format!("{}#accounts", steam_workspace_href(language)),
+        secondary_label: translations.steam_accounts_tab_label.to_owned(),
     }
 }
 
@@ -1581,7 +1588,7 @@ async fn import_mafile_handler(
                                     PageBanner::error(
                                         language.translations().steam_upload_read_error_message,
                                     ),
-                                    Some(STEAM_MANAGE_TAB_ID),
+                                    Some(STEAM_IMPORT_TAB_ID),
                                 )
                                 .await;
                             }
@@ -1597,7 +1604,7 @@ async fn import_mafile_handler(
                     &app_state,
                     &headers,
                     PageBanner::error(language.translations().steam_upload_read_error_message),
-                    Some(STEAM_MANAGE_TAB_ID),
+                    Some(STEAM_IMPORT_TAB_ID),
                 )
                 .await;
             }
@@ -1609,7 +1616,7 @@ async fn import_mafile_handler(
             &app_state,
             &headers,
             PageBanner::error(language.translations().steam_upload_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     };
@@ -1620,7 +1627,7 @@ async fn import_mafile_handler(
             &app_state,
             &headers,
             PageBanner::error(language.translations().session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     };
@@ -1640,7 +1647,7 @@ async fn import_mafile_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(language.translations().steam_upload_saved_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1650,7 +1657,7 @@ async fn import_mafile_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(language.translations().steam_upload_write_error_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1673,7 +1680,7 @@ async fn create_manual_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_invalid_steam_id_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await;
         }
@@ -1684,7 +1691,7 @@ async fn create_manual_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_missing_shared_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1693,7 +1700,7 @@ async fn create_manual_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_shared_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1704,7 +1711,7 @@ async fn create_manual_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_identity_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1715,7 +1722,7 @@ async fn create_manual_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     };
@@ -1757,7 +1764,7 @@ async fn create_manual_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_manual_saved_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1767,7 +1774,7 @@ async fn create_manual_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_manual_save_failed_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1788,7 +1795,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_login_missing_username_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1797,7 +1804,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_login_missing_password_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1806,7 +1813,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_missing_shared_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1815,7 +1822,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_shared_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1826,7 +1833,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_identity_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -1837,7 +1844,7 @@ async fn create_logged_in_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     };
@@ -1870,7 +1877,7 @@ async fn create_logged_in_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_login_create_success_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1884,7 +1891,7 @@ async fn create_logged_in_account_handler(
                     &error,
                     translations.steam_login_create_failed_message,
                 )),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -1906,7 +1913,7 @@ async fn login_managed_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_account_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     }
@@ -1915,7 +1922,7 @@ async fn login_managed_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_login_missing_password_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     }
@@ -1926,7 +1933,7 @@ async fn login_managed_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     };
@@ -1948,7 +1955,7 @@ async fn login_managed_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_login_update_success_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -1957,7 +1964,7 @@ async fn login_managed_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_account_missing_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -1971,7 +1978,7 @@ async fn login_managed_account_handler(
                     &error,
                     translations.steam_login_update_failed_message,
                 )),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -1993,7 +2000,7 @@ async fn update_account_materials_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_account_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_SECURITY_TAB_ID),
         )
         .await;
     }
@@ -2008,7 +2015,7 @@ async fn update_account_materials_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_materials_empty_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_SECURITY_TAB_ID),
         )
         .await;
     }
@@ -2019,7 +2026,7 @@ async fn update_account_materials_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_shared_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_SECURITY_TAB_ID),
         )
         .await;
     }
@@ -2030,7 +2037,7 @@ async fn update_account_materials_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_invalid_identity_secret_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_SECURITY_TAB_ID),
         )
         .await;
     }
@@ -2041,7 +2048,7 @@ async fn update_account_materials_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_SECURITY_TAB_ID),
         )
         .await;
     };
@@ -2066,7 +2073,7 @@ async fn update_account_materials_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_materials_updated_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_SECURITY_TAB_ID),
             )
             .await
         }
@@ -2075,7 +2082,7 @@ async fn update_account_materials_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_account_missing_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_SECURITY_TAB_ID),
             )
             .await
         }
@@ -2088,7 +2095,7 @@ async fn update_account_materials_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_materials_update_failed_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_SECURITY_TAB_ID),
             )
             .await
         }
@@ -2110,7 +2117,7 @@ async fn rename_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_account_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     }
@@ -2119,7 +2126,7 @@ async fn rename_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_rename_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     }
@@ -2130,7 +2137,7 @@ async fn rename_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     };
@@ -2149,7 +2156,7 @@ async fn rename_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_renamed_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -2158,7 +2165,7 @@ async fn rename_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_account_missing_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -2168,7 +2175,7 @@ async fn rename_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_rename_failed_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -2190,7 +2197,7 @@ async fn delete_account_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_account_missing_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await;
     }
@@ -2202,7 +2209,7 @@ async fn delete_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_deleted_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -2211,7 +2218,7 @@ async fn delete_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_account_missing_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -2221,7 +2228,7 @@ async fn delete_account_handler(
                 &app_state,
                 &headers,
                 PageBanner::error(translations.steam_delete_failed_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_ACCOUNTS_TAB_ID),
             )
             .await
         }
@@ -4685,7 +4692,7 @@ async fn import_winauth_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.steam_import_winauth_invalid_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     }
@@ -4696,7 +4703,7 @@ async fn import_winauth_handler(
             &app_state,
             &headers,
             PageBanner::error(translations.session_data_locked_message),
-            Some(STEAM_MANAGE_TAB_ID),
+            Some(STEAM_IMPORT_TAB_ID),
         )
         .await;
     };
@@ -4721,7 +4728,7 @@ async fn import_winauth_handler(
                 &app_state,
                 &headers,
                 PageBanner::success(translations.steam_import_winauth_success_message),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }
@@ -4734,7 +4741,7 @@ async fn import_winauth_handler(
                     "{}: {error}",
                     translations.steam_import_winauth_failed_message
                 )),
-                Some(STEAM_MANAGE_TAB_ID),
+                Some(STEAM_IMPORT_TAB_ID),
             )
             .await
         }

@@ -12,6 +12,8 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 use steamguard::ExposeSecret;
 use steamguard::accountlinker::{
     AccountLinkError, AccountLinker, FinalizeLinkError, RemoveAuthenticatorError, TransferError,
@@ -27,7 +29,7 @@ use steamguard::protobufs::steammessages_auth_steamclient::{
 use steamguard::refresher::TokenRefresher;
 use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient};
 use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens, TwoFactorSecret};
-use steamguard::transport::WebApiTransport;
+use steamguard::transport::{Transport, WebApiTransport};
 use steamguard::userlogin::UpdateAuthSessionError;
 use steamguard::{
     DeviceDetails, LoginApprover, LoginError, SteamGuardAccount as VendorSteamGuardAccount,
@@ -49,6 +51,8 @@ const STEAM_MANAGED_PACK_PREFIX: &[u8] = b"hanagram-steam-pack:v1\0";
 const STEAM_MANAGED_ZSTD_LEVEL: i32 = 9;
 const STEAM_CONFIRMATION_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
 const STEAM_ACCESS_TOKEN_REFRESH_SKEW_SECONDS: i64 = 300;
+const STEAM_DEVICE_REVOKE_VERIFICATION_ATTEMPTS: usize = 4;
+const STEAM_DEVICE_REVOKE_VERIFICATION_DELAY: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1048,6 +1052,80 @@ fn build_refresh_token_revoke_signature(
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
+fn revoke_verification_accepts_session_loss(result: EResult) -> bool {
+    matches!(
+        result,
+        EResult::AccessDenied
+            | EResult::InvalidPassword
+            | EResult::LoggedInElsewhere
+            | EResult::NotLoggedOn
+            | EResult::Revoked
+            | EResult::Expired
+            | EResult::LogonSessionReplaced
+            | EResult::AlreadyLoggedInElsewhere
+    )
+}
+
+fn verify_revoked_login_device_token<T>(
+    auth_client: &AuthenticationClient<T>,
+    access_token: &SteamJwt,
+    token_id: u64,
+    allow_session_loss: bool,
+) -> Result<()>
+where
+    T: Transport,
+{
+    for attempt in 1..=STEAM_DEVICE_REVOKE_VERIFICATION_ATTEMPTS {
+        let request = CAuthentication_RefreshToken_Enumerate_Request::new();
+        let response = auth_client
+            .enumerate_tokens(request, access_token)
+            .with_context(|| {
+                format!("failed verifying Steam login device token {token_id} after revoke")
+            })?;
+        let result = response.result();
+
+        if result == EResult::OK {
+            let payload = response.into_response_data();
+            let still_logged_in = payload
+                .refresh_tokens
+                .iter()
+                .any(|device| device.logged_in() && device.token_id() == token_id);
+            if !still_logged_in {
+                return Ok(());
+            }
+
+            if attempt < STEAM_DEVICE_REVOKE_VERIFICATION_ATTEMPTS {
+                info!(
+                    "Steam login device token {} still appears online after revoke verification attempt {}; retrying",
+                    token_id, attempt
+                );
+                thread::sleep(STEAM_DEVICE_REVOKE_VERIFICATION_DELAY);
+                continue;
+            }
+
+            bail!(
+                "Steam reported token {token_id} revoked, but it still appears in the login device list"
+            );
+        }
+
+        if allow_session_loss && revoke_verification_accepts_session_loss(result) {
+            info!(
+                "Steam login device token {} revoked and verification lost the current session with result {:?}; treating as success",
+                token_id, result
+            );
+            return Ok(());
+        }
+
+        let error_detail = response
+            .error_message()
+            .cloned()
+            .unwrap_or_else(|| format!("{result:?}"));
+        bail!("Steam revoke verification failed for token {token_id}: {error_detail}");
+    }
+
+    unreachable!("verification attempts must either return success or error")
+}
+
 fn login_approval_platform_label(platform_type: EAuthTokenPlatformType) -> &'static str {
     match platform_type {
         EAuthTokenPlatformType::k_EAuthTokenPlatformType_SteamClient => "Steam Client",
@@ -1342,6 +1420,7 @@ pub(crate) async fn revoke_logged_in_devices(
         let client = build_blocking_steam_client()?;
         let transport = WebApiTransport::new(client);
         let mut auth_client = AuthenticationClient::new(transport);
+        let current_token_id = inventory.current_token_id;
 
         for token_id in token_ids {
             let signature = build_refresh_token_revoke_signature(&shared_secret_bytes, token_id)?;
@@ -1367,6 +1446,12 @@ pub(crate) async fn revoke_logged_in_devices(
                 signed_response.error_message()
             );
             if signed_result == EResult::OK {
+                verify_revoked_login_device_token(
+                    &auth_client,
+                    vendor_tokens.access_token(),
+                    token_id,
+                    current_token_id == Some(token_id),
+                )?;
                 continue;
             }
 
@@ -1395,6 +1480,12 @@ pub(crate) async fn revoke_logged_in_devices(
                 signed_steamid_response.error_message()
             );
             if signed_steamid_result == EResult::OK {
+                verify_revoked_login_device_token(
+                    &auth_client,
+                    vendor_tokens.access_token(),
+                    token_id,
+                    current_token_id == Some(token_id),
+                )?;
                 continue;
             }
 
@@ -1418,6 +1509,12 @@ pub(crate) async fn revoke_logged_in_devices(
                 bare_response.error_message()
             );
             if bare_result == EResult::OK {
+                verify_revoked_login_device_token(
+                    &auth_client,
+                    vendor_tokens.access_token(),
+                    token_id,
+                    current_token_id == Some(token_id),
+                )?;
                 continue;
             }
 
@@ -1443,6 +1540,12 @@ pub(crate) async fn revoke_logged_in_devices(
                 support_response.error_message()
             );
             if support_result == EResult::OK {
+                verify_revoked_login_device_token(
+                    &auth_client,
+                    vendor_tokens.access_token(),
+                    token_id,
+                    current_token_id == Some(token_id),
+                )?;
                 continue;
             }
 
@@ -3655,6 +3758,21 @@ mod tests {
             data_encoding::HEXLOWER.encode(&signature),
             "45b65591b60097b69df1f2885535004d0c889534426d1a5d91bfce4bba7c35b4"
         );
+    }
+
+    #[test]
+    fn revoke_verification_accepts_expected_session_loss_results() {
+        assert!(revoke_verification_accepts_session_loss(
+            EResult::AccessDenied
+        ));
+        assert!(revoke_verification_accepts_session_loss(
+            EResult::NotLoggedOn
+        ));
+        assert!(revoke_verification_accepts_session_loss(EResult::Revoked));
+        assert!(!revoke_verification_accepts_session_loss(
+            EResult::InvalidParam
+        ));
+        assert!(!revoke_verification_accepts_session_loss(EResult::Fail));
     }
 
     #[test]
