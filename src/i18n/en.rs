@@ -905,9 +905,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
 
     // Zero Trust Mode
     steam_zero_trust_button_label: "Zero Trust",
-    steam_zero_trust_button_tooltip: "Emergency lockdown: reject all confirmations, revoke all devices",
+    steam_zero_trust_button_tooltip: "Emergency lockdown: reject all confirmations, sign out other devices",
     steam_zero_trust_modal_title: "Activate Zero Trust Mode",
-    steam_zero_trust_modal_warning: "This will immediately reject all pending confirmations, deny all login approvals, and revoke all logged-in devices for the selected accounts. This cannot be undone.",
+    steam_zero_trust_modal_warning: "This will immediately reject all pending confirmations, deny all login approvals, and sign out other logged-in devices for the selected accounts. The current managed web control session is kept whenever Steam identifies it, so the dashboard does not lock itself out unnecessarily.",
     steam_zero_trust_confirm_label: "Type CONFIRM to activate",
     steam_zero_trust_activate_button: "Activate Zero Trust",
     steam_zero_trust_activating_message: "Activating zero trust mode...",
@@ -927,4 +927,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_zero_trust_guard_changed_warning: "WARNING: Authenticator state or device binding has changed since activation. This may indicate unauthorized access.",
     steam_zero_trust_invalid_confirm_message: "You must type CONFIRM to proceed.",
     steam_zero_trust_password_required_message: "Password is required to deactivate zero trust mode.",
+    steam_zero_trust_password_invalid_message: "The current web account password is incorrect, so zero trust mode cannot be deactivated.",
+    steam_zero_trust_totp_required_message: "This web account has TOTP enabled. Enter a fresh TOTP code to deactivate zero trust mode.",
+    steam_zero_trust_totp_invalid_message: "That TOTP code is invalid. Enter the latest six-digit code from the current web account authenticator.",
+    steam_zero_trust_totp_replay_message: "That TOTP code was already used a moment ago. Wait for the next code and try again.",
 };

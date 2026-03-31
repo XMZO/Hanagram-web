@@ -905,9 +905,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
 
     // 零信任模式
     steam_zero_trust_button_label: "零信任模式",
-    steam_zero_trust_button_tooltip: "紧急锁定：拒绝所有确认、撤销所有设备",
+    steam_zero_trust_button_tooltip: "紧急锁定：拒绝所有确认、清退其它已登录设备",
     steam_zero_trust_modal_title: "激活零信任模式",
-    steam_zero_trust_modal_warning: "这将立即拒绝所有待处理确认、拒绝所有登录审批、撤销所有已登录设备。此操作不可撤销。",
+    steam_zero_trust_modal_warning: "这将立即拒绝所有待处理确认、拒绝所有登录审批，并清退其它已登录设备。系统会尽量保留当前网页里的受管控制会话，避免把自己也踢下线。",
     steam_zero_trust_confirm_label: "输入 CONFIRM 以激活",
     steam_zero_trust_activate_button: "激活零信任",
     steam_zero_trust_activating_message: "正在激活零信任模式...",
@@ -927,4 +927,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_zero_trust_guard_changed_warning: "警告：自激活以来，验证器状态或设备绑定已发生变化。这可能表示未授权访问。",
     steam_zero_trust_invalid_confirm_message: "请输入 CONFIRM 以继续。",
     steam_zero_trust_password_required_message: "需要输入密码才能解除零信任模式。",
+    steam_zero_trust_password_invalid_message: "当前 Web 账号密码不正确，无法解除零信任模式。",
+    steam_zero_trust_totp_required_message: "当前 Web 账号已启用 TOTP，解除零信任模式时必须输入一组新的 TOTP 验证码。",
+    steam_zero_trust_totp_invalid_message: "TOTP 验证码无效，请输入当前 Web 账号最新的一组六位数。",
+    steam_zero_trust_totp_replay_message: "这组 TOTP 验证码刚刚已经用过了，请等待下一组新验证码后再试。",
 };

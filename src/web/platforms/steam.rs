@@ -4,6 +4,7 @@
 use crate::platforms::steam as steam_platform;
 use crate::web::middleware;
 use crate::web::shared::*;
+use crate::web_auth;
 use hanagram_web::security::{PasswordVerification, verify_password};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -5953,7 +5954,7 @@ async fn zero_trust_deactivate_handler(
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({
                     "ok": false,
-                    "message": translations.steam_zero_trust_deactivation_failed_message
+                    "message": translations.steam_zero_trust_password_invalid_message
                 })),
             )
                 .into_response();
@@ -5973,23 +5974,55 @@ async fn zero_trust_deactivate_handler(
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({
                     "ok": false,
-                    "message": translations.steam_zero_trust_deactivation_failed_message
+                    "message": translations.steam_zero_trust_password_invalid_message
                 })),
             )
                 .into_response();
         }
     }
 
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
     // If user has TOTP enabled, verify the TOTP code
     if authenticated.user.security.totp_enabled {
-        if let Some(ref totp_secret_json) = authenticated.user.security.totp_secret_json {
+        if authenticated.user.security.totp_secret_json.is_some() {
+            let totp_secret = match web_auth::decrypt_user_totp_secret(
+                &authenticated.user,
+                master_key.as_ref().as_slice(),
+            ) {
+                Ok(secret) => secret,
+                Err(error) => {
+                    warn!(
+                        "failed decrypting zero trust deactivation TOTP secret for user {}: {}",
+                        authenticated.user.username, error
+                    );
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.session_data_locked_message
+                        })),
+                    )
+                        .into_response();
+                }
+            };
             let totp_code = form.totp_code.as_deref().unwrap_or("").trim();
             if totp_code.is_empty() {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "ok": false,
-                        "message": translations.steam_zero_trust_deactivation_failed_message
+                        "message": translations.steam_zero_trust_totp_required_message
                     })),
                 )
                     .into_response();
@@ -6002,19 +6035,33 @@ async fn zero_trust_deactivate_handler(
                 .unwrap_or_default()
                 .into_iter()
                 .collect::<std::collections::HashSet<_>>();
-            match verify_totp(totp_secret_json, totp_code, now, 1, &used_steps) {
+            match verify_totp(totp_secret.as_str(), totp_code, now, 1, &used_steps) {
                 Ok(TotpVerification::Valid { matched_step }) => {
                     let _ = app_state
                         .meta_store
                         .mark_totp_step_used(&authenticated.user.id, matched_step)
                         .await;
+                    let _ = app_state
+                        .meta_store
+                        .prune_used_totp_steps(now.div_euclid(30) - 8)
+                        .await;
+                }
+                Ok(TotpVerification::Replay) => {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_zero_trust_totp_replay_message
+                        })),
+                    )
+                        .into_response();
                 }
                 _ => {
                     return (
                         StatusCode::FORBIDDEN,
                         Json(serde_json::json!({
                             "ok": false,
-                            "message": translations.steam_zero_trust_deactivation_failed_message
+                            "message": translations.steam_zero_trust_totp_invalid_message
                         })),
                     )
                         .into_response();
@@ -6065,19 +6112,15 @@ async fn zero_trust_deactivate_handler(
     let file_path = zero_trust_file_path(&app_state.runtime, &authenticated.user.id);
     match remaining_state {
         Some(state) if !state.locked_accounts.is_empty() => {
-            if let Some(master_key) =
-                middleware::resolved_user_master_key(&app_state, &authenticated).await
+            if let Err(e) = persist_zero_trust_state(
+                &app_state.runtime,
+                &authenticated.user.id,
+                &state,
+                master_key.as_ref().as_slice(),
+            )
+            .await
             {
-                if let Err(e) = persist_zero_trust_state(
-                    &app_state.runtime,
-                    &authenticated.user.id,
-                    &state,
-                    master_key.as_ref().as_slice(),
-                )
-                .await
-                {
-                    warn!("failed persisting updated zero trust state: {e}");
-                }
+                warn!("failed persisting updated zero trust state: {e}");
             }
         }
         _ => {

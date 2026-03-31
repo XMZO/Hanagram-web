@@ -1397,10 +1397,12 @@ pub(crate) async fn revoke_logged_in_devices(
     };
 
     let token_ids = ordered_selected_session_tokens(&inventory, selection)?;
-    ensure!(
-        !token_ids.is_empty(),
-        "no matching Steam login devices are currently online"
-    );
+    if token_ids.is_empty() {
+        return Ok(SteamSessionRevokeOutcome {
+            revoked_count: 0,
+            current_device_revoked: false,
+        });
+    }
 
     let vendor_tokens = build_vendor_tokens(&account)?;
     let steam_id = account
@@ -3528,6 +3530,7 @@ pub(crate) async fn execute_zero_trust_sweep(
     let mut confirmations_rejected: usize = 0;
     let mut approvals_denied: usize = 0;
     let mut devices_revoked: usize = 0;
+    let mut current_device_revoked = false;
     let mut guard_state_changed = false;
     let mut device_id_changed = false;
 
@@ -3654,44 +3657,51 @@ pub(crate) async fn execute_zero_trust_sweep(
         }
     };
 
-    // Step 6: Revoke all devices (30s timeout — destructive, kills session)
+    // Step 6: Revoke other logged-in devices (30s timeout) while preserving the
+    // current managed control session whenever Steam can identify it.
     match timeout(
         Duration::from_secs(30),
         revoke_logged_in_devices(
             root_dir,
             master_key,
             account_id,
-            SteamSessionDeviceSelection::All,
+            SteamSessionDeviceSelection::Others,
         ),
     )
     .await
     {
-        Ok(Ok(outcome)) => devices_revoked = outcome.revoked_count,
+        Ok(Ok(outcome)) => {
+            devices_revoked = outcome.revoked_count;
+            current_device_revoked = outcome.current_device_revoked;
+        }
         Ok(Err(e)) => errors.push(format!("device revocation failed: {e}")),
         Err(_) => errors.push(String::from("device revocation timed out (30s)")),
     }
 
-    // Step 7: Clear local session material (5s timeout — local IO only)
-    match timeout(Duration::from_secs(5), async {
-        let storage_path = managed_account_storage_path(root_dir, account_id);
-        match load_stored_account(master_key, &storage_path).await {
-            Ok(Some(mut record)) => {
-                clear_stored_session_material(&mut record);
-                persist_stored_account(master_key, &storage_path, &record)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("failed persisting cleared session: {e}"))
+    // Step 7: Clear local session material only when the current managed
+    // session itself was revoked.
+    if current_device_revoked {
+        match timeout(Duration::from_secs(5), async {
+            let storage_path = managed_account_storage_path(root_dir, account_id);
+            match load_stored_account(master_key, &storage_path).await {
+                Ok(Some(mut record)) => {
+                    clear_stored_session_material(&mut record);
+                    persist_stored_account(master_key, &storage_path, &record)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("failed persisting cleared session: {e}"))
+                }
+                Ok(None) => Err(anyhow::anyhow!("account not found for session clearing")),
+                Err(e) => Err(anyhow::anyhow!(
+                    "failed loading account for session clearing: {e}"
+                )),
             }
-            Ok(None) => Err(anyhow::anyhow!("account not found for session clearing")),
-            Err(e) => Err(anyhow::anyhow!(
-                "failed loading account for session clearing: {e}"
-            )),
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => errors.push(e.to_string()),
+            Err(_) => errors.push(String::from("session clearing timed out (5s)")),
         }
-    })
-    .await
-    {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => errors.push(e.to_string()),
-        Err(_) => errors.push(String::from("session clearing timed out (5s)")),
     }
 
     Ok(ZeroTrustSweepResult {
