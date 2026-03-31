@@ -305,9 +305,11 @@ struct ZeroTrustActivateForm {
 
 #[derive(Debug, Deserialize)]
 struct ZeroTrustDeactivateForm {
-    account_ids: String,
+    #[serde(default)]
+    account_ids: Option<String>,
     confirm_phrase: String,
     password: String,
+    #[serde(default, alias = "totp")]
     totp_code: Option<String>,
     lang: Option<String>,
 }
@@ -5414,18 +5416,11 @@ pub(crate) async fn zero_trust_guard(
         return next.run(request).await;
     };
 
-    // 2. Read zero trust state from memory (no disk I/O in the hot path).
-    // The state is loaded from disk by render_workspace_page when the user
-    // first visits the workspace, and by the activate handler when locking.
-    let locked_ids: HashSet<String> = {
-        let zt = app_state.zero_trust.read().await;
-        match zt.get(&authenticated.user.id) {
-            Some(state) if !state.locked_accounts.is_empty() => {
-                state.locked_accounts.keys().cloned().collect()
-            }
-            _ => return next.run(request).await,
-        }
-    };
+    let locked_ids: HashSet<String> =
+        match current_zero_trust_state(&app_state, &authenticated).await {
+            Some(state) => state.locked_accounts.keys().cloned().collect(),
+            None => return next.run(request).await,
+        };
 
     // 4. Check allowlist
     let method = request.method().clone();
@@ -5672,6 +5667,35 @@ async fn ensure_zero_trust_loaded(app_state: &AppState, user_id: &str, master_ke
     }
 }
 
+async fn current_zero_trust_state(
+    app_state: &AppState,
+    authenticated: &AuthenticatedSession,
+) -> Option<ZeroTrustUserState> {
+    let in_memory = {
+        let zt = app_state.zero_trust.read().await;
+        zt.get(&authenticated.user.id)
+            .filter(|state| !state.locked_accounts.is_empty())
+            .cloned()
+    };
+    if in_memory.is_some() {
+        return in_memory;
+    }
+
+    if let Some(master_key) = middleware::resolved_user_master_key(app_state, authenticated).await {
+        ensure_zero_trust_loaded(
+            app_state,
+            &authenticated.user.id,
+            master_key.as_ref().as_slice(),
+        )
+        .await;
+    }
+
+    let zt = app_state.zero_trust.read().await;
+    zt.get(&authenticated.user.id)
+        .filter(|state| !state.locked_accounts.is_empty())
+        .cloned()
+}
+
 // ---------------------------------------------------------------------------
 // Zero Trust Mode — handlers
 // ---------------------------------------------------------------------------
@@ -5759,27 +5783,48 @@ async fn zero_trust_activate_handler(
         zt.insert(authenticated.user.id.clone(), user_state.clone());
     }
 
-    // --- Phase 2: Persist/audit/sweep in background (non-blocking) ---
+    let persist_result = tokio::time::timeout(
+        Duration::from_secs(3),
+        persist_zero_trust_state(
+            &app_state.runtime,
+            &authenticated.user.id,
+            &user_state,
+            master_key.as_ref().as_slice(),
+        ),
+    )
+    .await;
+    if let Some(error) = match persist_result {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error),
+        Err(_) => Some(anyhow::anyhow!(
+            "timed out while persisting zero trust state"
+        )),
+    } {
+        warn!(
+            "failed persisting zero trust state for user {}: {}",
+            authenticated.user.username, error
+        );
+        let mut zt = app_state.zero_trust.write().await;
+        zt.remove(&authenticated.user.id);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_activation_failed_message
+            })),
+        )
+            .into_response();
+    }
+
+    // --- Phase 2: Audit/sweep in background (non-blocking) ---
     let bg_app_state = app_state.clone();
     let bg_user_id = authenticated.user.id.clone();
     let bg_username = authenticated.user.username.clone();
     let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
     let bg_http_client = app_state.http_client.clone();
-    let bg_user_state = user_state.clone();
     let bg_account_ids = account_ids.clone();
     tokio::spawn(async move {
         let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
-
-        if let Err(e) = persist_zero_trust_state(
-            &bg_app_state.runtime,
-            &bg_user_id,
-            &bg_user_state,
-            &bg_master_key,
-        )
-        .await
-        {
-            warn!("failed persisting zero trust state: {e}");
-        }
 
         let _ = bg_app_state
             .meta_store
@@ -5873,6 +5918,8 @@ async fn zero_trust_deactivate_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
+    let _ = current_zero_trust_state(&app_state, &authenticated).await;
 
     // Validate confirm phrase
     if form.confirm_phrase.trim() != "CONFIRM" {
@@ -5977,13 +6024,19 @@ async fn zero_trust_deactivate_handler(
     }
 
     // Resolve which accounts to deactivate
-    let accounts_to_remove: Vec<String> = if form.account_ids.trim() == "all" {
-        let zt = app_state.zero_trust.read().await;
-        zt.get(&authenticated.user.id)
-            .map(|s| s.locked_accounts.keys().cloned().collect())
+    let requested_account_ids = form
+        .account_ids
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("all");
+    let accounts_to_remove: Vec<String> = if requested_account_ids == "all" {
+        current_zero_trust_state(&app_state, &authenticated)
+            .await
+            .map(|state| state.locked_accounts.keys().cloned().collect())
             .unwrap_or_default()
     } else {
-        form.account_ids
+        requested_account_ids
             .split(',')
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
@@ -6066,11 +6119,9 @@ async fn zero_trust_status_handler(
 ) -> Response {
     let _language = detect_language(&headers, query.lang.as_deref());
 
-    let zt = app_state.zero_trust.read().await;
-    let user_state = zt.get(&authenticated.user.id);
-
-    let (active, locked_accounts) = match user_state {
-        Some(state) if !state.locked_accounts.is_empty() => {
+    let (active, locked_accounts) = match current_zero_trust_state(&app_state, &authenticated).await
+    {
+        Some(state) => {
             let accounts: Vec<serde_json::Value> = state
                 .locked_accounts
                 .iter()
@@ -6105,18 +6156,15 @@ async fn zero_trust_sweep_handler(
     // This endpoint is polled by the frontend to check zero trust status.
     // It does NOT run sweeps — the only sweep runs once in the background
     // when zero trust is first activated.
-    let locked_accounts = {
-        let zt = app_state.zero_trust.read().await;
-        match zt.get(&authenticated.user.id) {
-            Some(state) => state.locked_accounts.clone(),
-            None => {
-                return Json(serde_json::json!({
-                    "ok": true,
-                    "active": false,
-                    "locked_count": 0,
-                }))
-                .into_response();
-            }
+    let locked_accounts = match current_zero_trust_state(&app_state, &authenticated).await {
+        Some(state) => state.locked_accounts,
+        None => {
+            return Json(serde_json::json!({
+                "ok": true,
+                "active": false,
+                "locked_count": 0,
+            }))
+            .into_response();
         }
     };
 
@@ -6130,4 +6178,24 @@ async fn zero_trust_sweep_handler(
         "account_ids": account_ids,
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ZeroTrustDeactivateForm;
+
+    #[test]
+    fn zero_trust_deactivate_form_accepts_legacy_totp_without_account_ids() {
+        let form: ZeroTrustDeactivateForm = serde_json::from_value(serde_json::json!({
+            "password": "temporary-password",
+            "confirm_phrase": "CONFIRM",
+            "totp": "123456"
+        }))
+        .expect("legacy deactivate payload should deserialize");
+
+        assert_eq!(form.account_ids, None);
+        assert_eq!(form.totp_code.as_deref(), Some("123456"));
+        assert_eq!(form.confirm_phrase, "CONFIRM");
+        assert_eq!(form.password, "temporary-password");
+    }
 }

@@ -109,8 +109,13 @@
             removeSuccess: {{ i18n.steam_remove_success_message | json_encode | safe }},
             removeFailed: {{ i18n.steam_remove_failed_message | json_encode | safe }},
             statusLoading: {{ i18n.steam_status_loading_message | json_encode | safe }},
+            statusFailed: {{ i18n.steam_status_failed_message | json_encode | safe }},
             statusActive: {{ i18n.steam_status_state_active | json_encode | safe }},
             statusInactive: {{ i18n.steam_status_state_inactive | json_encode | safe }},
+            statusStateLabel: {{ i18n.steam_status_state_label | json_encode | safe }},
+            statusDeviceIdLabel: {{ i18n.steam_status_device_id_label | json_encode | safe }},
+            statusRevocationAttemptsLabel: {{ i18n.steam_status_revocation_attempts_label | json_encode | safe }},
+            statusVersionLabel: {{ i18n.steam_status_version_label | json_encode | safe }},
             sessionDevicesLoading: {{ i18n.steam_session_devices_loading_message | json_encode | safe }},
             sessionDevicesEmpty: {{ i18n.steam_session_devices_empty_message | json_encode | safe }},
             sessionDevicesLoadFailed: {{ i18n.steam_session_devices_load_failed_message | json_encode | safe }},
@@ -129,6 +134,7 @@
             sessionRevokeFailed: {{ i18n.steam_session_revoke_failed_message | json_encode | safe }},
             exportQrWarning: {{ i18n.steam_export_qr_warning | json_encode | safe }},
             exportQrCopied: {{ i18n.steam_export_qr_copied_message | json_encode | safe }},
+            exportQrFailed: {{ i18n.steam_export_qr_failed_message | json_encode | safe }},
             bulkAcceptBtn: {{ i18n.steam_bulk_accept_all_button | json_encode | safe }},
             bulkDenyBtn: {{ i18n.steam_bulk_deny_all_button | json_encode | safe }},
             bulkAcceptConfirm: {{ i18n.steam_bulk_accept_confirm_prompt | json_encode | safe }},
@@ -136,6 +142,7 @@
             bulkRunning: {{ i18n.steam_bulk_action_running_message | json_encode | safe }},
             timeCheckOk: {{ i18n.steam_time_check_ok_message | json_encode | safe }},
             timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }},
+            timeCheckFailed: {{ i18n.steam_time_check_failed_message | json_encode | safe }},
             phoneHasPhone: {{ i18n.steam_phone_status_has_phone | json_encode | safe }},
             phoneNoPhone: {{ i18n.steam_phone_status_no_phone | json_encode | safe }},
             phoneStatusFailed: {{ i18n.steam_phone_status_failed | json_encode | safe }},
@@ -561,7 +568,8 @@
                     cache: "no-store"
                 });
                 if (!response.ok) { return; }
-                applySteamSnapshot(await response.json());
+                const snapshot = await readJsonResponse(response);
+                applySteamSnapshot(snapshot);
             } catch (_) {
             } finally {
                 steamSnapshotInFlight = false;
@@ -761,14 +769,9 @@
                     headers: { "Accept": "application/json" },
                     cache: "no-store"
                 });
-                let payload = null;
-                try {
-                    payload = await response.json();
-                } catch (_) {
-                    payload = null;
-                }
+                const payload = await maybeReadJsonResponse(response, I18N.confirmationsLoadFailed);
 
-                if (!response.ok) {
+                if (!response.ok || !payload) {
                     setConfirmationStatus("error", payload?.message || I18N.confirmationsLoadFailed);
                     return;
                 }
@@ -816,12 +819,7 @@
                     body: body.toString()
                 });
 
-                let payload = null;
-                try {
-                    payload = await response.json();
-                } catch (_) {
-                    payload = null;
-                }
+                const payload = await maybeReadJsonResponse(response, I18N.confirmationActionFailed);
 
                 if (!response.ok || !payload?.ok) {
                     setConfirmationStatus("error", payload?.message || I18N.confirmationActionFailed);
@@ -1010,14 +1008,9 @@
                     headers: { "Accept": "application/json" },
                     cache: "no-store"
                 });
-                let payload = null;
-                try {
-                    payload = await response.json();
-                } catch (_) {
-                    payload = null;
-                }
+                const payload = await maybeReadJsonResponse(response, I18N.approvalsLoadFailed);
 
-                if (!response.ok) {
+                if (!response.ok || !payload) {
                     setApprovalStatus("error", payload?.message || I18N.approvalsLoadFailed);
                     return;
                 }
@@ -1063,12 +1056,7 @@
                     body: body.toString()
                 });
 
-                let payload = null;
-                try {
-                    payload = await response.json();
-                } catch (_) {
-                    payload = null;
-                }
+                const payload = await maybeReadJsonResponse(response, I18N.approvalActionFailed);
 
                 if (!response.ok || !payload?.ok) {
                     setApprovalStatus("error", payload?.message || I18N.approvalActionFailed);
@@ -2765,6 +2753,13 @@
             }
             return resp.json();
         }
+        async function maybeReadJsonResponse(resp, fallbackMessage) {
+            try {
+                return await readJsonResponse(resp, fallbackMessage);
+            } catch (_) {
+                return null;
+            }
+        }
         async function jsonPost(url, body) {
             const resp = await fetch(url, {
                 method: "POST",
@@ -3053,16 +3048,16 @@
         if (timeCheckBtn) {
             timeCheckBtn.addEventListener("click", async () => {
                 timeCheckBtn.disabled = true;
+                const resultEl = document.getElementById("time-check-result");
+                const verdictEl = document.getElementById("time-check-verdict");
                 try {
                     const resp = await fetch(TIME_CHECK_API + "?lang=" + LANG);
-                    const data = await resp.json();
-                    const resultEl = document.getElementById("time-check-result");
+                    const data = await readJsonResponse(resp, I18N.timeCheckFailed);
                     if (data.ok) {
                         document.getElementById("time-check-server").textContent = data.remote_time;
                         document.getElementById("time-check-local").textContent = data.local_time;
                         const driftEl = document.getElementById("time-check-drift");
                         driftEl.textContent = (data.drift_seconds >= 0 ? "+" : "") + data.drift_seconds + "s";
-                        const verdictEl = document.getElementById("time-check-verdict");
                         if (Math.abs(data.drift_seconds) <= 30) {
                             driftEl.classList.remove("text-[#98675f]");
                             driftEl.classList.add("text-sageDeep");
@@ -3077,8 +3072,20 @@
                             verdictEl.classList.add("text-[#98675f]");
                         }
                         resultEl.classList.remove("hidden");
+                    } else if (resultEl && verdictEl) {
+                        resultEl.classList.remove("hidden");
+                        verdictEl.textContent = data.message || I18N.timeCheckFailed;
+                        verdictEl.classList.remove("text-sageDeep");
+                        verdictEl.classList.add("text-[#98675f]");
                     }
-                } catch (_) {}
+                } catch (err) {
+                    if (resultEl && verdictEl) {
+                        resultEl.classList.remove("hidden");
+                        verdictEl.textContent = err.message || I18N.timeCheckFailed;
+                        verdictEl.classList.remove("text-sageDeep");
+                        verdictEl.classList.add("text-[#98675f]");
+                    }
+                }
                 timeCheckBtn.disabled = false;
             });
         }
@@ -3146,20 +3153,20 @@
             resultEl.classList.remove("hidden");
             try {
                 const resp = await fetch("/api/platforms/steam/accounts/" + accountId + "/status?lang=" + LANG);
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.statusFailed);
                 if (data.ok && data.status) {
                     const s = data.status;
                     resultEl.innerHTML = "<div class='space-y-1 text-sm'>"
-                        + "<div><b>State:</b> " + (s.guard_state > 0 ? I18N.statusActive : I18N.statusInactive) + "</div>"
-                        + "<div><b>Device:</b> " + (s.bound_device || "—") + "</div>"
-                        + "<div><b>Revocation attempts:</b> " + s.remaining_revoke_tries + "</div>"
-                        + "<div><b>Version:</b> " + s.schema_ver + "</div>"
+                        + "<div><b>" + escapeHtml(I18N.statusStateLabel) + ":</b> " + escapeHtml(s.guard_state > 0 ? I18N.statusActive : I18N.statusInactive) + "</div>"
+                        + "<div><b>" + escapeHtml(I18N.statusDeviceIdLabel) + ":</b> " + escapeHtml(s.bound_device || "—") + "</div>"
+                        + "<div><b>" + escapeHtml(I18N.statusRevocationAttemptsLabel) + ":</b> " + escapeHtml(String(s.remaining_revoke_tries ?? "-")) + "</div>"
+                        + "<div><b>" + escapeHtml(I18N.statusVersionLabel) + ":</b> " + escapeHtml(String(s.schema_ver ?? "-")) + "</div>"
                         + "</div>";
                 } else {
-                    resultEl.textContent = data.message || "Error";
+                    resultEl.textContent = data.message || I18N.statusFailed;
                 }
             } catch (err) {
-                resultEl.textContent = err.message;
+                resultEl.textContent = err.message || I18N.statusFailed;
             }
             statusBtn.disabled = false;
         });
@@ -3174,7 +3181,7 @@
             qrBtn.disabled = true;
             try {
                 const resp = await fetch("/api/platforms/steam/accounts/" + accountId + "/export/qr?lang=" + LANG);
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.exportQrFailed);
                 if (data.ok) {
                     resultEl.innerHTML = "<div class='flex flex-col items-center gap-3'>"
                         + "<div class='w-48 h-48'>" + data.svg + "</div>"
@@ -3182,11 +3189,11 @@
                         + "</div>";
                     resultEl.classList.remove("hidden");
                 } else {
-                    resultEl.textContent = data.message || "Error";
+                    resultEl.textContent = data.message || I18N.exportQrFailed;
                     resultEl.classList.remove("hidden");
                 }
             } catch (err) {
-                resultEl.textContent = err.message;
+                resultEl.textContent = err.message || I18N.exportQrFailed;
                 resultEl.classList.remove("hidden");
             }
             qrBtn.disabled = false;
@@ -3222,7 +3229,7 @@
             resultEl.textContent = "...";
             try {
                 const resp = await fetch(`/api/platforms/steam/accounts/${encodeURIComponent(accountId)}/phone-status?lang=${LANG}`);
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.phoneStatusFailed);
                 if (data.ok) {
                     resultEl.textContent = data.has_phone ? I18N.phoneHasPhone : I18N.phoneNoPhone;
                     resultEl.className = "mt-2 rounded-[0.85rem] border px-3.5 py-2.5 text-sm " + (data.has_phone ? "border-sage/35 bg-[#eef4ee] text-sageDeep" : "border-peach/35 bg-[#fbefec] text-[#98675f]");
@@ -3255,7 +3262,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ lang: LANG })
                 });
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.emergencyCodesFailed);
                 if (data.ok && data.codes) {
                     resultEl.textContent = data.codes.join("  ");
                     resultEl.className = "mt-2 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm font-mono text-sageDeep select-all";
@@ -3288,7 +3295,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ lang: LANG })
                 });
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.emergencyCodesFailed);
                 if (data.ok) {
                     resultEl.textContent = "OK";
                     resultEl.className = "mt-2 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm text-sageDeep";
@@ -3324,7 +3331,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ code, lang: LANG })
                 });
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.validateTokenFailed);
                 if (data.ok) {
                     resultEl.textContent = data.valid ? I18N.validateTokenValid : I18N.validateTokenInvalid;
                     resultEl.className = "mt-2 rounded-[0.85rem] border px-3.5 py-2.5 text-sm " + (data.valid ? "border-sage/35 bg-[#eef4ee] text-sageDeep" : "border-peach/35 bg-[#fbefec] text-[#98675f]");
@@ -3477,11 +3484,7 @@
                         lang: LANG
                     })
                 });
-                const ct = resp.headers.get("content-type") || "";
-                if (!ct.includes("application/json")) {
-                    throw new Error(resp.redirected ? "Session expired — please reload the page" : "Server returned non-JSON response (" + resp.status + ")");
-                }
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.ztActivationFailedMessage);
                 if (data.ok) {
                     if (statusEl) {
                         statusEl.className = "mt-3 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm text-sageDeep";
@@ -3559,9 +3562,15 @@
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     signal: controller.signal,
-                    body: JSON.stringify({ password: password, totp: totp, confirm_phrase: confirmInput.value.trim(), lang: LANG })
+                    body: JSON.stringify({
+                        account_ids: "all",
+                        password: password,
+                        totp_code: totp,
+                        confirm_phrase: confirmInput.value.trim(),
+                        lang: LANG
+                    })
                 });
-                const data = await resp.json();
+                const data = await readJsonResponse(resp, I18N.ztDeactivationFailedMessage);
                 if (data.ok) {
                     if (statusEl) { statusEl.textContent = I18N.ztDeactivatedMessage; }
                     setTimeout(() => { window.location.reload(); }, 800);
@@ -3633,7 +3642,7 @@
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ lang: LANG })
                     });
-                    const data = await resp.json();
+                    const data = await readJsonResponse(resp);
                     if (data.ok) {
                         updateZeroTrustLog(data);
                         updateZeroTrustCounter(data);
