@@ -1309,6 +1309,9 @@ pub(crate) async fn revoke_logged_in_devices(
     );
 
     let vendor_tokens = build_vendor_tokens(&account)?;
+    let steam_id = account
+        .steam_id
+        .context("Steam account is missing SteamID for device revocation")?;
     let shared_secret_bytes: [u8; 20] = base64::engine::general_purpose::STANDARD
         .decode(account.shared_secret.trim())
         .context("failed to decode shared_secret as base64 for device revoke signature")?
@@ -1330,6 +1333,7 @@ pub(crate) async fn revoke_logged_in_devices(
         let mut auth_client = AuthenticationClient::new(transport);
 
         for token_id in token_ids {
+            // First attempt: with HMAC-SHA256 signature over token_id (per proto spec).
             let mut mac = Hmac::<Sha256>::new_from_slice(&shared_secret_bytes)
                 .context("failed to initialize HMAC for Steam device revoke signature")?;
             mac.update(&token_id.to_le_bytes());
@@ -1337,6 +1341,7 @@ pub(crate) async fn revoke_logged_in_devices(
 
             let mut request = CAuthentication_RefreshToken_Revoke_Request::new();
             request.set_token_id(token_id);
+            request.set_steamid(steam_id);
             request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
             request.set_signature(signature);
             let response = auth_client
@@ -1344,10 +1349,39 @@ pub(crate) async fn revoke_logged_in_devices(
                 .with_context(|| format!("failed revoking Steam login device token {token_id}"))?;
             let result = response.result();
             info!(
-                "Steam RevokeRefreshToken for token {}: result={:?}, error_message={:?}",
+                "Steam RevokeRefreshToken for token {} (with signature+steamid): result={:?}, error_message={:?}",
                 token_id, result, response.error_message()
             );
-            if result != EResult::OK {
+
+            // If AccessDenied with signature, retry without signature — some Steam
+            // API versions accept a bare request authenticated solely by the access token.
+            if result == EResult::AccessDenied {
+                warn!(
+                    "Steam RevokeRefreshToken with signature returned AccessDenied for token {}; retrying without signature",
+                    token_id
+                );
+                let mut retry_request = CAuthentication_RefreshToken_Revoke_Request::new();
+                retry_request.set_token_id(token_id);
+                retry_request.set_steamid(steam_id);
+                retry_request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
+                let retry_response = auth_client
+                    .revoke_refresh_token(retry_request, vendor_tokens.access_token())
+                    .with_context(|| format!("failed revoking Steam login device token {token_id} (retry without signature)"))?;
+                let retry_result = retry_response.result();
+                info!(
+                    "Steam RevokeRefreshToken for token {} (without signature): result={:?}, error_message={:?}",
+                    token_id, retry_result, retry_response.error_message()
+                );
+                if retry_result != EResult::OK {
+                    let error_detail = retry_response
+                        .error_message()
+                        .cloned()
+                        .unwrap_or_else(|| format!("{retry_result:?}"));
+                    bail!(
+                        "Steam refused to revoke login device token {token_id}: {error_detail}"
+                    );
+                }
+            } else if result != EResult::OK {
                 let error_detail = response
                     .error_message()
                     .cloned()
