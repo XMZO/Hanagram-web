@@ -52,6 +52,16 @@ pub(crate) async fn require_login(
             .flatten()
     else {
         clear_invalid_cookie_state(&app_state, request.headers()).await;
+        if request.uri().path().starts_with("/api/") {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({
+                    "ok": false,
+                    "message": "Not authenticated",
+                })),
+            )
+                .into_response();
+        }
         let location = match request.uri().query() {
             Some(query) if !query.is_empty() => format!("/login?{query}"),
             _ => String::from("/login"),
@@ -75,6 +85,16 @@ pub(crate) async fn require_login(
         )
         .await
         else {
+            if request.uri().path().starts_with("/api/") {
+                return (
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    axum::Json(serde_json::json!({
+                        "ok": false,
+                        "message": "Session expired",
+                    })),
+                )
+                    .into_response();
+            }
             return revoke_auth_session_and_redirect_to_login(
                 &app_state,
                 &settings,
@@ -100,6 +120,17 @@ pub(crate) async fn require_login(
         authenticated.requires_totp_setup,
         authenticated.recovery_codes_remaining,
     ) {
+        if request.uri().path().starts_with("/api/") {
+            return (
+                axum::http::StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({
+                    "ok": false,
+                    "message": "Account action required",
+                    "redirect": target,
+                })),
+            )
+                .into_response();
+        }
         return Redirect::to(target).into_response();
     }
 

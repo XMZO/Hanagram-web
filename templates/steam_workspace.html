@@ -3467,6 +3467,10 @@
                         lang: LANG
                     })
                 });
+                const ct = resp.headers.get("content-type") || "";
+                if (!ct.includes("application/json")) {
+                    throw new Error(resp.redirected ? "Session expired — please reload the page" : "Server returned non-JSON response (" + resp.status + ")");
+                }
                 const data = await resp.json();
                 if (data.ok) {
                     if (statusEl) {
