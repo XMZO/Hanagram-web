@@ -5763,76 +5763,25 @@ async fn zero_trust_activate_handler(
             .into_response();
     }
 
+    // --- Phase 1: Lock accounts IMMEDIATELY, return fast ---
     let now = Utc::now().timestamp();
-    let mut results_per_account = Vec::new();
     let mut locked_accounts: HashMap<String, ZeroTrustAccountEntry> = HashMap::new();
 
     for account_id in &account_ids {
-        // Fetch security info for initial state capture
-        let (initial_guard_state, initial_device_id) =
-            match steam_platform::fetch_security_info(
-                &steam_root,
-                master_key.as_ref().as_slice(),
-                account_id,
-            )
-            .await
-            {
-                Ok(info) => (Some(info.guard_state), Some(info.bound_device)),
-                Err(_) => (None, None),
-            };
-
-        // Execute the sweep
-        let skip_ec = form.skip_emergency_codes.unwrap_or(true);
-        let sweep_result = steam_platform::execute_zero_trust_sweep(
-            &steam_root,
-            master_key.as_ref().as_slice(),
-            &app_state.http_client,
-            account_id,
-            initial_guard_state,
-            initial_device_id.as_deref(),
-            skip_ec,
-            form.emergency_code.as_deref(),
-        )
-        .await;
-
-        match sweep_result {
-            Ok(result) => {
-                locked_accounts.insert(
-                    account_id.clone(),
-                    ZeroTrustAccountEntry {
-                        activated_at_unix: now,
-                        activated_by_username: authenticated.user.username.clone(),
-                        initial_guard_state,
-                        initial_device_id: initial_device_id.clone(),
-                    },
-                );
-                results_per_account.push(serde_json::json!({
-                    "account_id": account_id,
-                    "ok": true,
-                    "result": result,
-                }));
-            }
-            Err(e) => {
-                // Even on error, still lock the account for protection
-                locked_accounts.insert(
-                    account_id.clone(),
-                    ZeroTrustAccountEntry {
-                        activated_at_unix: now,
-                        activated_by_username: authenticated.user.username.clone(),
-                        initial_guard_state,
-                        initial_device_id: initial_device_id.clone(),
-                    },
-                );
-                results_per_account.push(serde_json::json!({
-                    "account_id": account_id,
-                    "ok": false,
-                    "error": e.to_string(),
-                }));
-            }
-        }
+        locked_accounts.insert(
+            account_id.clone(),
+            ZeroTrustAccountEntry {
+                activated_at_unix: now,
+                activated_by_username: authenticated.user.username.clone(),
+                initial_guard_state: None,
+                initial_device_id: None,
+            },
+        );
     }
 
-    let user_state = ZeroTrustUserState { locked_accounts };
+    let user_state = ZeroTrustUserState {
+        locked_accounts: locked_accounts.clone(),
+    };
 
     // Write to in-memory state
     {
@@ -5870,10 +5819,83 @@ async fn zero_trust_activate_handler(
         })
         .await;
 
+    // --- Phase 2: Spawn sweep in background (non-blocking) ---
+    let bg_app_state = app_state.clone();
+    let bg_user_id = authenticated.user.id.clone();
+    let bg_username = authenticated.user.username.clone();
+    let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
+    let bg_http_client = app_state.http_client.clone();
+    let bg_account_ids = account_ids.clone();
+    let bg_skip_ec = form.skip_emergency_codes.unwrap_or(true);
+    let bg_emergency_code = form.emergency_code.clone();
+
+    tokio::spawn(async move {
+        let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
+
+        for account_id in &bg_account_ids {
+            // Fetch security info (with timeout)
+            let (initial_guard_state, initial_device_id) = match tokio::time::timeout(
+                Duration::from_secs(15),
+                steam_platform::fetch_security_info(&steam_root, &bg_master_key, account_id),
+            )
+            .await
+            {
+                Ok(Ok(info)) => (Some(info.guard_state), Some(info.bound_device)),
+                _ => (None, None),
+            };
+
+            // Update the entry with captured security info
+            {
+                let mut zt = bg_app_state.zero_trust.write().await;
+                if let Some(user_state) = zt.get_mut(&bg_user_id) {
+                    if let Some(entry) = user_state.locked_accounts.get_mut(account_id) {
+                        entry.initial_guard_state = initial_guard_state;
+                        entry.initial_device_id = initial_device_id.clone();
+                    }
+                }
+            }
+
+            // Execute the sweep
+            let _ = steam_platform::execute_zero_trust_sweep(
+                &steam_root,
+                &bg_master_key,
+                &bg_http_client,
+                account_id,
+                initial_guard_state,
+                initial_device_id.as_deref(),
+                bg_skip_ec,
+                bg_emergency_code.as_deref(),
+            )
+            .await;
+        }
+
+        // Re-persist state with updated security info
+        let state_snapshot = {
+            let zt = bg_app_state.zero_trust.read().await;
+            zt.get(&bg_user_id).cloned()
+        };
+        if let Some(state) = state_snapshot {
+            let _ = persist_zero_trust_state(
+                &bg_app_state.runtime,
+                &bg_user_id,
+                &state,
+                &bg_master_key,
+            )
+            .await;
+        }
+
+        info!(
+            "zero trust background sweep completed for user {} ({} accounts)",
+            bg_username,
+            bg_account_ids.len()
+        );
+    });
+
+    // Return immediately — the page will reload and show the zero trust banner,
+    // and the periodic sweep polling will display ongoing results.
     Json(serde_json::json!({
         "ok": true,
         "message": translations.steam_zero_trust_activated_message,
-        "results": results_per_account,
     }))
     .into_response()
 }
@@ -6153,8 +6175,21 @@ async fn zero_trust_sweep_handler(
     let mut results_per_account = Vec::new();
 
     // Validate each account actually belongs to this user before sweeping
-    let (owned_accounts, _) =
-        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())).await;
+    let (owned_accounts, _) = match tokio::time::timeout(
+        Duration::from_secs(10),
+        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            return Json(serde_json::json!({
+                "ok": false,
+                "message": "account discovery timed out",
+            }))
+            .into_response();
+        }
+    };
     let owned_ids: std::collections::HashSet<&str> =
         owned_accounts.iter().map(|a| a.id.as_str()).collect();
 
