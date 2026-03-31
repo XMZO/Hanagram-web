@@ -3461,7 +3461,7 @@
                 const resp = await fetch(ZERO_TRUST_ACTIVATE_API, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ account_ids: accountIds, confirm_phrase: confirmInput.value.trim(), lang: LANG })
+                    body: JSON.stringify({ account_ids: accountIds.join(","), confirm_phrase: confirmInput.value.trim(), lang: LANG })
                 });
                 const data = await resp.json();
                 if (data.ok) {
