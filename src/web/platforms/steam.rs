@@ -314,7 +314,8 @@ struct ZeroTrustDeactivateForm {
 
 #[derive(Debug, Deserialize)]
 struct ZeroTrustSweepForm {
-    lang: Option<String>,
+    #[serde(rename = "lang")]
+    _lang: Option<String>,
 }
 
 const STEAM_CODES_TAB_ID: &str = "codes";
@@ -956,7 +957,8 @@ pub(crate) async fn build_workspace_card(
     language: Language,
 ) -> PlatformWorkspaceCardView {
     // The workspace card doesn't need zero trust detail; pass an empty set.
-    let snapshot = build_workspace_snapshot(app_state, authenticated, &std::collections::HashSet::new()).await;
+    let snapshot =
+        build_workspace_snapshot(app_state, authenticated, &std::collections::HashSet::new()).await;
     let translations = language.translations();
     PlatformWorkspaceCardView {
         id: String::from("steam"),
@@ -1125,14 +1127,8 @@ pub(crate) fn routes() -> Router<AppState> {
             STEAM_ZERO_TRUST_DEACTIVATE_PATH,
             post(zero_trust_deactivate_handler),
         )
-        .route(
-            STEAM_ZERO_TRUST_STATUS_PATH,
-            get(zero_trust_status_handler),
-        )
-        .route(
-            STEAM_ZERO_TRUST_SWEEP_PATH,
-            post(zero_trust_sweep_handler),
-        )
+        .route(STEAM_ZERO_TRUST_STATUS_PATH, get(zero_trust_status_handler))
+        .route(STEAM_ZERO_TRUST_SWEEP_PATH, post(zero_trust_sweep_handler))
 }
 
 pub(crate) async fn render_workspace_page(
@@ -1672,7 +1668,6 @@ async fn import_mafile_handler(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
-
     let mut language = detect_language(&headers, None);
     let mut account_name = String::new();
     let mut upload_name: Option<String> = None;
@@ -1790,7 +1785,6 @@ async fn create_manual_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     let steam_id = match form.steam_id.trim().parse::<u64>() {
         Ok(value) => value,
         Err(_) => {
@@ -1907,7 +1901,6 @@ async fn create_logged_in_account_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if form.steam_username.trim().is_empty() {
         return redirect_with_workspace_banner(
@@ -2027,7 +2020,6 @@ async fn login_managed_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2114,7 +2106,6 @@ async fn update_account_materials_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
@@ -2233,7 +2224,6 @@ async fn rename_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2314,7 +2304,6 @@ async fn delete_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2366,7 +2355,6 @@ async fn accept_confirmation_handler(
     Form(form): Form<SteamConfirmationActionForm>,
 ) -> Response {
     let language = language_from_headers_and_form(&headers, form.lang.as_deref());
-
 
     confirmation_action_handler(
         &app_state,
@@ -2531,7 +2519,6 @@ async fn approve_login_challenge_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
 
-
     approve_login_challenge_for_account(
         &app_state,
         &authenticated,
@@ -2604,7 +2591,6 @@ async fn approve_login_challenge_upload_handler(
         }
     }
 
-
     let Some(file_bytes) = image_bytes.filter(|value| !value.is_empty()) else {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2649,7 +2635,6 @@ async fn approve_login_approval_handler(
     Form(form): Form<SteamApprovalActionForm>,
 ) -> Response {
     let language = language_from_headers_and_form(&headers, form.lang.as_deref());
-
 
     login_approval_action_handler(
         &app_state,
@@ -2989,7 +2974,6 @@ async fn link_authenticator_for_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -3067,7 +3051,6 @@ async fn setup_begin_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if form.steam_username.trim().is_empty() || form.steam_password.is_empty() {
         return (
@@ -3285,7 +3268,6 @@ async fn setup_resume_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     let Some((setup_id, pending)) =
         take_pending_setup_for_user(&app_state, &authenticated.user.id).await
@@ -3919,7 +3901,6 @@ async fn setup_transfer_start_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     let Some((setup_id, pending)) =
         take_pending_setup_for_user(&app_state, &authenticated.user.id).await
     else {
@@ -4266,7 +4247,6 @@ async fn remove_authenticator_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -4667,7 +4647,6 @@ async fn account_status_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -4734,7 +4713,6 @@ async fn account_export_qr_handler(
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
-
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -4827,7 +4805,6 @@ async fn import_winauth_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if form.uri.trim().is_empty() {
         return redirect_with_workspace_banner(
             &app_state,
@@ -4901,7 +4878,6 @@ async fn bulk_accept_confirmations_handler(
     Json(form): Json<LangQuery>,
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
-
 
     bulk_confirmation_action(
         &app_state,
@@ -5042,7 +5018,6 @@ async fn account_proxy_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -5170,7 +5145,6 @@ async fn account_phone_status_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -5238,7 +5212,6 @@ async fn create_emergency_codes_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
-
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -5301,7 +5274,6 @@ async fn destroy_emergency_codes_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -5368,7 +5340,6 @@ async fn validate_token_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
-
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -5482,7 +5453,11 @@ pub(crate) async fn zero_trust_guard(
         redirect_with_workspace_banner(
             &app_state,
             &headers,
-            PageBanner::error(language.translations().steam_zero_trust_operation_locked_message),
+            PageBanner::error(
+                language
+                    .translations()
+                    .steam_zero_trust_operation_locked_message,
+            ),
             Some(STEAM_ACCOUNTS_TAB_ID),
         )
         .await
@@ -5490,7 +5465,11 @@ pub(crate) async fn zero_trust_guard(
 }
 
 /// Check whether a request is on the zero trust allowlist.
-fn is_zero_trust_allowed(method: &axum::http::Method, path: &str, locked_ids: &HashSet<String>) -> bool {
+fn is_zero_trust_allowed(
+    method: &axum::http::Method,
+    path: &str,
+    locked_ids: &HashSet<String>,
+) -> bool {
     // Zero trust endpoints — always allowed (activate, deactivate, status, sweep)
     if path.starts_with("/api/platforms/steam/zero-trust/") {
         return true;
@@ -5599,15 +5578,13 @@ fn zero_trust_file_path(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
 }
 
 fn compute_zero_trust_hmac(master_key: &[u8], payload: &[u8]) -> String {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
+    let mut mac = Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
     mac.update(payload);
     base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
 }
 
 fn verify_zero_trust_hmac(master_key: &[u8], payload: &[u8], expected_b64: &str) -> bool {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
+    let mut mac = Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
     mac.update(payload);
     let expected = match base64::engine::general_purpose::STANDARD.decode(expected_b64) {
         Ok(bytes) => bytes,
@@ -5628,8 +5605,7 @@ async fn persist_zero_trust_state(
             .await
             .context("failed creating zero trust state directory")?;
     }
-    let state_json =
-        serde_json::to_vec(state).context("failed serializing zero trust state")?;
+    let state_json = serde_json::to_vec(state).context("failed serializing zero trust state")?;
     let signature = compute_zero_trust_hmac(master_key, &state_json);
     let file_content = serde_json::json!({
         "state": state,
@@ -5671,8 +5647,8 @@ async fn load_zero_trust_state(
         anyhow::bail!("zero trust file HMAC verification failed — possible tampering");
     }
 
-    let state: ZeroTrustUserState =
-        serde_json::from_value(state_value.clone()).context("failed deserializing zero trust state")?;
+    let state: ZeroTrustUserState = serde_json::from_value(state_value.clone())
+        .context("failed deserializing zero trust state")?;
     Ok(Some(state))
 }
 
@@ -5783,45 +5759,44 @@ async fn zero_trust_activate_handler(
         zt.insert(authenticated.user.id.clone(), user_state.clone());
     }
 
-    // Persist to disk
-    if let Err(e) = persist_zero_trust_state(
-        &app_state.runtime,
-        &authenticated.user.id,
-        &user_state,
-        master_key.as_ref().as_slice(),
-    )
-    .await
-    {
-        warn!("failed persisting zero trust state: {e}");
-    }
-
-    // Audit log
-    let _ = app_state
-        .meta_store
-        .record_audit(&NewAuditEntry {
-            action_type: "steam_zero_trust_activate".to_owned(),
-            actor_user_id: Some(authenticated.user.id.clone()),
-            subject_user_id: Some(authenticated.user.id.clone()),
-            ip_address: None,
-            success: true,
-            details_json: serde_json::json!({
-                "username": authenticated.user.username,
-                "locked_account_count": account_ids.len(),
-                "account_ids": account_ids,
-            })
-            .to_string(),
-        })
-        .await;
-
-    // --- Phase 2: Spawn sweep in background (non-blocking) ---
+    // --- Phase 2: Persist/audit/sweep in background (non-blocking) ---
     let bg_app_state = app_state.clone();
     let bg_user_id = authenticated.user.id.clone();
     let bg_username = authenticated.user.username.clone();
     let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
     let bg_http_client = app_state.http_client.clone();
+    let bg_user_state = user_state.clone();
     let bg_account_ids = account_ids.clone();
     tokio::spawn(async move {
         let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
+
+        if let Err(e) = persist_zero_trust_state(
+            &bg_app_state.runtime,
+            &bg_user_id,
+            &bg_user_state,
+            &bg_master_key,
+        )
+        .await
+        {
+            warn!("failed persisting zero trust state: {e}");
+        }
+
+        let _ = bg_app_state
+            .meta_store
+            .record_audit(&NewAuditEntry {
+                action_type: "steam_zero_trust_activate".to_owned(),
+                actor_user_id: Some(bg_user_id.clone()),
+                subject_user_id: Some(bg_user_id.clone()),
+                ip_address: None,
+                success: true,
+                details_json: serde_json::json!({
+                    "username": bg_username,
+                    "locked_account_count": bg_account_ids.len(),
+                    "account_ids": bg_account_ids.clone(),
+                })
+                .to_string(),
+            })
+            .await;
 
         for account_id in &bg_account_ids {
             // Fetch security info (with timeout)
@@ -5975,10 +5950,7 @@ async fn zero_trust_deactivate_handler(
             let now = Utc::now().timestamp();
             let used_steps = app_state
                 .meta_store
-                .list_recent_totp_steps(
-                    &authenticated.user.id,
-                    now.div_euclid(30) - 5,
-                )
+                .list_recent_totp_steps(&authenticated.user.id, now.div_euclid(30) - 5)
                 .await
                 .unwrap_or_default()
                 .into_iter()

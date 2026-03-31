@@ -102,8 +102,7 @@ pub(crate) const STEAM_SETUP_TRANSFER_START_PATH: &str = "/platforms/steam/setup
 pub(crate) const STEAM_SETUP_TRANSFER_FINISH_PATH: &str = "/platforms/steam/setup/transfer/finish";
 pub(crate) const STEAM_IMPORT_WINAUTH_PATH: &str = "/platforms/steam/import/winauth";
 pub(crate) const STEAM_TIME_CHECK_API_PATH: &str = "/api/platforms/steam/time-check";
-pub(crate) const STEAM_ZERO_TRUST_ACTIVATE_PATH: &str =
-    "/api/platforms/steam/zero-trust/activate";
+pub(crate) const STEAM_ZERO_TRUST_ACTIVATE_PATH: &str = "/api/platforms/steam/zero-trust/activate";
 pub(crate) const STEAM_ZERO_TRUST_DEACTIVATE_PATH: &str =
     "/api/platforms/steam/zero-trust/deactivate";
 pub(crate) const STEAM_ZERO_TRUST_STATUS_PATH: &str = "/api/platforms/steam/zero-trust/status";

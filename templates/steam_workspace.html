@@ -1455,7 +1455,7 @@
                     headers: { "Accept": "application/json" },
                     cache: "no-store"
                 });
-                const data = await response.json();
+                const data = await readJsonResponse(response, I18N.sessionDevicesLoadFailed);
                 if (!response.ok || !data?.ok) {
                     setSteamSessionDevicesStatus(root, "error", data?.message || I18N.sessionDevicesLoadFailed);
                     return;
@@ -1486,7 +1486,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ ...payload, lang: LANG })
                 });
-                const data = await response.json();
+                const data = await readJsonResponse(response, I18N.sessionRevokeFailed);
                 if (!response.ok || !data?.ok) {
                     setSteamSessionDevicesStatus(root, "error", data?.message || I18N.sessionRevokeFailed);
                     return;
@@ -2758,13 +2758,20 @@
                 el.classList.add("border-sage/30", "bg-mint", "text-sageDeep");
             }
         }
+        async function readJsonResponse(resp, fallbackMessage) {
+            const contentType = resp.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error(`${fallbackMessage || "Server returned non-JSON response"} (HTTP ${resp.status || 0})`);
+            }
+            return resp.json();
+        }
         async function jsonPost(url, body) {
             const resp = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             });
-            return resp.json();
+            return readJsonResponse(resp, "Server returned non-JSON response");
         }
         function handleSetupStepResponse(data) {
             if (!data || !data.ok) return false;
@@ -3457,10 +3464,13 @@
                 statusEl.classList.remove("hidden");
             }
 
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 15000);
             try {
                 const resp = await fetch(ZERO_TRUST_ACTIVATE_API, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
+                    signal: controller.signal,
                     body: JSON.stringify({
                         account_ids: accountIds.join(","),
                         confirm_phrase: confirmInput.value.trim(),
@@ -3488,10 +3498,14 @@
             } catch (err) {
                 if (statusEl) {
                     statusEl.className = "mt-3 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
-                    statusEl.textContent = err.message || I18N.ztActivationFailedMessage;
+                    statusEl.textContent = err && err.name === "AbortError"
+                        ? I18N.ztActivationFailedMessage
+                        : (err.message || I18N.ztActivationFailedMessage);
                     statusEl.classList.remove("hidden");
                 }
                 if (submitBtn) { submitBtn.disabled = false; }
+            } finally {
+                window.clearTimeout(timeoutId);
             }
         }
         window.activateZeroTrust = activateZeroTrust;
@@ -3538,10 +3552,13 @@
             if (submitBtn) { submitBtn.disabled = true; }
             if (statusEl) { statusEl.textContent = I18N.ztSweepRunningMessage; }
 
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 15000);
             try {
                 const resp = await fetch(ZERO_TRUST_DEACTIVATE_API, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
+                    signal: controller.signal,
                     body: JSON.stringify({ password: password, totp: totp, confirm_phrase: confirmInput.value.trim(), lang: LANG })
                 });
                 const data = await resp.json();
@@ -3553,8 +3570,14 @@
                     if (submitBtn) { submitBtn.disabled = false; }
                 }
             } catch (err) {
-                if (statusEl) { statusEl.textContent = err.message || I18N.ztDeactivationFailedMessage; }
+                if (statusEl) {
+                    statusEl.textContent = err && err.name === "AbortError"
+                        ? I18N.ztDeactivationFailedMessage
+                        : (err.message || I18N.ztDeactivationFailedMessage);
+                }
                 if (submitBtn) { submitBtn.disabled = false; }
+            } finally {
+                window.clearTimeout(timeoutId);
             }
         }
         window.deactivateZeroTrust = deactivateZeroTrust;

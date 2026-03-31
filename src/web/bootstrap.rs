@@ -104,10 +104,7 @@ pub(crate) async fn run() -> Result<()> {
     maintenance::spawn_background_maintenance(app_state.clone());
 
     let steam_routes = platforms::steam::routes().route_layer(
-        axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            platforms::steam::zero_trust_guard,
-        ),
+        axum::middleware::from_fn_with_state(app_state.clone(), platforms::steam::zero_trust_guard),
     );
 
     let protected = Router::new()

@@ -21,17 +21,17 @@ use steamguard::accountlinker::{
 use steamguard::approver::Challenge;
 use steamguard::phonelinker::{PhoneLinker, SetPhoneNumberError, VerifyPhoneError};
 use steamguard::protobufs::enums::ESessionPersistence;
+use steamguard::protobufs::service_phone::CPhone_AccountPhoneStatus_Request;
+use steamguard::protobufs::service_twofactor::{
+    CTwoFactor_CreateEmergencyCodes_Request, CTwoFactor_DestroyEmergencyCodes_Request,
+    CTwoFactor_ValidateToken_Request,
+};
 use steamguard::protobufs::steammessages_auth_steamclient::{
     CAuthentication_GetAuthSessionInfo_Response, CAuthentication_RefreshToken_Enumerate_Request,
     CAuthentication_RefreshToken_Revoke_Request, CAuthenticationSupport_RevokeToken_Request,
     EAuthSessionGuardType, EAuthTokenPlatformType, EAuthTokenRevokeAction,
 };
 use steamguard::refresher::TokenRefresher;
-use steamguard::protobufs::service_phone::CPhone_AccountPhoneStatus_Request;
-use steamguard::protobufs::service_twofactor::{
-    CTwoFactor_CreateEmergencyCodes_Request, CTwoFactor_DestroyEmergencyCodes_Request,
-    CTwoFactor_ValidateToken_Request,
-};
 use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient, TwoFactorClient};
 use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens, TwoFactorSecret};
 use steamguard::transport::{Transport, WebApiTransport};
@@ -3682,7 +3682,9 @@ pub(crate) async fn execute_zero_trust_sweep(
                     .map_err(|e| anyhow::anyhow!("failed persisting cleared session: {e}"))
             }
             Ok(None) => Err(anyhow::anyhow!("account not found for session clearing")),
-            Err(e) => Err(anyhow::anyhow!("failed loading account for session clearing: {e}")),
+            Err(e) => Err(anyhow::anyhow!(
+                "failed loading account for session clearing: {e}"
+            )),
         }
     })
     .await
