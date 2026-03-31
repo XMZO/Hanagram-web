@@ -1857,7 +1857,9 @@ mod tests {
                     "update_material_action": "/platforms/steam/accounts/demo/materials",
                     "login_action": "/platforms/steam/accounts/demo/login",
                     "rename_action": "/platforms/steam/accounts/demo/rename",
-                    "delete_action": "/platforms/steam/accounts/demo/delete"
+                    "delete_action": "/platforms/steam/accounts/demo/delete",
+                    "session_devices_api": "/api/platforms/steam/accounts/demo/devices",
+                    "session_device_revoke_api": "/api/platforms/steam/accounts/demo/devices/revoke"
                 }],
                 "issues": []
             }),

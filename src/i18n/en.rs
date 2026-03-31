@@ -542,6 +542,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_issue_empty: "No broken files were found.",
     steam_codes_tab_label: "Codes",
     steam_manage_tab_label: "Manage",
+    steam_devices_tab_label: "Devices",
     steam_confirmations_tab_label: "Confirmations",
     steam_issues_tab_label: "Issues",
     steam_about_tab_label: "About",

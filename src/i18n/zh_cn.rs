@@ -542,6 +542,7 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_issue_empty: "当前没有异常文件。",
     steam_codes_tab_label: "动态码",
     steam_manage_tab_label: "管理",
+    steam_devices_tab_label: "设备",
     steam_confirmations_tab_label: "确认",
     steam_issues_tab_label: "异常",
     steam_about_tab_label: "说明",

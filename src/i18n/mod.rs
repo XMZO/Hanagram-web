@@ -552,6 +552,7 @@ pub struct TranslationSet {
     pub steam_issue_empty: &'static str,
     pub steam_codes_tab_label: &'static str,
     pub steam_manage_tab_label: &'static str,
+    pub steam_devices_tab_label: &'static str,
     pub steam_confirmations_tab_label: &'static str,
     pub steam_issues_tab_label: &'static str,
     pub steam_about_tab_label: &'static str,
