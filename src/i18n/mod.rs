@@ -937,10 +937,6 @@ pub struct TranslationSet {
     pub steam_zero_trust_guard_changed_warning: &'static str,
     pub steam_zero_trust_invalid_confirm_message: &'static str,
     pub steam_zero_trust_password_required_message: &'static str,
-    pub steam_zero_trust_emergency_codes_label: &'static str,
-    pub steam_zero_trust_emergency_codes_skip: &'static str,
-    pub steam_zero_trust_emergency_codes_attempt: &'static str,
-    pub steam_zero_trust_emergency_codes_code_label: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]

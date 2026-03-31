@@ -3178,7 +3178,6 @@ pub(crate) async fn create_emergency_codes(
     root_dir: &Path,
     master_key: &[u8],
     account_id: &str,
-    verification_code: Option<&str>,
 ) -> Result<Vec<String>> {
     refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
 
@@ -3188,18 +3187,15 @@ pub(crate) async fn create_emergency_codes(
         .context("account not found")?;
     let account = record.into_runtime(storage_path);
     let vendor_tokens = build_vendor_tokens(&account)?;
-    let code_owned = verification_code.map(|s| s.to_owned());
 
     spawn_blocking(move || {
         let client = build_blocking_steam_client()?;
         let transport = WebApiTransport::new(client);
         let twofactor_client = TwoFactorClient::new(transport);
-        let mut request = CTwoFactor_CreateEmergencyCodes_Request::new();
-        if let Some(code) = code_owned {
-            if !code.is_empty() {
-                request.set_code(code);
-            }
-        }
+        // Note: the `code` field on CreateEmergencyCodes is an SMS verification
+        // code sent to the account's phone. We cannot generate it programmatically.
+        // Steam may still accept the request without it for some accounts.
+        let request = CTwoFactor_CreateEmergencyCodes_Request::new();
         let response = twofactor_client
             .create_emergency_codes(request, vendor_tokens.access_token())
             .context("failed creating Steam emergency codes")?;
@@ -3525,7 +3521,6 @@ pub(crate) async fn execute_zero_trust_sweep(
     initial_guard_state: Option<u32>,
     initial_device_id: Option<&str>,
     skip_emergency_codes: bool,
-    emergency_code: Option<&str>,
 ) -> Result<ZeroTrustSweepResult> {
     use tokio::time::timeout;
 
@@ -3642,9 +3637,8 @@ pub(crate) async fn execute_zero_trust_sweep(
     let emergency_codes_rotated = if skip_emergency_codes {
         false
     } else {
-        let code = emergency_code.map(|s| s.to_owned());
         match timeout(Duration::from_secs(20), async {
-            rotate_emergency_codes(root_dir, master_key, account_id, code.as_deref()).await
+            rotate_emergency_codes(root_dir, master_key, account_id).await
         })
         .await
         {
@@ -3710,15 +3704,14 @@ pub(crate) async fn execute_zero_trust_sweep(
 }
 
 /// Rotate emergency codes: destroy existing → create new → destroy the new ones.
-/// If an optional verification `code` is provided, it is passed to the create step.
+/// The TOTP code is auto-generated from the account's shared_secret.
 async fn rotate_emergency_codes(
     root_dir: &Path,
     master_key: &[u8],
     account_id: &str,
-    code: Option<&str>,
 ) -> Result<()> {
     destroy_emergency_codes(root_dir, master_key, account_id).await?;
-    create_emergency_codes(root_dir, master_key, account_id, code).await?;
+    create_emergency_codes(root_dir, master_key, account_id).await?;
     destroy_emergency_codes(root_dir, master_key, account_id).await?;
     Ok(())
 }

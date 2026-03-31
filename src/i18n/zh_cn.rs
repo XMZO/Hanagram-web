@@ -905,9 +905,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
 
     // 零信任模式
     steam_zero_trust_button_label: "零信任模式",
-    steam_zero_trust_button_tooltip: "紧急锁定：拒绝所有确认、撤销所有设备、轮换恢复码",
+    steam_zero_trust_button_tooltip: "紧急锁定：拒绝所有确认、撤销所有设备",
     steam_zero_trust_modal_title: "激活零信任模式",
-    steam_zero_trust_modal_warning: "这将立即拒绝所有待处理确认、拒绝所有登录审批、撤销所有已登录设备，并为所选账号轮换恢复码。此操作不可撤销。",
+    steam_zero_trust_modal_warning: "这将立即拒绝所有待处理确认、拒绝所有登录审批、撤销所有已登录设备。此操作不可撤销。",
     steam_zero_trust_confirm_label: "输入 CONFIRM 以激活",
     steam_zero_trust_activate_button: "激活零信任",
     steam_zero_trust_activating_message: "正在激活零信任模式...",
@@ -927,8 +927,4 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_zero_trust_guard_changed_warning: "警告：自激活以来，验证器状态或设备绑定已发生变化。这可能表示未授权访问。",
     steam_zero_trust_invalid_confirm_message: "请输入 CONFIRM 以继续。",
     steam_zero_trust_password_required_message: "需要输入密码才能解除零信任模式。",
-    steam_zero_trust_emergency_codes_label: "备用码轮换",
-    steam_zero_trust_emergency_codes_skip: "跳过轮换（推荐）",
-    steam_zero_trust_emergency_codes_attempt: "尝试轮换（20 秒超时）",
-    steam_zero_trust_emergency_codes_code_label: "验证码（可选）",
 };

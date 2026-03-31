@@ -905,9 +905,9 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
 
     // Zero Trust Mode
     steam_zero_trust_button_label: "Zero Trust",
-    steam_zero_trust_button_tooltip: "Emergency lockdown: reject all confirmations, revoke all devices, rotate recovery codes",
+    steam_zero_trust_button_tooltip: "Emergency lockdown: reject all confirmations, revoke all devices",
     steam_zero_trust_modal_title: "Activate Zero Trust Mode",
-    steam_zero_trust_modal_warning: "This will immediately reject all pending confirmations, deny all login approvals, revoke all logged-in devices, and rotate emergency codes for the selected accounts. This cannot be undone.",
+    steam_zero_trust_modal_warning: "This will immediately reject all pending confirmations, deny all login approvals, and revoke all logged-in devices for the selected accounts. This cannot be undone.",
     steam_zero_trust_confirm_label: "Type CONFIRM to activate",
     steam_zero_trust_activate_button: "Activate Zero Trust",
     steam_zero_trust_activating_message: "Activating zero trust mode...",
@@ -927,8 +927,4 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_zero_trust_guard_changed_warning: "WARNING: Authenticator state or device binding has changed since activation. This may indicate unauthorized access.",
     steam_zero_trust_invalid_confirm_message: "You must type CONFIRM to proceed.",
     steam_zero_trust_password_required_message: "Password is required to deactivate zero trust mode.",
-    steam_zero_trust_emergency_codes_label: "Emergency Code Rotation",
-    steam_zero_trust_emergency_codes_skip: "Skip rotation (recommended)",
-    steam_zero_trust_emergency_codes_attempt: "Attempt rotation (20s timeout)",
-    steam_zero_trust_emergency_codes_code_label: "Verification code (optional)",
 };

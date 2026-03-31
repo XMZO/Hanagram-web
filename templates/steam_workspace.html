@@ -1373,39 +1373,39 @@
             const firstSeen = device.first_seen_at || "—";
             const location = device.location_label || I18N.sessionDeviceUnknownLocation;
 
-            return `<article class="rounded-[0.95rem] border border-line/80 bg-white/96 p-3">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            return `<article class="overflow-hidden rounded-[0.95rem] border border-line/80 bg-white/96 p-3">
+                <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <p class="min-w-0 truncate text-sm font-semibold text-ink">${escapeHtml(device.device_label)}</p>
                             ${device.is_current
-                                ? `<span class="inline-flex rounded-full border border-sage/30 bg-mint px-2 py-1 text-[0.64rem] font-medium uppercase tracking-[0.16em] text-sageDeep">${escapeHtml(I18N.sessionDeviceCurrent)}</span>`
+                                ? `<span class="inline-flex shrink-0 rounded-full border border-sage/30 bg-mint px-2 py-1 text-[0.64rem] font-medium uppercase tracking-[0.16em] text-sageDeep">${escapeHtml(I18N.sessionDeviceCurrent)}</span>`
                                 : ""}
                         </div>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span class="inline-flex rounded-full border border-steam/18 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(device.platform_label)}</span>
-                            <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">${escapeHtml(device.token_id)}</span>
+                        <div class="mt-2 flex flex-wrap gap-1.5">
+                            <span class="inline-flex shrink-0 rounded-full border border-steam/18 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(device.platform_label)}</span>
+                            <span class="inline-flex min-w-0 truncate rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.68rem] text-ink/58">${escapeHtml(device.token_id)}</span>
                         </div>
                     </div>
                     <button
                         type="button"
                         data-session-device-action
                         data-session-device-revoke-token="${escapeHtml(device.token_id)}"
-                        class="rounded-[0.95rem] border border-line bg-white px-3 py-2 text-sm font-medium text-ink/76 transition hover:border-steam/25 hover:bg-steamMist/45"
+                        class="shrink-0 rounded-[0.95rem] border border-line bg-white px-3 py-2 text-sm font-medium text-ink/76 transition hover:border-steam/25 hover:bg-steamMist/45"
                     >${escapeHtml(I18N.sessionDeviceRevoke)}</button>
                 </div>
-                <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
                         <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceLastSeen)}</p>
-                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(lastSeen)}</p>
+                        <p class="mt-1 text-[0.78rem] text-ink/68">${escapeHtml(lastSeen)}</p>
                     </div>
                     <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
                         <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceFirstSeen)}</p>
-                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(firstSeen)}</p>
+                        <p class="mt-1 text-[0.78rem] text-ink/68">${escapeHtml(firstSeen)}</p>
                     </div>
                     <div class="rounded-[0.85rem] border border-line/70 bg-paper/70 px-3 py-2">
                         <p class="text-[0.62rem] uppercase tracking-[0.18em] text-ink/45">${escapeHtml(I18N.sessionDeviceLocation)}</p>
-                        <p class="mt-1.5 text-[0.78rem] text-ink/68">${escapeHtml(location)}</p>
+                        <p class="mt-1 text-[0.78rem] text-ink/68">${escapeHtml(location)}</p>
                     </div>
                 </div>
             </article>`;
@@ -2251,7 +2251,7 @@
             </section>
 
             <section data-tab-panel="devices">
-                <article class="paper-shadow rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
+                <article class="paper-shadow mx-auto max-w-3xl rounded-[1.35rem] border border-line/85 bg-white/94 p-4 backdrop-blur-sm">
                     <h2 class="font-display text-xl font-semibold">{{ i18n.steam_session_devices_title }}</h2>
                     <p class="mt-2 text-sm leading-6 text-ink/68">{{ i18n.steam_session_devices_description }}</p>
 
@@ -2664,26 +2664,6 @@
                         </div>
                     </label>
                     {% endfor %}
-                </div>
-
-                <div class="mt-4">
-                    <p class="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/55">{{ i18n.steam_zero_trust_emergency_codes_label }}</p>
-                    <div class="mt-2 space-y-2 rounded-[1rem] border border-line/80 bg-paper p-3">
-                        <label class="flex cursor-pointer items-center gap-2.5 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300">
-                            <input type="radio" name="zt_emergency" value="skip" checked onchange="toggleZtEmergencyCode()" class="h-4 w-4 border-line text-red-600 focus:ring-red-500">
-                            <span class="text-sm text-ink">{{ i18n.steam_zero_trust_emergency_codes_skip }}</span>
-                        </label>
-                        <label class="flex cursor-pointer items-center gap-2.5 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300">
-                            <input type="radio" name="zt_emergency" value="attempt" onchange="toggleZtEmergencyCode()" class="h-4 w-4 border-line text-red-600 focus:ring-red-500">
-                            <span class="text-sm text-ink">{{ i18n.steam_zero_trust_emergency_codes_attempt }}</span>
-                        </label>
-                        <div id="zt-emergency-code-input" class="hidden pl-7">
-                            <label class="block">
-                                <span class="text-[0.68rem] text-ink/55">{{ i18n.steam_zero_trust_emergency_codes_code_label }}</span>
-                                <input id="zt-emergency-code" type="text" maxlength="10" autocomplete="one-time-code" class="mt-1 w-full rounded-[0.85rem] border border-red-200 bg-white px-3 py-2 font-mono text-sm text-ink outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200" placeholder="">
-                            </label>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="mt-4">
@@ -3451,20 +3431,6 @@
         }
         window.ztSelectAllAccounts = ztSelectAllAccounts;
 
-        // ----------- Zero Trust: Emergency code toggle -----------
-        function toggleZtEmergencyCode() {
-            const selected = document.querySelector("input[name='zt_emergency']:checked");
-            const codePanel = document.getElementById("zt-emergency-code-input");
-            if (codePanel) {
-                if (selected && selected.value === "attempt") {
-                    codePanel.classList.remove("hidden");
-                } else {
-                    codePanel.classList.add("hidden");
-                }
-            }
-        }
-        window.toggleZtEmergencyCode = toggleZtEmergencyCode;
-
         // ----------- Zero Trust: Activation flow -----------
         async function activateZeroTrust() {
             const confirmInput = document.getElementById("zt-activate-confirm");
@@ -3498,8 +3464,6 @@
                     body: JSON.stringify({
                         account_ids: accountIds.join(","),
                         confirm_phrase: confirmInput.value.trim(),
-                        skip_emergency_codes: !(document.querySelector("input[name='zt_emergency']:checked") || {}).value || document.querySelector("input[name='zt_emergency']:checked").value === "skip",
-                        emergency_code: (document.getElementById("zt-emergency-code") || {}).value || "",
                         lang: LANG
                     })
                 });
@@ -3602,6 +3566,7 @@
 
         // ----------- Zero Trust: Sweep polling -----------
         let zeroTrustSweepTimer = null;
+        let zeroTrustSweepInFlight = false;
         const ZERO_TRUST_SWEEP_INTERVAL_MS = 5000;
 
         function updateZeroTrustLog(data) {
@@ -3633,6 +3598,8 @@
         function startZeroTrustPolling() {
             if (zeroTrustSweepTimer) return;
             zeroTrustSweepTimer = window.setInterval(async function() {
+                if (zeroTrustSweepInFlight) return;
+                zeroTrustSweepInFlight = true;
                 try {
                     const resp = await fetch(ZERO_TRUST_SWEEP_API, {
                         method: "POST",
@@ -3646,6 +3613,8 @@
                     }
                 } catch (e) {
                     // Sweep poll failed silently
+                } finally {
+                    zeroTrustSweepInFlight = false;
                 }
             }, ZERO_TRUST_SWEEP_INTERVAL_MS);
         }

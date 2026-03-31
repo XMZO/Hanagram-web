@@ -300,8 +300,6 @@ struct SteamSessionDeviceRevokeForm {
 struct ZeroTrustActivateForm {
     account_ids: String,
     confirm_phrase: String,
-    skip_emergency_codes: Option<bool>,
-    emergency_code: Option<String>,
     lang: Option<String>,
 }
 
@@ -5269,7 +5267,6 @@ async fn create_emergency_codes_handler(
         &steam_root,
         master_key.as_ref().as_slice(),
         &account_id,
-        None,
     )
     .await
     {
@@ -5826,9 +5823,6 @@ async fn zero_trust_activate_handler(
     let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
     let bg_http_client = app_state.http_client.clone();
     let bg_account_ids = account_ids.clone();
-    let bg_skip_ec = form.skip_emergency_codes.unwrap_or(true);
-    let bg_emergency_code = form.emergency_code.clone();
-
     tokio::spawn(async move {
         let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
 
@@ -5863,8 +5857,7 @@ async fn zero_trust_activate_handler(
                 account_id,
                 initial_guard_state,
                 initial_device_id.as_deref(),
-                bg_skip_ec,
-                bg_emergency_code.as_deref(),
+                true, // always skip emergency code rotation
             )
             .await;
         }
@@ -6164,79 +6157,46 @@ async fn zero_trust_sweep_handler(
                 return Json(serde_json::json!({
                     "ok": true,
                     "active": false,
-                    "results": [],
+                    "locked_count": 0,
                 }))
                 .into_response();
             }
         }
     };
 
-    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    let mut results_per_account = Vec::new();
+    let locked_count = locked_accounts.len();
+    let account_ids: Vec<String> = locked_accounts.keys().cloned().collect();
 
-    // Validate each account actually belongs to this user before sweeping
-    let (owned_accounts, _) = match tokio::time::timeout(
-        Duration::from_secs(10),
-        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            return Json(serde_json::json!({
-                "ok": false,
-                "message": "account discovery timed out",
-            }))
-            .into_response();
+    // Spawn the sweep in the background — do NOT block the HTTP response.
+    // The frontend polls this endpoint to confirm zero trust is still active;
+    // the actual sweep runs asynchronously.
+    let bg_app_state = app_state.clone();
+    let bg_user_id = authenticated.user.id.clone();
+    let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
+    let bg_http_client = app_state.http_client.clone();
+
+    tokio::spawn(async move {
+        let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
+
+        for (account_id, entry) in &locked_accounts {
+            let _ = steam_platform::execute_zero_trust_sweep(
+                &steam_root,
+                &bg_master_key,
+                &bg_http_client,
+                account_id,
+                entry.initial_guard_state,
+                entry.initial_device_id.as_deref(),
+                true, // periodic sweeps always skip emergency code rotation
+            )
+            .await;
         }
-    };
-    let owned_ids: std::collections::HashSet<&str> =
-        owned_accounts.iter().map(|a| a.id.as_str()).collect();
-
-    for (account_id, entry) in &locked_accounts {
-        if !owned_ids.contains(account_id.as_str()) {
-            results_per_account.push(serde_json::json!({
-                "account_id": account_id,
-                "ok": false,
-                "error": "account not owned by this user",
-            }));
-            continue;
-        }
-
-        let sweep_result = steam_platform::execute_zero_trust_sweep(
-            &steam_root,
-            master_key.as_ref().as_slice(),
-            &app_state.http_client,
-            account_id,
-            entry.initial_guard_state,
-            entry.initial_device_id.as_deref(),
-            true,  // periodic sweeps always skip emergency code rotation
-            None,
-        )
-        .await;
-
-        match sweep_result {
-            Ok(result) => {
-                results_per_account.push(serde_json::json!({
-                    "account_id": account_id,
-                    "ok": true,
-                    "result": result,
-                }));
-            }
-            Err(e) => {
-                results_per_account.push(serde_json::json!({
-                    "account_id": account_id,
-                    "ok": false,
-                    "error": e.to_string(),
-                }));
-            }
-        }
-    }
+    });
 
     Json(serde_json::json!({
         "ok": true,
         "active": true,
-        "results": results_per_account,
+        "locked_count": locked_count,
+        "account_ids": account_ids,
     }))
     .into_response()
 }
