@@ -496,7 +496,7 @@
         }
 
         function resolveSteamTab() {
-            const validTabs = ["codes", "manage", "setup", "approvals", "confirmations", "issues", "about"];
+            const validTabs = ["codes", "manage", "devices", "setup", "approvals", "confirmations", "issues", "about"];
             const hashTab = (window.location.hash || "").replace(/^#/, "");
             if (validTabs.includes(hashTab)) {
                 return hashTab;
