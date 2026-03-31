@@ -2637,8 +2637,8 @@
     </main>
 
     <!-- Zero Trust Activation Modal -->
-    <div id="zero-trust-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onclick="if(event.target===this)hideZeroTrustModal()">
-        <div class="relative mx-4 w-full max-w-lg overflow-hidden rounded-[1.35rem] border-2 border-red-700/50 bg-white shadow-[0_32px_80px_rgba(220,38,38,0.25)]" onclick="event.stopPropagation()">
+    <div id="zero-trust-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="relative mx-4 w-full max-w-lg overflow-hidden rounded-[1.35rem] border-2 border-red-700/50 bg-white shadow-[0_32px_80px_rgba(220,38,38,0.25)]">
             <div class="border-b-2 border-red-200 bg-gradient-to-r from-[#dc2626] to-[#b91c1c] px-5 py-4 text-white">
                 <div class="flex items-center gap-3">
                     <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-lg" aria-hidden="true">&#9888;</span>
@@ -2664,6 +2664,26 @@
                         </div>
                     </label>
                     {% endfor %}
+                </div>
+
+                <div class="mt-4">
+                    <p class="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/55">{{ i18n.steam_zero_trust_emergency_codes_label }}</p>
+                    <div class="mt-2 space-y-2 rounded-[1rem] border border-line/80 bg-paper p-3">
+                        <label class="flex cursor-pointer items-center gap-2.5 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300">
+                            <input type="radio" name="zt_emergency" value="skip" checked onchange="toggleZtEmergencyCode()" class="h-4 w-4 border-line text-red-600 focus:ring-red-500">
+                            <span class="text-sm text-ink">{{ i18n.steam_zero_trust_emergency_codes_skip }}</span>
+                        </label>
+                        <label class="flex cursor-pointer items-center gap-2.5 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300">
+                            <input type="radio" name="zt_emergency" value="attempt" onchange="toggleZtEmergencyCode()" class="h-4 w-4 border-line text-red-600 focus:ring-red-500">
+                            <span class="text-sm text-ink">{{ i18n.steam_zero_trust_emergency_codes_attempt }}</span>
+                        </label>
+                        <div id="zt-emergency-code-input" class="hidden pl-7">
+                            <label class="block">
+                                <span class="text-[0.68rem] text-ink/55">{{ i18n.steam_zero_trust_emergency_codes_code_label }}</span>
+                                <input id="zt-emergency-code" type="text" maxlength="10" autocomplete="one-time-code" class="mt-1 w-full rounded-[0.85rem] border border-red-200 bg-white px-3 py-2 font-mono text-sm text-ink outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200" placeholder="">
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="mt-4">
@@ -3431,6 +3451,20 @@
         }
         window.ztSelectAllAccounts = ztSelectAllAccounts;
 
+        // ----------- Zero Trust: Emergency code toggle -----------
+        function toggleZtEmergencyCode() {
+            const selected = document.querySelector("input[name='zt_emergency']:checked");
+            const codePanel = document.getElementById("zt-emergency-code-input");
+            if (codePanel) {
+                if (selected && selected.value === "attempt") {
+                    codePanel.classList.remove("hidden");
+                } else {
+                    codePanel.classList.add("hidden");
+                }
+            }
+        }
+        window.toggleZtEmergencyCode = toggleZtEmergencyCode;
+
         // ----------- Zero Trust: Activation flow -----------
         async function activateZeroTrust() {
             const confirmInput = document.getElementById("zt-activate-confirm");
@@ -3461,7 +3495,13 @@
                 const resp = await fetch(ZERO_TRUST_ACTIVATE_API, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ account_ids: accountIds.join(","), confirm_phrase: confirmInput.value.trim(), lang: LANG })
+                    body: JSON.stringify({
+                        account_ids: accountIds.join(","),
+                        confirm_phrase: confirmInput.value.trim(),
+                        skip_emergency_codes: !(document.querySelector("input[name='zt_emergency']:checked") || {}).value || document.querySelector("input[name='zt_emergency']:checked").value === "skip",
+                        emergency_code: (document.getElementById("zt-emergency-code") || {}).value || "",
+                        lang: LANG
+                    })
                 });
                 const data = await resp.json();
                 if (data.ok) {

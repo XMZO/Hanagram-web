@@ -3178,6 +3178,7 @@ pub(crate) async fn create_emergency_codes(
     root_dir: &Path,
     master_key: &[u8],
     account_id: &str,
+    verification_code: Option<&str>,
 ) -> Result<Vec<String>> {
     refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
 
@@ -3187,12 +3188,18 @@ pub(crate) async fn create_emergency_codes(
         .context("account not found")?;
     let account = record.into_runtime(storage_path);
     let vendor_tokens = build_vendor_tokens(&account)?;
+    let code_owned = verification_code.map(|s| s.to_owned());
 
     spawn_blocking(move || {
         let client = build_blocking_steam_client()?;
         let transport = WebApiTransport::new(client);
         let twofactor_client = TwoFactorClient::new(transport);
-        let request = CTwoFactor_CreateEmergencyCodes_Request::new();
+        let mut request = CTwoFactor_CreateEmergencyCodes_Request::new();
+        if let Some(code) = code_owned {
+            if !code.is_empty() {
+                request.set_code(code);
+            }
+        }
         let response = twofactor_client
             .create_emergency_codes(request, vendor_tokens.access_token())
             .context("failed creating Steam emergency codes")?;
@@ -3508,7 +3515,8 @@ pub(crate) struct ZeroTrustSweepResult {
 ///
 /// The sweep proceeds through seven stages in order, with the API-dependent steps
 /// executed first (before the session is destroyed).  Each step is individually
-/// guarded so that one failure does not abort the remaining steps.
+/// guarded with a timeout so that one failure or hang does not abort or block
+/// the remaining steps.
 pub(crate) async fn execute_zero_trust_sweep(
     root_dir: &Path,
     master_key: &[u8],
@@ -3516,7 +3524,11 @@ pub(crate) async fn execute_zero_trust_sweep(
     account_id: &str,
     initial_guard_state: Option<u32>,
     initial_device_id: Option<&str>,
+    skip_emergency_codes: bool,
+    emergency_code: Option<&str>,
 ) -> Result<ZeroTrustSweepResult> {
+    use tokio::time::timeout;
+
     let mut errors: Vec<String> = Vec::new();
     let mut confirmations_rejected: usize = 0;
     let mut approvals_denied: usize = 0;
@@ -3524,26 +3536,36 @@ pub(crate) async fn execute_zero_trust_sweep(
     let mut guard_state_changed = false;
     let mut device_id_changed = false;
 
-    // Step 1: Refresh session
-    let account = match refresh_confirmation_session_if_needed(
-        root_dir, master_key, account_id, true,
+    // Step 1: Refresh session (15s timeout)
+    let account = match timeout(
+        Duration::from_secs(15),
+        refresh_confirmation_session_if_needed(root_dir, master_key, account_id, true),
     )
     .await
     {
-        Ok(Some(account)) => Some(account),
-        Ok(None) => {
+        Ok(Ok(Some(account))) => Some(account),
+        Ok(Ok(None)) => {
             errors.push(String::from("account not found during session refresh"));
             None
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             errors.push(format!("session refresh failed: {e}"));
+            None
+        }
+        Err(_) => {
+            errors.push(String::from("session refresh timed out (15s)"));
             None
         }
     };
 
-    // Step 2: Fetch security info and compare with initial state
-    match fetch_security_info(root_dir, master_key, account_id).await {
-        Ok(info) => {
+    // Step 2: Fetch security info and compare with initial state (15s timeout)
+    match timeout(
+        Duration::from_secs(15),
+        fetch_security_info(root_dir, master_key, account_id),
+    )
+    .await
+    {
+        Ok(Ok(info)) => {
             if let Some(initial) = initial_guard_state {
                 if info.guard_state != initial {
                     guard_state_changed = true;
@@ -3555,103 +3577,125 @@ pub(crate) async fn execute_zero_trust_sweep(
                 }
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             errors.push(format!("security info check failed: {e}"));
         }
-    }
-
-    // Step 3: Reject all confirmations
-    if let Some(ref account) = account {
-        match batch_reject_trades(http_client, account).await {
-            Ok(count) => confirmations_rejected = count,
-            Err(e) => errors.push(format!("confirmation rejection failed: {e}")),
+        Err(_) => {
+            errors.push(String::from("security info check timed out (15s)"));
         }
     }
 
-    // Step 4: Deny all login approvals
+    // Step 3: Reject all confirmations (30s timeout)
     if let Some(ref account) = account {
-        match list_login_approvals(account).await {
-            Ok(approvals) => {
-                for approval in &approvals {
-                    let client_id = approval
-                        .client_id
-                        .parse::<u64>()
-                        .unwrap_or(0);
-                    if client_id == 0 {
-                        errors.push(format!(
-                            "invalid approval client_id: {}",
-                            approval.client_id
-                        ));
-                        continue;
-                    }
-                    match respond_to_login_approval(account, client_id, false).await {
-                        Ok(()) => approvals_denied += 1,
-                        Err(e) => errors.push(format!(
-                            "failed denying login approval {}: {e}",
-                            approval.client_id
-                        )),
+        match timeout(
+            Duration::from_secs(30),
+            batch_reject_trades(http_client, account),
+        )
+        .await
+        {
+            Ok(Ok(count)) => confirmations_rejected = count,
+            Ok(Err(e)) => errors.push(format!("confirmation rejection failed: {e}")),
+            Err(_) => errors.push(String::from("confirmation rejection timed out (30s)")),
+        }
+    }
+
+    // Step 4: Deny all login approvals (30s timeout for the entire group)
+    if let Some(ref account) = account {
+        match timeout(Duration::from_secs(30), async {
+            let mut denied = 0usize;
+            let mut step_errors = Vec::new();
+            match list_login_approvals(account).await {
+                Ok(approvals) => {
+                    for approval in &approvals {
+                        let client_id = approval.client_id.parse::<u64>().unwrap_or(0);
+                        if client_id == 0 {
+                            step_errors.push(format!(
+                                "invalid approval client_id: {}",
+                                approval.client_id
+                            ));
+                            continue;
+                        }
+                        match respond_to_login_approval(account, client_id, false).await {
+                            Ok(()) => denied += 1,
+                            Err(e) => step_errors.push(format!(
+                                "failed denying login approval {}: {e}",
+                                approval.client_id
+                            )),
+                        }
                     }
                 }
+                Err(e) => step_errors.push(format!("failed listing login approvals: {e}")),
             }
-            Err(e) => errors.push(format!("failed listing login approvals: {e}")),
+            (denied, step_errors)
+        })
+        .await
+        {
+            Ok((denied, step_errors)) => {
+                approvals_denied = denied;
+                errors.extend(step_errors);
+            }
+            Err(_) => errors.push(String::from("login approval denial timed out (30s)")),
         }
     }
 
-    // Step 5: Rotate emergency codes (destroy -> create -> destroy)
-    let emergency_codes_rotated = {
-        let mut rotation_ok = true;
-        if let Err(e) = destroy_emergency_codes(root_dir, master_key, account_id).await {
-            errors.push(format!("emergency code destroy (1st) failed: {e}"));
-            rotation_ok = false;
-        }
-        if rotation_ok {
-            match create_emergency_codes(root_dir, master_key, account_id).await {
-                Ok(_) => {}
-                Err(e) => {
-                    errors.push(format!("emergency code create failed: {e}"));
-                    rotation_ok = false;
-                }
+    // Step 5: Rotate emergency codes (optional, 20s timeout)
+    let emergency_codes_rotated = if skip_emergency_codes {
+        false
+    } else {
+        let code = emergency_code.map(|s| s.to_owned());
+        match timeout(Duration::from_secs(20), async {
+            rotate_emergency_codes(root_dir, master_key, account_id, code.as_deref()).await
+        })
+        .await
+        {
+            Ok(Ok(())) => true,
+            Ok(Err(e)) => {
+                errors.push(format!("emergency code rotation failed: {e}"));
+                false
+            }
+            Err(_) => {
+                errors.push(String::from("emergency code rotation timed out (20s)"));
+                false
             }
         }
-        if rotation_ok {
-            if let Err(e) = destroy_emergency_codes(root_dir, master_key, account_id).await {
-                errors.push(format!("emergency code destroy (2nd) failed: {e}"));
-                rotation_ok = false;
-            }
-        }
-        rotation_ok
     };
 
-    // Step 6: Revoke all devices (destructive - kills session)
-    match revoke_logged_in_devices(
-        root_dir,
-        master_key,
-        account_id,
-        SteamSessionDeviceSelection::All,
+    // Step 6: Revoke all devices (30s timeout — destructive, kills session)
+    match timeout(
+        Duration::from_secs(30),
+        revoke_logged_in_devices(
+            root_dir,
+            master_key,
+            account_id,
+            SteamSessionDeviceSelection::All,
+        ),
     )
     .await
     {
-        Ok(outcome) => devices_revoked = outcome.revoked_count,
-        Err(e) => errors.push(format!("device revocation failed: {e}")),
+        Ok(Ok(outcome)) => devices_revoked = outcome.revoked_count,
+        Ok(Err(e)) => errors.push(format!("device revocation failed: {e}")),
+        Err(_) => errors.push(String::from("device revocation timed out (30s)")),
     }
 
-    // Step 7: Clear local session material
-    {
+    // Step 7: Clear local session material (5s timeout — local IO only)
+    match timeout(Duration::from_secs(5), async {
         let storage_path = managed_account_storage_path(root_dir, account_id);
         match load_stored_account(master_key, &storage_path).await {
             Ok(Some(mut record)) => {
                 clear_stored_session_material(&mut record);
-                if let Err(e) = persist_stored_account(master_key, &storage_path, &record).await {
-                    errors.push(format!("failed persisting cleared session: {e}"));
-                }
+                persist_stored_account(master_key, &storage_path, &record)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("failed persisting cleared session: {e}"))
             }
-            Ok(None) => {
-                errors.push(String::from("account not found for session clearing"));
-            }
-            Err(e) => {
-                errors.push(format!("failed loading account for session clearing: {e}"));
-            }
+            Ok(None) => Err(anyhow::anyhow!("account not found for session clearing")),
+            Err(e) => Err(anyhow::anyhow!("failed loading account for session clearing: {e}")),
         }
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => errors.push(e.to_string()),
+        Err(_) => errors.push(String::from("session clearing timed out (5s)")),
     }
 
     Ok(ZeroTrustSweepResult {
@@ -3663,6 +3707,20 @@ pub(crate) async fn execute_zero_trust_sweep(
         device_id_changed,
         errors,
     })
+}
+
+/// Rotate emergency codes: destroy existing → create new → destroy the new ones.
+/// If an optional verification `code` is provided, it is passed to the create step.
+async fn rotate_emergency_codes(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    code: Option<&str>,
+) -> Result<()> {
+    destroy_emergency_codes(root_dir, master_key, account_id).await?;
+    create_emergency_codes(root_dir, master_key, account_id, code).await?;
+    destroy_emergency_codes(root_dir, master_key, account_id).await?;
+    Ok(())
 }
 
 /// List all managed account IDs for a steam root directory.

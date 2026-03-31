@@ -927,4 +927,8 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_zero_trust_guard_changed_warning: "WARNING: Authenticator state or device binding has changed since activation. This may indicate unauthorized access.",
     steam_zero_trust_invalid_confirm_message: "You must type CONFIRM to proceed.",
     steam_zero_trust_password_required_message: "Password is required to deactivate zero trust mode.",
+    steam_zero_trust_emergency_codes_label: "Emergency Code Rotation",
+    steam_zero_trust_emergency_codes_skip: "Skip rotation (recommended)",
+    steam_zero_trust_emergency_codes_attempt: "Attempt rotation (20s timeout)",
+    steam_zero_trust_emergency_codes_code_label: "Verification code (optional)",
 };

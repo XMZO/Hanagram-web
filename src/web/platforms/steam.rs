@@ -300,6 +300,8 @@ struct SteamSessionDeviceRevokeForm {
 struct ZeroTrustActivateForm {
     account_ids: String,
     confirm_phrase: String,
+    skip_emergency_codes: Option<bool>,
+    emergency_code: Option<String>,
     lang: Option<String>,
 }
 
@@ -5267,6 +5269,7 @@ async fn create_emergency_codes_handler(
         &steam_root,
         master_key.as_ref().as_slice(),
         &account_id,
+        None,
     )
     .await
     {
@@ -5779,6 +5782,7 @@ async fn zero_trust_activate_handler(
             };
 
         // Execute the sweep
+        let skip_ec = form.skip_emergency_codes.unwrap_or(true);
         let sweep_result = steam_platform::execute_zero_trust_sweep(
             &steam_root,
             master_key.as_ref().as_slice(),
@@ -5786,6 +5790,8 @@ async fn zero_trust_activate_handler(
             account_id,
             initial_guard_state,
             initial_device_id.as_deref(),
+            skip_ec,
+            form.emergency_code.as_deref(),
         )
         .await;
 
@@ -6169,6 +6175,8 @@ async fn zero_trust_sweep_handler(
             account_id,
             entry.initial_guard_state,
             entry.initial_device_id.as_deref(),
+            true,  // periodic sweeps always skip emergency code rotation
+            None,
         )
         .await;
 
