@@ -21,8 +21,8 @@ use steamguard::phonelinker::{PhoneLinker, SetPhoneNumberError, VerifyPhoneError
 use steamguard::protobufs::enums::ESessionPersistence;
 use steamguard::protobufs::steammessages_auth_steamclient::{
     CAuthentication_GetAuthSessionInfo_Response, CAuthentication_RefreshToken_Enumerate_Request,
-    CAuthentication_RefreshToken_Revoke_Request, EAuthSessionGuardType, EAuthTokenPlatformType,
-    EAuthTokenRevokeAction,
+    CAuthentication_RefreshToken_Revoke_Request, CAuthenticationSupport_RevokeToken_Request,
+    EAuthSessionGuardType, EAuthTokenPlatformType, EAuthTokenRevokeAction,
 };
 use steamguard::refresher::TokenRefresher;
 use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient};
@@ -1333,63 +1333,115 @@ pub(crate) async fn revoke_logged_in_devices(
         let mut auth_client = AuthenticationClient::new(transport);
 
         for token_id in token_ids {
-            // First attempt: with HMAC-SHA256 signature over token_id (per proto spec).
             let mut mac = Hmac::<Sha256>::new_from_slice(&shared_secret_bytes)
                 .context("failed to initialize HMAC for Steam device revoke signature")?;
             mac.update(&token_id.to_le_bytes());
             let signature = mac.finalize().into_bytes().to_vec();
 
-            let mut request = CAuthentication_RefreshToken_Revoke_Request::new();
-            request.set_token_id(token_id);
-            request.set_steamid(steam_id);
-            request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
-            request.set_signature(signature);
-            let response = auth_client
-                .revoke_refresh_token(request, vendor_tokens.access_token())
-                .with_context(|| format!("failed revoking Steam login device token {token_id}"))?;
-            let result = response.result();
-            info!(
-                "Steam RevokeRefreshToken for token {} (with signature+steamid): result={:?}, error_message={:?}",
-                token_id, result, response.error_message()
-            );
+            let mut attempts = Vec::new();
 
-            // If AccessDenied with signature, retry without signature — some Steam
-            // API versions accept a bare request authenticated solely by the access token.
-            if result == EResult::AccessDenied {
-                warn!(
-                    "Steam RevokeRefreshToken with signature returned AccessDenied for token {}; retrying without signature",
-                    token_id
-                );
-                let mut retry_request = CAuthentication_RefreshToken_Revoke_Request::new();
-                retry_request.set_token_id(token_id);
-                retry_request.set_steamid(steam_id);
-                retry_request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
-                let retry_response = auth_client
-                    .revoke_refresh_token(retry_request, vendor_tokens.access_token())
-                    .with_context(|| format!("failed revoking Steam login device token {token_id} (retry without signature)"))?;
-                let retry_result = retry_response.result();
-                info!(
-                    "Steam RevokeRefreshToken for token {} (without signature): result={:?}, error_message={:?}",
-                    token_id, retry_result, retry_response.error_message()
-                );
-                if retry_result != EResult::OK {
-                    let error_detail = retry_response
-                        .error_message()
-                        .cloned()
-                        .unwrap_or_else(|| format!("{retry_result:?}"));
-                    bail!(
-                        "Steam refused to revoke login device token {token_id}: {error_detail}"
-                    );
-                }
-            } else if result != EResult::OK {
-                let error_detail = response
-                    .error_message()
-                    .cloned()
-                    .unwrap_or_else(|| format!("{result:?}"));
-                bail!(
-                    "Steam refused to revoke login device token {token_id}: {error_detail}"
-                );
+            let mut signed_request = CAuthentication_RefreshToken_Revoke_Request::new();
+            signed_request.set_token_id(token_id);
+            signed_request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
+            signed_request.set_signature(signature.clone());
+            let signed_response = auth_client
+                .revoke_refresh_token(signed_request, vendor_tokens.access_token())
+                .with_context(|| format!("failed revoking Steam login device token {token_id}"))?;
+            let signed_result = signed_response.result();
+            attempts.push(format!(
+                "signature_only={signed_result:?}:{:?}",
+                signed_response.error_message()
+            ));
+            info!(
+                "Steam RevokeRefreshToken for token {} (signature only): result={:?}, error_message={:?}",
+                token_id,
+                signed_result,
+                signed_response.error_message()
+            );
+            if signed_result == EResult::OK {
+                continue;
             }
+
+            let mut signed_steamid_request = CAuthentication_RefreshToken_Revoke_Request::new();
+            signed_steamid_request.set_token_id(token_id);
+            signed_steamid_request.set_steamid(steam_id);
+            signed_steamid_request
+                .set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
+            signed_steamid_request.set_signature(signature);
+            let signed_steamid_response = auth_client
+                .revoke_refresh_token(signed_steamid_request, vendor_tokens.access_token())
+                .with_context(|| {
+                    format!(
+                        "failed revoking Steam login device token {token_id} (signature + steamid)"
+                    )
+                })?;
+            let signed_steamid_result = signed_steamid_response.result();
+            attempts.push(format!(
+                "signature_steamid={signed_steamid_result:?}:{:?}",
+                signed_steamid_response.error_message()
+            ));
+            info!(
+                "Steam RevokeRefreshToken for token {} (signature+steamid): result={:?}, error_message={:?}",
+                token_id,
+                signed_steamid_result,
+                signed_steamid_response.error_message()
+            );
+            if signed_steamid_result == EResult::OK {
+                continue;
+            }
+
+            let mut bare_request = CAuthentication_RefreshToken_Revoke_Request::new();
+            bare_request.set_token_id(token_id);
+            bare_request.set_revoke_action(EAuthTokenRevokeAction::k_EAuthTokenRevokePermanent);
+            let bare_response = auth_client
+                .revoke_refresh_token(bare_request, vendor_tokens.access_token())
+                .with_context(|| {
+                    format!("failed revoking Steam login device token {token_id} (bare request)")
+                })?;
+            let bare_result = bare_response.result();
+            attempts.push(format!(
+                "bare={bare_result:?}:{:?}",
+                bare_response.error_message()
+            ));
+            info!(
+                "Steam RevokeRefreshToken for token {} (bare request): result={:?}, error_message={:?}",
+                token_id,
+                bare_result,
+                bare_response.error_message()
+            );
+            if bare_result == EResult::OK {
+                continue;
+            }
+
+            let mut support_request = CAuthenticationSupport_RevokeToken_Request::new();
+            support_request.set_token_id(token_id);
+            support_request.set_steamid(steam_id);
+            let support_response = auth_client
+                .revoke_access_token(support_request, vendor_tokens.access_token())
+                .with_context(|| {
+                    format!(
+                        "failed revoking Steam login device token {token_id} via AuthenticationSupport"
+                    )
+                })?;
+            let support_result = support_response.result();
+            attempts.push(format!(
+                "support={support_result:?}:{:?}",
+                support_response.error_message()
+            ));
+            info!(
+                "Steam AuthenticationSupport.RevokeToken for token {}: result={:?}, error_message={:?}",
+                token_id,
+                support_result,
+                support_response.error_message()
+            );
+            if support_result == EResult::OK {
+                continue;
+            }
+
+            bail!(
+                "Steam refused to revoke login device token {token_id}: {}",
+                attempts.join(" | ")
+            );
         }
 
         Ok::<(), anyhow::Error>(())
