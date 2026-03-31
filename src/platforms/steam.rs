@@ -1037,6 +1037,17 @@ fn build_vendor_tokens(account: &SteamGuardAccount) -> Result<SteamTokens> {
     ))
 }
 
+fn build_refresh_token_revoke_signature(
+    shared_secret_bytes: &[u8; 20],
+    token_id: u64,
+) -> Result<Vec<u8>> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(shared_secret_bytes)
+        .context("failed to initialize HMAC for Steam device revoke signature")?;
+    let token_id_message = token_id.to_string();
+    mac.update(token_id_message.as_bytes());
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
 fn login_approval_platform_label(platform_type: EAuthTokenPlatformType) -> &'static str {
     match platform_type {
         EAuthTokenPlatformType::k_EAuthTokenPlatformType_SteamClient => "Steam Client",
@@ -1333,10 +1344,7 @@ pub(crate) async fn revoke_logged_in_devices(
         let mut auth_client = AuthenticationClient::new(transport);
 
         for token_id in token_ids {
-            let mut mac = Hmac::<Sha256>::new_from_slice(&shared_secret_bytes)
-                .context("failed to initialize HMAC for Steam device revoke signature")?;
-            mac.update(&token_id.to_le_bytes());
-            let signature = mac.finalize().into_bytes().to_vec();
+            let signature = build_refresh_token_revoke_signature(&shared_secret_bytes, token_id)?;
 
             let mut attempts = Vec::new();
 
@@ -3629,6 +3637,24 @@ mod tests {
             ordered_selected_session_tokens(&inventory, SteamSessionDeviceSelection::Others)
                 .expect("other devices should be selectable");
         assert_eq!(others, vec![11, 33]);
+    }
+
+    #[test]
+    fn build_refresh_token_revoke_signature_uses_decimal_token_id() {
+        let shared_secret_bytes: [u8; 20] = base64::engine::general_purpose::STANDARD
+            .decode("zvIayp3JPvtvX/QGHqsqKBk/44s=")
+            .expect("shared_secret should decode")
+            .try_into()
+            .expect("shared_secret should be 20 bytes");
+
+        let signature =
+            build_refresh_token_revoke_signature(&shared_secret_bytes, 11_961_540_867_365_273)
+                .expect("signature should build");
+
+        assert_eq!(
+            data_encoding::HEXLOWER.encode(&signature),
+            "45b65591b60097b69df1f2885535004d0c889534426d1a5d91bfce4bba7c35b4"
+        );
     }
 
     #[test]
