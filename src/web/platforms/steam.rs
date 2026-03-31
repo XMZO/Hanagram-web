@@ -4,6 +4,9 @@
 use crate::platforms::steam as steam_platform;
 use crate::web::middleware;
 use crate::web::shared::*;
+use hanagram_web::security::{PasswordVerification, verify_password};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 #[derive(Clone, Debug, Serialize)]
 struct SteamAccountView {
@@ -39,6 +42,7 @@ struct SteamAccountView {
     proxy_url: Option<String>,
     session_devices_api: Option<String>,
     session_device_revoke_api: Option<String>,
+    zero_trust_active: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -275,9 +279,41 @@ struct SteamProxyForm {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct SteamValidateTokenForm {
+    code: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamEmptyActionForm {
+    lang: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct SteamSessionDeviceRevokeForm {
     scope: String,
     token_id: Option<String>,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeroTrustActivateForm {
+    account_ids: String,
+    confirm_phrase: String,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeroTrustDeactivateForm {
+    account_ids: String,
+    confirm_phrase: String,
+    password: String,
+    totp_code: Option<String>,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeroTrustSweepForm {
     lang: Option<String>,
 }
 
@@ -463,6 +499,7 @@ fn bulk_deny_action(account_id: &str) -> String {
 async fn build_workspace_snapshot(
     app_state: &AppState,
     authenticated: &AuthenticatedSession,
+    zero_trust_locked_ids: &std::collections::HashSet<String>,
 ) -> SteamWorkspaceSnapshot {
     let base_dir = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
     let shared_master_key = middleware::resolved_user_master_key(app_state, authenticated).await;
@@ -578,6 +615,7 @@ async fn build_workspace_snapshot(
             proxy_url: account.proxy_url.clone(),
             session_devices_api,
             session_device_revoke_api,
+            zero_trust_active: zero_trust_locked_ids.contains(&account.id),
         });
     }
 
@@ -917,7 +955,8 @@ pub(crate) async fn build_workspace_card(
     authenticated: &AuthenticatedSession,
     language: Language,
 ) -> PlatformWorkspaceCardView {
-    let snapshot = build_workspace_snapshot(app_state, authenticated).await;
+    // The workspace card doesn't need zero trust detail; pass an empty set.
+    let snapshot = build_workspace_snapshot(app_state, authenticated, &std::collections::HashSet::new()).await;
     let translations = language.translations();
     PlatformWorkspaceCardView {
         id: String::from("steam"),
@@ -1056,8 +1095,44 @@ pub(crate) fn routes() -> Router<AppState> {
             "/platforms/steam/accounts/{account_id}/proxy",
             post(account_proxy_handler),
         )
+        // Phone status
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/phone-status",
+            get(account_phone_status_handler),
+        )
+        // Emergency codes
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/emergency-codes",
+            post(create_emergency_codes_handler),
+        )
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/emergency-codes/destroy",
+            post(destroy_emergency_codes_handler),
+        )
+        // Validate token
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/validate-token",
+            post(validate_token_handler),
+        )
         // Time sync check
         .route(STEAM_TIME_CHECK_API_PATH, get(time_check_handler))
+        // Zero Trust Mode
+        .route(
+            STEAM_ZERO_TRUST_ACTIVATE_PATH,
+            post(zero_trust_activate_handler),
+        )
+        .route(
+            STEAM_ZERO_TRUST_DEACTIVATE_PATH,
+            post(zero_trust_deactivate_handler),
+        )
+        .route(
+            STEAM_ZERO_TRUST_STATUS_PATH,
+            get(zero_trust_status_handler),
+        )
+        .route(
+            STEAM_ZERO_TRUST_SWEEP_PATH,
+            post(zero_trust_sweep_handler),
+        )
 }
 
 pub(crate) async fn render_workspace_page(
@@ -1071,7 +1146,22 @@ pub(crate) async fn render_workspace_page(
     let translations = language.translations();
     let languages = language_options(language, STEAM_WORKSPACE_PATH);
     let settings_page_href = settings_href(language);
-    let snapshot = build_workspace_snapshot(app_state, authenticated).await;
+
+    // Ensure zero trust state is loaded from disk if not yet in memory
+    if let Some(mk) = middleware::resolved_user_master_key(app_state, authenticated).await {
+        ensure_zero_trust_loaded(app_state, &authenticated.user.id, mk.as_ref().as_slice()).await;
+    }
+
+    // Collect zero-trust-locked account IDs so build_workspace_snapshot can populate them
+    let zero_trust_locked_ids: std::collections::HashSet<String> = {
+        let zt = app_state.zero_trust.read().await;
+        zt.get(&authenticated.user.id)
+            .map(|s| s.locked_accounts.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+
+    let snapshot = build_workspace_snapshot(app_state, authenticated, &zero_trust_locked_ids).await;
+
     let approval_ready_accounts = snapshot
         .accounts
         .iter()
@@ -1175,6 +1265,19 @@ pub(crate) async fn render_workspace_page(
         &format!("{STEAM_IMPORT_WINAUTH_PATH}?lang={}", language.code()),
     );
     context.insert("steam_time_check_api", STEAM_TIME_CHECK_API_PATH);
+
+    // Zero Trust context injection (reuse the set collected earlier)
+    let zero_trust_active_ids: Vec<String> = zero_trust_locked_ids.iter().cloned().collect();
+    context.insert("zero_trust_active", &!zero_trust_active_ids.is_empty());
+    context.insert("zero_trust_account_ids", &zero_trust_active_ids);
+    context.insert("zero_trust_activate_api", STEAM_ZERO_TRUST_ACTIVATE_PATH);
+    context.insert(
+        "zero_trust_deactivate_api",
+        STEAM_ZERO_TRUST_DEACTIVATE_PATH,
+    );
+    context.insert("zero_trust_status_api", STEAM_ZERO_TRUST_STATUS_PATH);
+    context.insert("zero_trust_sweep_api", STEAM_ZERO_TRUST_SWEEP_PATH);
+
     insert_transport_security_warning(&mut context, language, headers);
 
     render_template(&app_state.tera, "steam_workspace.html", &context)
@@ -1233,7 +1336,20 @@ async fn workspace_snapshot_handler(
     headers: HeaderMap,
 ) -> Json<SteamWorkspaceSnapshot> {
     let _language = detect_language(&headers, query.lang.as_deref());
-    Json(build_workspace_snapshot(&app_state, &authenticated).await)
+
+    // Ensure zero trust state is loaded
+    if let Some(mk) = middleware::resolved_user_master_key(&app_state, &authenticated).await {
+        ensure_zero_trust_loaded(&app_state, &authenticated.user.id, mk.as_ref().as_slice()).await;
+    }
+
+    let zero_trust_locked_ids: std::collections::HashSet<String> = {
+        let zt = app_state.zero_trust.read().await;
+        zt.get(&authenticated.user.id)
+            .map(|s| s.locked_accounts.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+
+    Json(build_workspace_snapshot(&app_state, &authenticated, &zero_trust_locked_ids).await)
 }
 
 async fn approvals_snapshot_handler(
@@ -1556,6 +1672,7 @@ async fn import_mafile_handler(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
+
     let mut language = detect_language(&headers, None);
     let mut account_name = String::new();
     let mut upload_name: Option<String> = None;
@@ -1673,6 +1790,7 @@ async fn create_manual_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     let steam_id = match form.steam_id.trim().parse::<u64>() {
         Ok(value) => value,
         Err(_) => {
@@ -1789,6 +1907,7 @@ async fn create_logged_in_account_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
 
     if form.steam_username.trim().is_empty() {
         return redirect_with_workspace_banner(
@@ -1908,6 +2027,7 @@ async fn login_managed_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -1994,6 +2114,7 @@ async fn update_account_materials_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
@@ -2112,6 +2233,7 @@ async fn rename_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2192,6 +2314,7 @@ async fn delete_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2242,10 +2365,13 @@ async fn accept_confirmation_handler(
     headers: HeaderMap,
     Form(form): Form<SteamConfirmationActionForm>,
 ) -> Response {
+    let language = language_from_headers_and_form(&headers, form.lang.as_deref());
+
+
     confirmation_action_handler(
         &app_state,
         &authenticated,
-        language_from_headers_and_form(&headers, form.lang.as_deref()),
+        language,
         &account_id,
         &confirmation_id,
         &form.nonce,
@@ -2403,11 +2529,14 @@ async fn approve_login_challenge_handler(
     headers: HeaderMap,
     Form(form): Form<SteamQrApprovalForm>,
 ) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+
+
     approve_login_challenge_for_account(
         &app_state,
         &authenticated,
         &headers,
-        detect_language(&headers, form.lang.as_deref()),
+        language,
         &form.account_id,
         &form.challenge_url,
     )
@@ -2475,6 +2604,7 @@ async fn approve_login_challenge_upload_handler(
         }
     }
 
+
     let Some(file_bytes) = image_bytes.filter(|value| !value.is_empty()) else {
         return redirect_with_workspace_banner(
             &app_state,
@@ -2518,10 +2648,13 @@ async fn approve_login_approval_handler(
     headers: HeaderMap,
     Form(form): Form<SteamApprovalActionForm>,
 ) -> Response {
+    let language = language_from_headers_and_form(&headers, form.lang.as_deref());
+
+
     login_approval_action_handler(
         &app_state,
         &authenticated,
-        language_from_headers_and_form(&headers, form.lang.as_deref()),
+        language,
         &account_id,
         &client_id,
         true,
@@ -2856,6 +2989,7 @@ async fn link_authenticator_for_account_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -2933,6 +3067,7 @@ async fn setup_begin_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
 
     if form.steam_username.trim().is_empty() || form.steam_password.is_empty() {
         return (
@@ -3150,6 +3285,7 @@ async fn setup_resume_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
 
     let Some((setup_id, pending)) =
         take_pending_setup_for_user(&app_state, &authenticated.user.id).await
@@ -3783,6 +3919,7 @@ async fn setup_transfer_start_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     let Some((setup_id, pending)) =
         take_pending_setup_for_user(&app_state, &authenticated.user.id).await
     else {
@@ -4129,6 +4266,7 @@ async fn remove_authenticator_handler(
 ) -> Response {
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
+
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -4529,6 +4667,7 @@ async fn account_status_handler(
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -4595,6 +4734,7 @@ async fn account_export_qr_handler(
 ) -> Response {
     let language = detect_language(&headers, query.lang.as_deref());
     let translations = language.translations();
+
 
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
@@ -4687,6 +4827,7 @@ async fn import_winauth_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if form.uri.trim().is_empty() {
         return redirect_with_workspace_banner(
             &app_state,
@@ -4759,11 +4900,14 @@ async fn bulk_accept_confirmations_handler(
     headers: HeaderMap,
     Json(form): Json<LangQuery>,
 ) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+
+
     bulk_confirmation_action(
         &app_state,
         &authenticated,
         &headers,
-        form.lang.as_deref(),
+        Some(language.code()),
         &account_id,
         true,
     )
@@ -4898,6 +5042,7 @@ async fn account_proxy_handler(
     let language = detect_language(&headers, form.lang.as_deref());
     let translations = language.translations();
 
+
     if !steam_platform::is_valid_managed_account_id(&account_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -5009,4 +5154,1046 @@ async fn time_check_handler(
                 .into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phone status handler
+// ---------------------------------------------------------------------------
+
+async fn account_phone_status_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::check_phone_status(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok(has_phone) => Json(serde_json::json!({
+            "ok": true,
+            "has_phone": has_phone
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed querying phone status for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_phone_status_failed)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Emergency codes handlers
+// ---------------------------------------------------------------------------
+
+async fn create_emergency_codes_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamEmptyActionForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::create_emergency_codes(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok(codes) => Json(serde_json::json!({
+            "ok": true,
+            "codes": codes
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed creating emergency codes for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_emergency_codes_failed)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn destroy_emergency_codes_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamEmptyActionForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::destroy_emergency_codes(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({
+            "ok": true
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed destroying emergency codes for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_emergency_codes_failed)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Validate token handler
+// ---------------------------------------------------------------------------
+
+async fn validate_token_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(form): Json<SteamValidateTokenForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    match steam_platform::validate_authenticator_token(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+        form.code,
+    )
+    .await
+    {
+        Ok(valid) => Json(serde_json::json!({
+            "ok": true,
+            "valid": valid
+        }))
+        .into_response(),
+        Err(error) => {
+            warn!(
+                "failed validating token for account {}: {}",
+                account_id, error
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": format!("{}: {error}", translations.steam_validate_token_failed)
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zero Trust Mode — middleware gateway (default-deny + allowlist)
+// ---------------------------------------------------------------------------
+
+/// Axum middleware that enforces zero trust mode for all Steam routes.
+///
+/// When any of the user's Steam accounts are locked by zero trust, this
+/// middleware blocks ALL requests except those on an explicit allowlist.
+/// New handlers added in the future are automatically blocked — safe by default.
+pub(crate) async fn zero_trust_guard(
+    State(app_state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    // 1. Get authenticated session (inserted by require_login middleware)
+    let Some(authenticated) = request.extensions().get::<AuthenticatedSession>().cloned() else {
+        return next.run(request).await;
+    };
+
+    // 2. Ensure zero trust state is loaded from disk
+    if let Some(mk) = middleware::resolved_user_master_key(&app_state, &authenticated).await {
+        ensure_zero_trust_loaded(&app_state, &authenticated.user.id, mk.as_ref().as_slice()).await;
+    }
+
+    // 3. Read zero trust state — if no locked accounts, pass through immediately
+    let locked_ids: HashSet<String> = {
+        let zt = app_state.zero_trust.read().await;
+        match zt.get(&authenticated.user.id) {
+            Some(state) if !state.locked_accounts.is_empty() => {
+                state.locked_accounts.keys().cloned().collect()
+            }
+            _ => return next.run(request).await,
+        }
+    };
+
+    // 4. Check allowlist
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+
+    if is_zero_trust_allowed(&method, &path, &locked_ids) {
+        return next.run(request).await;
+    }
+
+    // 5. Blocked — return appropriate response based on path type
+    let headers = request.headers().clone();
+    if path.starts_with("/api/") {
+        let language = detect_language(&headers, None);
+        let translations = language.translations();
+        (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_operation_locked_message
+            })),
+        )
+            .into_response()
+    } else {
+        let language = detect_language(&headers, None);
+        redirect_with_workspace_banner(
+            &app_state,
+            &headers,
+            PageBanner::error(language.translations().steam_zero_trust_operation_locked_message),
+            Some(STEAM_ACCOUNTS_TAB_ID),
+        )
+        .await
+    }
+}
+
+/// Check whether a request is on the zero trust allowlist.
+fn is_zero_trust_allowed(method: &axum::http::Method, path: &str, locked_ids: &HashSet<String>) -> bool {
+    // Zero trust endpoints — always allowed (activate, deactivate, status, sweep)
+    if path.starts_with("/api/platforms/steam/zero-trust/") {
+        return true;
+    }
+
+    // GET-only readonly endpoints — always allowed
+    if *method == axum::http::Method::GET {
+        if path == STEAM_WORKSPACE_PATH
+            || path == STEAM_SNAPSHOT_API_PATH
+            || path == STEAM_APPROVALS_API_PATH
+            || path == STEAM_CONFIRMATIONS_API_PATH
+            || path == STEAM_TIME_CHECK_API_PATH
+        {
+            return true;
+        }
+    }
+
+    // Extract account_id from path (if present)
+    let account_id = extract_account_id_from_path(path);
+
+    // Account-specific paths: if the specific account is NOT locked, allow
+    if let Some(ref id) = account_id {
+        if !locked_ids.contains(id.as_str()) {
+            return true;
+        }
+    }
+
+    // Protective operations — these are allowed even for locked accounts
+    // because zero trust actively uses them (deny confirmations, revoke devices, etc.)
+    if is_protective_operation(method, path) {
+        return true;
+    }
+
+    // Everything else is blocked (default-deny)
+    false
+}
+
+/// Extract account_id from Steam route paths like:
+///   /platforms/steam/accounts/{account_id}/...
+///   /api/platforms/steam/accounts/{account_id}/...
+fn extract_account_id_from_path(path: &str) -> Option<String> {
+    // Match both /platforms/steam/accounts/{id} and /api/platforms/steam/accounts/{id}
+    let segments: Vec<&str> = path.split('/').collect();
+    for (i, segment) in segments.iter().enumerate() {
+        if *segment == "accounts" && i + 1 < segments.len() {
+            let candidate = segments[i + 1];
+            if !candidate.is_empty() {
+                return Some(candidate.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Check if the operation is a "protective" action allowed during zero trust.
+fn is_protective_operation(method: &axum::http::Method, path: &str) -> bool {
+    if *method == axum::http::Method::GET {
+        // Enumerate devices (sweep needs this)
+        if path.ends_with("/devices") && path.contains("/accounts/") {
+            return true;
+        }
+        // Account 2FA status (read-only, needed for monitoring)
+        if path.ends_with("/status") && path.contains("/accounts/") {
+            return true;
+        }
+        // Phone status (read-only)
+        if path.ends_with("/phone-status") && path.contains("/accounts/") {
+            return true;
+        }
+        return false;
+    }
+
+    if *method == axum::http::Method::POST {
+        // Revoke devices
+        if path.ends_with("/devices/revoke") && path.contains("/accounts/") {
+            return true;
+        }
+        // Deny individual confirmation
+        if path.contains("/confirmations/") && path.ends_with("/deny") {
+            return true;
+        }
+        // Bulk deny confirmations
+        if path.ends_with("/confirmations/deny-all") && path.contains("/accounts/") {
+            return true;
+        }
+        // Deny login approval
+        if path.contains("/approvals/") && path.ends_with("/deny") {
+            return true;
+        }
+        return false;
+    }
+
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Zero Trust Mode — file persistence helpers
+// ---------------------------------------------------------------------------
+
+fn zero_trust_file_path(runtime: &RuntimeConfig, user_id: &str) -> PathBuf {
+    runtime
+        .users_dir
+        .join(user_id)
+        .join("steam")
+        .join("zero_trust.json")
+}
+
+fn compute_zero_trust_hmac(master_key: &[u8], payload: &[u8]) -> String {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
+    mac.update(payload);
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
+fn verify_zero_trust_hmac(master_key: &[u8], payload: &[u8], expected_b64: &str) -> bool {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(master_key).expect("HMAC accepts any key length");
+    mac.update(payload);
+    let expected = match base64::engine::general_purpose::STANDARD.decode(expected_b64) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+    mac.verify_slice(&expected).is_ok()
+}
+
+async fn persist_zero_trust_state(
+    runtime: &RuntimeConfig,
+    user_id: &str,
+    state: &ZeroTrustUserState,
+    master_key: &[u8],
+) -> Result<()> {
+    let path = zero_trust_file_path(runtime, user_id);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .context("failed creating zero trust state directory")?;
+    }
+    let state_json =
+        serde_json::to_vec(state).context("failed serializing zero trust state")?;
+    let signature = compute_zero_trust_hmac(master_key, &state_json);
+    let file_content = serde_json::json!({
+        "state": state,
+        "signature": signature,
+    });
+    let encoded = serde_json::to_vec_pretty(&file_content)
+        .context("failed encoding zero trust file content")?;
+    tokio::fs::write(&path, encoded)
+        .await
+        .with_context(|| format!("failed writing {}", path.display()))
+}
+
+async fn load_zero_trust_state(
+    path: &std::path::Path,
+    master_key: &[u8],
+) -> Result<Option<ZeroTrustUserState>> {
+    let raw = match tokio::fs::read(path).await {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("failed reading {}", path.display())),
+    };
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&raw).context("failed parsing zero trust file")?;
+
+    let signature = parsed
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .context("zero trust file missing signature")?;
+
+    let state_value = parsed
+        .get("state")
+        .context("zero trust file missing state")?;
+
+    let state_bytes =
+        serde_json::to_vec(state_value).context("failed re-serializing state for HMAC check")?;
+
+    if !verify_zero_trust_hmac(master_key, &state_bytes, signature) {
+        anyhow::bail!("zero trust file HMAC verification failed — possible tampering");
+    }
+
+    let state: ZeroTrustUserState =
+        serde_json::from_value(state_value.clone()).context("failed deserializing zero trust state")?;
+    Ok(Some(state))
+}
+
+/// Load zero trust state from disk into memory if not already present.
+async fn ensure_zero_trust_loaded(app_state: &AppState, user_id: &str, master_key: &[u8]) {
+    let already_loaded = {
+        let zt = app_state.zero_trust.read().await;
+        zt.contains_key(user_id)
+    };
+    if !already_loaded {
+        let path = zero_trust_file_path(&app_state.runtime, user_id);
+        if let Ok(Some(state)) = load_zero_trust_state(&path, master_key).await {
+            if !state.locked_accounts.is_empty() {
+                app_state
+                    .zero_trust
+                    .write()
+                    .await
+                    .insert(user_id.to_owned(), state);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zero Trust Mode — handlers
+// ---------------------------------------------------------------------------
+
+async fn zero_trust_activate_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<ZeroTrustActivateForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    // Validate confirm phrase
+    if form.confirm_phrase.trim() != "CONFIRM" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_invalid_confirm_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+
+    // Resolve account IDs
+    let account_ids: Vec<String> = if form.account_ids.trim() == "all" {
+        steam_platform::list_managed_account_ids(&steam_root).await
+    } else {
+        form.account_ids
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    if account_ids.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_activation_failed_message
+            })),
+        )
+            .into_response();
+    }
+
+    let now = Utc::now().timestamp();
+    let mut results_per_account = Vec::new();
+    let mut locked_accounts: HashMap<String, ZeroTrustAccountEntry> = HashMap::new();
+
+    for account_id in &account_ids {
+        // Fetch security info for initial state capture
+        let (initial_guard_state, initial_device_id) =
+            match steam_platform::fetch_security_info(
+                &steam_root,
+                master_key.as_ref().as_slice(),
+                account_id,
+            )
+            .await
+            {
+                Ok(info) => (Some(info.guard_state), Some(info.bound_device)),
+                Err(_) => (None, None),
+            };
+
+        // Execute the sweep
+        let sweep_result = steam_platform::execute_zero_trust_sweep(
+            &steam_root,
+            master_key.as_ref().as_slice(),
+            &app_state.http_client,
+            account_id,
+            initial_guard_state,
+            initial_device_id.as_deref(),
+        )
+        .await;
+
+        match sweep_result {
+            Ok(result) => {
+                locked_accounts.insert(
+                    account_id.clone(),
+                    ZeroTrustAccountEntry {
+                        activated_at_unix: now,
+                        activated_by_username: authenticated.user.username.clone(),
+                        initial_guard_state,
+                        initial_device_id: initial_device_id.clone(),
+                    },
+                );
+                results_per_account.push(serde_json::json!({
+                    "account_id": account_id,
+                    "ok": true,
+                    "result": result,
+                }));
+            }
+            Err(e) => {
+                // Even on error, still lock the account for protection
+                locked_accounts.insert(
+                    account_id.clone(),
+                    ZeroTrustAccountEntry {
+                        activated_at_unix: now,
+                        activated_by_username: authenticated.user.username.clone(),
+                        initial_guard_state,
+                        initial_device_id: initial_device_id.clone(),
+                    },
+                );
+                results_per_account.push(serde_json::json!({
+                    "account_id": account_id,
+                    "ok": false,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    let user_state = ZeroTrustUserState { locked_accounts };
+
+    // Write to in-memory state
+    {
+        let mut zt = app_state.zero_trust.write().await;
+        zt.insert(authenticated.user.id.clone(), user_state.clone());
+    }
+
+    // Persist to disk
+    if let Err(e) = persist_zero_trust_state(
+        &app_state.runtime,
+        &authenticated.user.id,
+        &user_state,
+        master_key.as_ref().as_slice(),
+    )
+    .await
+    {
+        warn!("failed persisting zero trust state: {e}");
+    }
+
+    // Audit log
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: "steam_zero_trust_activate".to_owned(),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(authenticated.user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: serde_json::json!({
+                "username": authenticated.user.username,
+                "locked_account_count": account_ids.len(),
+                "account_ids": account_ids,
+            })
+            .to_string(),
+        })
+        .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "message": translations.steam_zero_trust_activated_message,
+        "results": results_per_account,
+    }))
+    .into_response()
+}
+
+async fn zero_trust_deactivate_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<ZeroTrustDeactivateForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    // Validate confirm phrase
+    if form.confirm_phrase.trim() != "CONFIRM" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_invalid_confirm_message
+            })),
+        )
+            .into_response();
+    }
+
+    // Validate password
+    if form.password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_zero_trust_password_required_message
+            })),
+        )
+            .into_response();
+    }
+
+    // Verify password against stored hash
+    let stored_hash = match authenticated.user.security.password_hash.as_deref() {
+        Some(hash) => hash.to_owned(),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_zero_trust_deactivation_failed_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let settings = app_state.system_settings.read().await.clone();
+    match verify_password(
+        &form.password,
+        &stored_hash,
+        authenticated.user.security.password_argon_version,
+        &settings.argon_policy,
+    ) {
+        Ok(PasswordVerification::Valid | PasswordVerification::ValidNeedsRehash) => {}
+        _ => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_zero_trust_deactivation_failed_message
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    // If user has TOTP enabled, verify the TOTP code
+    if authenticated.user.security.totp_enabled {
+        if let Some(ref totp_secret_json) = authenticated.user.security.totp_secret_json {
+            let totp_code = form.totp_code.as_deref().unwrap_or("").trim();
+            if totp_code.is_empty() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_zero_trust_deactivation_failed_message
+                    })),
+                )
+                    .into_response();
+            }
+            let now = Utc::now().timestamp();
+            let used_steps = app_state
+                .meta_store
+                .list_recent_totp_steps(
+                    &authenticated.user.id,
+                    now.div_euclid(30) - 5,
+                )
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
+            match verify_totp(totp_secret_json, totp_code, now, 1, &used_steps) {
+                Ok(TotpVerification::Valid { matched_step }) => {
+                    let _ = app_state
+                        .meta_store
+                        .mark_totp_step_used(&authenticated.user.id, matched_step)
+                        .await;
+                }
+                _ => {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "ok": false,
+                            "message": translations.steam_zero_trust_deactivation_failed_message
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    // Resolve which accounts to deactivate
+    let accounts_to_remove: Vec<String> = if form.account_ids.trim() == "all" {
+        let zt = app_state.zero_trust.read().await;
+        zt.get(&authenticated.user.id)
+            .map(|s| s.locked_accounts.keys().cloned().collect())
+            .unwrap_or_default()
+    } else {
+        form.account_ids
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    // Remove from in-memory state
+    {
+        let mut zt = app_state.zero_trust.write().await;
+        if let Some(user_state) = zt.get_mut(&authenticated.user.id) {
+            for account_id in &accounts_to_remove {
+                user_state.locked_accounts.remove(account_id);
+            }
+            if user_state.locked_accounts.is_empty() {
+                zt.remove(&authenticated.user.id);
+            }
+        }
+    }
+
+    // Update or delete persisted file
+    let remaining_state = {
+        let zt = app_state.zero_trust.read().await;
+        zt.get(&authenticated.user.id).cloned()
+    };
+
+    let file_path = zero_trust_file_path(&app_state.runtime, &authenticated.user.id);
+    match remaining_state {
+        Some(state) if !state.locked_accounts.is_empty() => {
+            if let Some(master_key) =
+                middleware::resolved_user_master_key(&app_state, &authenticated).await
+            {
+                if let Err(e) = persist_zero_trust_state(
+                    &app_state.runtime,
+                    &authenticated.user.id,
+                    &state,
+                    master_key.as_ref().as_slice(),
+                )
+                .await
+                {
+                    warn!("failed persisting updated zero trust state: {e}");
+                }
+            }
+        }
+        _ => {
+            // All accounts removed, delete the file
+            let _ = tokio::fs::remove_file(&file_path).await;
+        }
+    }
+
+    // Audit log
+    let _ = app_state
+        .meta_store
+        .record_audit(&NewAuditEntry {
+            action_type: "steam_zero_trust_deactivate".to_owned(),
+            actor_user_id: Some(authenticated.user.id.clone()),
+            subject_user_id: Some(authenticated.user.id.clone()),
+            ip_address: None,
+            success: true,
+            details_json: serde_json::json!({
+                "username": authenticated.user.username,
+                "deactivated_account_count": accounts_to_remove.len(),
+                "account_ids": accounts_to_remove,
+            })
+            .to_string(),
+        })
+        .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "message": translations.steam_zero_trust_deactivated_message,
+    }))
+    .into_response()
+}
+
+async fn zero_trust_status_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    Query(query): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let _language = detect_language(&headers, query.lang.as_deref());
+
+    let zt = app_state.zero_trust.read().await;
+    let user_state = zt.get(&authenticated.user.id);
+
+    let (active, locked_accounts) = match user_state {
+        Some(state) if !state.locked_accounts.is_empty() => {
+            let accounts: Vec<serde_json::Value> = state
+                .locked_accounts
+                .iter()
+                .map(|(id, entry)| {
+                    serde_json::json!({
+                        "account_id": id,
+                        "activated_at_unix": entry.activated_at_unix,
+                        "activated_by_username": entry.activated_by_username,
+                        "initial_guard_state": entry.initial_guard_state,
+                        "initial_device_id": entry.initial_device_id,
+                    })
+                })
+                .collect();
+            (true, accounts)
+        }
+        _ => (false, Vec::new()),
+    };
+
+    Json(serde_json::json!({
+        "active": active,
+        "locked_accounts": locked_accounts,
+    }))
+    .into_response()
+}
+
+async fn zero_trust_sweep_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(form): Json<ZeroTrustSweepForm>,
+) -> Response {
+    let language = detect_language(&headers, form.lang.as_deref());
+    let translations = language.translations();
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    // Get locked accounts for this user
+    let locked_accounts = {
+        let zt = app_state.zero_trust.read().await;
+        match zt.get(&authenticated.user.id) {
+            Some(state) => state.locked_accounts.clone(),
+            None => {
+                return Json(serde_json::json!({
+                    "ok": true,
+                    "active": false,
+                    "results": [],
+                }))
+                .into_response();
+            }
+        }
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let mut results_per_account = Vec::new();
+
+    // Validate each account actually belongs to this user before sweeping
+    let (owned_accounts, _) =
+        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())).await;
+    let owned_ids: std::collections::HashSet<&str> =
+        owned_accounts.iter().map(|a| a.id.as_str()).collect();
+
+    for (account_id, entry) in &locked_accounts {
+        if !owned_ids.contains(account_id.as_str()) {
+            results_per_account.push(serde_json::json!({
+                "account_id": account_id,
+                "ok": false,
+                "error": "account not owned by this user",
+            }));
+            continue;
+        }
+
+        let sweep_result = steam_platform::execute_zero_trust_sweep(
+            &steam_root,
+            master_key.as_ref().as_slice(),
+            &app_state.http_client,
+            account_id,
+            entry.initial_guard_state,
+            entry.initial_device_id.as_deref(),
+        )
+        .await;
+
+        match sweep_result {
+            Ok(result) => {
+                results_per_account.push(serde_json::json!({
+                    "account_id": account_id,
+                    "ok": true,
+                    "result": result,
+                }));
+            }
+            Err(e) => {
+                results_per_account.push(serde_json::json!({
+                    "account_id": account_id,
+                    "ok": false,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "active": true,
+        "results": results_per_account,
+    }))
+    .into_response()
 }

@@ -27,7 +27,12 @@ use steamguard::protobufs::steammessages_auth_steamclient::{
     EAuthSessionGuardType, EAuthTokenPlatformType, EAuthTokenRevokeAction,
 };
 use steamguard::refresher::TokenRefresher;
-use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient};
+use steamguard::protobufs::service_phone::CPhone_AccountPhoneStatus_Request;
+use steamguard::protobufs::service_twofactor::{
+    CTwoFactor_CreateEmergencyCodes_Request, CTwoFactor_DestroyEmergencyCodes_Request,
+    CTwoFactor_ValidateToken_Request,
+};
+use steamguard::steamapi::{AuthenticationClient, EResult, PhoneClient, TwoFactorClient};
 use steamguard::token::{Jwt as SteamJwt, Tokens as SteamTokens, TwoFactorSecret};
 use steamguard::transport::{Transport, WebApiTransport};
 use steamguard::userlogin::UpdateAuthSessionError;
@@ -3124,6 +3129,172 @@ pub(crate) async fn fetch_security_info(
 }
 
 // ---------------------------------------------------------------------------
+// Phone status check
+// ---------------------------------------------------------------------------
+
+/// Query whether the Steam account has a phone number linked.
+pub(crate) async fn check_phone_status(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+) -> Result<bool> {
+    refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
+
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let record = load_stored_account(master_key, &storage_path)
+        .await?
+        .context("account not found")?;
+    let account = record.into_runtime(storage_path);
+    let vendor_tokens = build_vendor_tokens(&account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let phone_client = PhoneClient::new(transport);
+        let request = CPhone_AccountPhoneStatus_Request::new();
+        let response = phone_client
+            .account_phone_status(request, vendor_tokens.access_token())
+            .context("failed querying Steam phone status")?;
+        let result = response.result();
+        if result != EResult::OK {
+            let error_detail = response
+                .error_message()
+                .cloned()
+                .unwrap_or_else(|| format!("{result:?}"));
+            bail!("Steam refused phone status query: {error_detail}");
+        }
+        Ok(response.into_response_data().has_phone())
+    })
+    .await
+    .context("phone status query task panicked")?
+}
+
+// ---------------------------------------------------------------------------
+// Emergency (recovery) codes
+// ---------------------------------------------------------------------------
+
+/// Generate a new set of emergency recovery codes for the Steam account.
+pub(crate) async fn create_emergency_codes(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+) -> Result<Vec<String>> {
+    refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
+
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let record = load_stored_account(master_key, &storage_path)
+        .await?
+        .context("account not found")?;
+    let account = record.into_runtime(storage_path);
+    let vendor_tokens = build_vendor_tokens(&account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let twofactor_client = TwoFactorClient::new(transport);
+        let request = CTwoFactor_CreateEmergencyCodes_Request::new();
+        let response = twofactor_client
+            .create_emergency_codes(request, vendor_tokens.access_token())
+            .context("failed creating Steam emergency codes")?;
+        let result = response.result();
+        if result != EResult::OK {
+            let error_detail = response
+                .error_message()
+                .cloned()
+                .unwrap_or_else(|| format!("{result:?}"));
+            bail!("Steam refused emergency code creation: {error_detail}");
+        }
+        let data = response.into_response_data();
+        let codes: Vec<String> = data.codes.iter().map(|c| c.clone()).collect();
+        Ok(codes)
+    })
+    .await
+    .context("emergency code creation task panicked")?
+}
+
+/// Destroy all existing emergency recovery codes for the Steam account.
+pub(crate) async fn destroy_emergency_codes(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+) -> Result<()> {
+    refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
+
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let record = load_stored_account(master_key, &storage_path)
+        .await?
+        .context("account not found")?;
+    let steam_id = record.steam_id.context("no steam_id on account")?;
+    let account = record.into_runtime(storage_path);
+    let vendor_tokens = build_vendor_tokens(&account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let twofactor_client = TwoFactorClient::new(transport);
+        let mut request = CTwoFactor_DestroyEmergencyCodes_Request::new();
+        request.set_steamid(steam_id);
+        let response = twofactor_client
+            .destroy_emergency_codes(request, vendor_tokens.access_token())
+            .context("failed destroying Steam emergency codes")?;
+        let result = response.result();
+        if result != EResult::OK {
+            let error_detail = response
+                .error_message()
+                .cloned()
+                .unwrap_or_else(|| format!("{result:?}"));
+            bail!("Steam refused emergency code destruction: {error_detail}");
+        }
+        Ok(())
+    })
+    .await
+    .context("emergency code destruction task panicked")?
+}
+
+// ---------------------------------------------------------------------------
+// Validate authenticator token
+// ---------------------------------------------------------------------------
+
+/// Ask Steam whether a given TOTP code is currently valid for the account.
+pub(crate) async fn validate_authenticator_token(
+    root_dir: &Path,
+    master_key: &[u8],
+    account_id: &str,
+    code: String,
+) -> Result<bool> {
+    refresh_confirmation_session_if_needed(root_dir, master_key, account_id, false).await?;
+
+    let storage_path = managed_account_storage_path(root_dir, account_id);
+    let record = load_stored_account(master_key, &storage_path)
+        .await?
+        .context("account not found")?;
+    let account = record.into_runtime(storage_path);
+    let vendor_tokens = build_vendor_tokens(&account)?;
+
+    spawn_blocking(move || {
+        let client = build_blocking_steam_client()?;
+        let transport = WebApiTransport::new(client);
+        let twofactor_client = TwoFactorClient::new(transport);
+        let mut request = CTwoFactor_ValidateToken_Request::new();
+        request.set_code(code);
+        let response = twofactor_client
+            .validate_token(request, vendor_tokens.access_token())
+            .context("failed validating Steam authenticator token")?;
+        let result = response.result();
+        if result != EResult::OK {
+            let error_detail = response
+                .error_message()
+                .cloned()
+                .unwrap_or_else(|| format!("{result:?}"));
+            bail!("Steam refused token validation: {error_detail}");
+        }
+        Ok(response.into_response_data().valid())
+    })
+    .await
+    .context("token validation task panicked")?
+}
+
+// ---------------------------------------------------------------------------
 // TOTP export URI
 // ---------------------------------------------------------------------------
 
@@ -3316,6 +3487,206 @@ pub(crate) async fn measure_clock_drift(http_client: &reqwest::Client) -> Result
     let local = Utc::now().timestamp();
     let remote = query_steam_server_time(http_client).await?;
     Ok((remote, local, remote - local))
+}
+
+// ---------------------------------------------------------------------------
+// Zero Trust sweep
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ZeroTrustSweepResult {
+    pub(crate) confirmations_rejected: usize,
+    pub(crate) approvals_denied: usize,
+    pub(crate) devices_revoked: usize,
+    pub(crate) emergency_codes_rotated: bool,
+    pub(crate) guard_state_changed: bool,
+    pub(crate) device_id_changed: bool,
+    pub(crate) errors: Vec<String>,
+}
+
+/// Execute a full zero-trust protective sweep for a single managed Steam account.
+///
+/// The sweep proceeds through seven stages in order, with the API-dependent steps
+/// executed first (before the session is destroyed).  Each step is individually
+/// guarded so that one failure does not abort the remaining steps.
+pub(crate) async fn execute_zero_trust_sweep(
+    root_dir: &Path,
+    master_key: &[u8],
+    http_client: &reqwest::Client,
+    account_id: &str,
+    initial_guard_state: Option<u32>,
+    initial_device_id: Option<&str>,
+) -> Result<ZeroTrustSweepResult> {
+    let mut errors: Vec<String> = Vec::new();
+    let mut confirmations_rejected: usize = 0;
+    let mut approvals_denied: usize = 0;
+    let mut devices_revoked: usize = 0;
+    let mut guard_state_changed = false;
+    let mut device_id_changed = false;
+
+    // Step 1: Refresh session
+    let account = match refresh_confirmation_session_if_needed(
+        root_dir, master_key, account_id, true,
+    )
+    .await
+    {
+        Ok(Some(account)) => Some(account),
+        Ok(None) => {
+            errors.push(String::from("account not found during session refresh"));
+            None
+        }
+        Err(e) => {
+            errors.push(format!("session refresh failed: {e}"));
+            None
+        }
+    };
+
+    // Step 2: Fetch security info and compare with initial state
+    match fetch_security_info(root_dir, master_key, account_id).await {
+        Ok(info) => {
+            if let Some(initial) = initial_guard_state {
+                if info.guard_state != initial {
+                    guard_state_changed = true;
+                }
+            }
+            if let Some(initial_dev) = initial_device_id {
+                if info.bound_device != initial_dev {
+                    device_id_changed = true;
+                }
+            }
+        }
+        Err(e) => {
+            errors.push(format!("security info check failed: {e}"));
+        }
+    }
+
+    // Step 3: Reject all confirmations
+    if let Some(ref account) = account {
+        match batch_reject_trades(http_client, account).await {
+            Ok(count) => confirmations_rejected = count,
+            Err(e) => errors.push(format!("confirmation rejection failed: {e}")),
+        }
+    }
+
+    // Step 4: Deny all login approvals
+    if let Some(ref account) = account {
+        match list_login_approvals(account).await {
+            Ok(approvals) => {
+                for approval in &approvals {
+                    let client_id = approval
+                        .client_id
+                        .parse::<u64>()
+                        .unwrap_or(0);
+                    if client_id == 0 {
+                        errors.push(format!(
+                            "invalid approval client_id: {}",
+                            approval.client_id
+                        ));
+                        continue;
+                    }
+                    match respond_to_login_approval(account, client_id, false).await {
+                        Ok(()) => approvals_denied += 1,
+                        Err(e) => errors.push(format!(
+                            "failed denying login approval {}: {e}",
+                            approval.client_id
+                        )),
+                    }
+                }
+            }
+            Err(e) => errors.push(format!("failed listing login approvals: {e}")),
+        }
+    }
+
+    // Step 5: Rotate emergency codes (destroy -> create -> destroy)
+    let emergency_codes_rotated = {
+        let mut rotation_ok = true;
+        if let Err(e) = destroy_emergency_codes(root_dir, master_key, account_id).await {
+            errors.push(format!("emergency code destroy (1st) failed: {e}"));
+            rotation_ok = false;
+        }
+        if rotation_ok {
+            match create_emergency_codes(root_dir, master_key, account_id).await {
+                Ok(_) => {}
+                Err(e) => {
+                    errors.push(format!("emergency code create failed: {e}"));
+                    rotation_ok = false;
+                }
+            }
+        }
+        if rotation_ok {
+            if let Err(e) = destroy_emergency_codes(root_dir, master_key, account_id).await {
+                errors.push(format!("emergency code destroy (2nd) failed: {e}"));
+                rotation_ok = false;
+            }
+        }
+        rotation_ok
+    };
+
+    // Step 6: Revoke all devices (destructive - kills session)
+    match revoke_logged_in_devices(
+        root_dir,
+        master_key,
+        account_id,
+        SteamSessionDeviceSelection::All,
+    )
+    .await
+    {
+        Ok(outcome) => devices_revoked = outcome.revoked_count,
+        Err(e) => errors.push(format!("device revocation failed: {e}")),
+    }
+
+    // Step 7: Clear local session material
+    {
+        let storage_path = managed_account_storage_path(root_dir, account_id);
+        match load_stored_account(master_key, &storage_path).await {
+            Ok(Some(mut record)) => {
+                clear_stored_session_material(&mut record);
+                if let Err(e) = persist_stored_account(master_key, &storage_path, &record).await {
+                    errors.push(format!("failed persisting cleared session: {e}"));
+                }
+            }
+            Ok(None) => {
+                errors.push(String::from("account not found for session clearing"));
+            }
+            Err(e) => {
+                errors.push(format!("failed loading account for session clearing: {e}"));
+            }
+        }
+    }
+
+    Ok(ZeroTrustSweepResult {
+        confirmations_rejected,
+        approvals_denied,
+        devices_revoked,
+        emergency_codes_rotated,
+        guard_state_changed,
+        device_id_changed,
+        errors,
+    })
+}
+
+/// List all managed account IDs for a steam root directory.
+pub(crate) async fn list_managed_account_ids(root_dir: &Path) -> Vec<String> {
+    let managed_dir = managed_accounts_dir(root_dir);
+    let mut ids = Vec::new();
+    let mut entries = match fs::read_dir(&managed_dir).await {
+        Ok(entries) => entries,
+        Err(_) => return ids,
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|v| v.to_str())
+            .map(|v| v.eq_ignore_ascii_case(STEAM_MANAGED_ACCOUNT_EXTENSION))
+            == Some(true)
+        {
+            if let Some(stem) = path.file_stem().and_then(|v| v.to_str()) {
+                ids.push(stem.to_owned());
+            }
+        }
+    }
+    ids
 }
 
 #[cfg(test)]

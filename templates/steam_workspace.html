@@ -135,7 +135,37 @@
             bulkDenyConfirm: {{ i18n.steam_bulk_deny_confirm_prompt | json_encode | safe }},
             bulkRunning: {{ i18n.steam_bulk_action_running_message | json_encode | safe }},
             timeCheckOk: {{ i18n.steam_time_check_ok_message | json_encode | safe }},
-            timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }}
+            timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }},
+            phoneHasPhone: {{ i18n.steam_phone_status_has_phone | json_encode | safe }},
+            phoneNoPhone: {{ i18n.steam_phone_status_no_phone | json_encode | safe }},
+            phoneStatusFailed: {{ i18n.steam_phone_status_failed | json_encode | safe }},
+            emergencyCodesFailed: {{ i18n.steam_emergency_codes_failed | json_encode | safe }},
+            validateTokenValid: {{ i18n.steam_validate_token_valid | json_encode | safe }},
+            validateTokenInvalid: {{ i18n.steam_validate_token_invalid | json_encode | safe }},
+            validateTokenFailed: {{ i18n.steam_validate_token_failed | json_encode | safe }},
+            ztButtonLabel: {{ i18n.steam_zero_trust_button_label | json_encode | safe }},
+            ztButtonTooltip: {{ i18n.steam_zero_trust_button_tooltip | json_encode | safe }},
+            ztModalTitle: {{ i18n.steam_zero_trust_modal_title | json_encode | safe }},
+            ztModalWarning: {{ i18n.steam_zero_trust_modal_warning | json_encode | safe }},
+            ztConfirmLabel: {{ i18n.steam_zero_trust_confirm_label | json_encode | safe }},
+            ztActivateButton: {{ i18n.steam_zero_trust_activate_button | json_encode | safe }},
+            ztActivatingMessage: {{ i18n.steam_zero_trust_activating_message | json_encode | safe }},
+            ztActivatedMessage: {{ i18n.steam_zero_trust_activated_message | json_encode | safe }},
+            ztActivationFailedMessage: {{ i18n.steam_zero_trust_activation_failed_message | json_encode | safe }},
+            ztBannerTitle: {{ i18n.steam_zero_trust_banner_title | json_encode | safe }},
+            ztBannerDescription: {{ i18n.steam_zero_trust_banner_description | json_encode | safe }},
+            ztDeactivateLabel: {{ i18n.steam_zero_trust_deactivate_label | json_encode | safe }},
+            ztDeactivatePasswordLabel: {{ i18n.steam_zero_trust_deactivate_password_label | json_encode | safe }},
+            ztDeactivateTotpLabel: {{ i18n.steam_zero_trust_deactivate_totp_label | json_encode | safe }},
+            ztDeactivatedMessage: {{ i18n.steam_zero_trust_deactivated_message | json_encode | safe }},
+            ztDeactivationFailedMessage: {{ i18n.steam_zero_trust_deactivation_failed_message | json_encode | safe }},
+            ztSweepRunningMessage: {{ i18n.steam_zero_trust_sweep_running_message | json_encode | safe }},
+            ztOperationLockedMessage: {{ i18n.steam_zero_trust_operation_locked_message | json_encode | safe }},
+            ztAccountBadge: {{ i18n.steam_zero_trust_account_badge | json_encode | safe }},
+            ztSelectAllLabel: {{ i18n.steam_zero_trust_select_all_label | json_encode | safe }},
+            ztGuardChangedWarning: {{ i18n.steam_zero_trust_guard_changed_warning | json_encode | safe }},
+            ztInvalidConfirmMessage: {{ i18n.steam_zero_trust_invalid_confirm_message | json_encode | safe }},
+            ztPasswordRequiredMessage: {{ i18n.steam_zero_trust_password_required_message | json_encode | safe }}
         };
         const SETUP_BEGIN_API = {{ steam_setup_begin_action | json_encode | safe }};
         const SETUP_LOGIN_CODE_API = {{ steam_setup_login_code_action | json_encode | safe }};
@@ -147,6 +177,10 @@
         const SETUP_TRANSFER_START_API = {{ steam_setup_transfer_start_action | json_encode | safe }};
         const SETUP_TRANSFER_FINISH_API = {{ steam_setup_transfer_finish_action | json_encode | safe }};
         const TIME_CHECK_API = {{ steam_time_check_api | json_encode | safe }};
+        const ZERO_TRUST_ACTIVATE_API = {{ zero_trust_activate_api | json_encode | safe }};
+        const ZERO_TRUST_DEACTIVATE_API = {{ zero_trust_deactivate_api | json_encode | safe }};
+        const ZERO_TRUST_STATUS_API = {{ zero_trust_status_api | json_encode | safe }};
+        const ZERO_TRUST_SWEEP_API = {{ zero_trust_sweep_api | json_encode | safe }};
         const LANG = {{ lang | json_encode | safe }};
         let steamSnapshotInFlight = false;
         let steamApprovalsInFlight = false;
@@ -265,6 +299,60 @@
         }
         [data-tab-panel] { display: none; }
         [data-tab-panel].tab-active { display: block; }
+
+        /* --- Zero Trust Mode --- */
+        @keyframes ztPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.72; }
+        }
+        @keyframes ztBannerSlideIn {
+            from { transform: translateY(-100%); opacity: 0; }
+            to   { transform: translateY(0); opacity: 1; }
+        }
+        .zt-banner-pulse {
+            animation: ztPulse 2s ease-in-out infinite;
+        }
+        .zt-banner-enter {
+            animation: ztBannerSlideIn 320ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @keyframes ztButtonPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
+            50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+        }
+        .zt-btn-active-pulse {
+            animation: ztButtonPulse 1.6s ease-in-out infinite;
+        }
+        #zero-trust-modal-backdrop {
+            transition: opacity 180ms ease;
+        }
+        #zero-trust-modal-backdrop.zt-modal-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #zero-trust-deactivation-panel.zt-panel-hidden {
+            display: none;
+        }
+        #zero-trust-log-panel.zt-log-hidden {
+            display: none;
+        }
+        .zt-locked-overlay {
+            position: relative;
+        }
+        .zt-locked-overlay::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: rgba(220, 38, 38, 0.04);
+            border-radius: inherit;
+            pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .zt-banner-pulse,
+            .zt-btn-active-pulse,
+            .zt-banner-enter {
+                animation: none !important;
+            }
+        }
     </style>
     <script>
         function escapeHtml(value) {
@@ -356,6 +444,7 @@
                         <div class="mt-2 flex flex-wrap items-center gap-2">
                             <span class="inline-flex rounded-full border border-steam/20 bg-steamMist px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-steam">${escapeHtml(sourceBadge)}</span>
                             <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(account.steam_id || "-")}</span>
+                            ${account.zero_trust_active ? `<span class="rounded-full border border-red-400 bg-red-100 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-red-700">${escapeHtml(I18N.ztAccountBadge)}</span>` : ""}
                         </div>
                         <p class="mt-2 truncate text-[0.74rem] text-ink/46">${escapeHtml(account.storage_file)}</p>
                     </div>
@@ -1506,6 +1595,55 @@
     data-default-tab="{{ default_tab }}"
 >
     <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
+
+    {% if zero_trust_active %}
+    <div id="zero-trust-banner" class="zt-banner-enter sticky top-0 z-[60] border-b-2 border-red-900/40 bg-[#dc2626] px-4 py-3 text-white shadow-[0_4px_24px_rgba(220,38,38,0.35)]">
+        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <span class="zt-banner-pulse inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-lg" aria-hidden="true">&#9888;</span>
+                <div>
+                    <h2 class="text-sm font-bold uppercase tracking-[0.18em]">{{ i18n.steam_zero_trust_banner_title }}</h2>
+                    <p class="mt-0.5 text-[0.78rem] leading-5 text-white/85">{{ i18n.steam_zero_trust_banner_description }}</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span id="zt-sweep-counter" class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[0.72rem] font-mono font-medium text-white/90">
+                    <span id="zt-sweep-counter-value">--</span>
+                </span>
+                <button type="button" onclick="toggleZeroTrustLog()" class="rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-[0.72rem] font-medium text-white transition hover:bg-white/20">Log</button>
+                <button type="button" onclick="toggleZeroTrustDeactivation()" class="rounded-full border-2 border-white/50 bg-white/15 px-4 py-1.5 text-[0.78rem] font-bold text-white transition hover:bg-white/25">{{ i18n.steam_zero_trust_deactivate_label }}</button>
+            </div>
+        </div>
+
+        <div id="zero-trust-deactivation-panel" class="zt-panel-hidden mx-auto mt-3 max-w-6xl rounded-[1rem] border border-white/20 bg-[#b91c1c] px-4 py-3">
+            <h3 class="text-sm font-bold uppercase tracking-[0.16em] text-white/90">{{ i18n.steam_zero_trust_deactivate_label }}</h3>
+            <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                <label class="block">
+                    <span class="text-[0.68rem] uppercase tracking-[0.18em] text-white/70">{{ i18n.steam_zero_trust_deactivate_password_label }}</span>
+                    <input id="zt-deactivate-password" type="password" autocomplete="current-password" class="mt-1.5 w-full rounded-[0.85rem] border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-white/40 outline-none transition focus:border-white/50 focus:ring-2 focus:ring-white/20">
+                </label>
+                <label class="block">
+                    <span class="text-[0.68rem] uppercase tracking-[0.18em] text-white/70">{{ i18n.steam_zero_trust_deactivate_totp_label }}</span>
+                    <input id="zt-deactivate-totp" type="text" maxlength="10" autocomplete="one-time-code" class="mt-1.5 w-full rounded-[0.85rem] border border-white/20 bg-white/10 px-3 py-2 font-mono text-sm text-white placeholder-white/40 outline-none transition focus:border-white/50 focus:ring-2 focus:ring-white/20">
+                </label>
+                <label class="block">
+                    <span class="text-[0.68rem] uppercase tracking-[0.18em] text-white/70">{{ i18n.steam_zero_trust_confirm_label }}</span>
+                    <input id="zt-deactivate-confirm" type="text" placeholder="CONFIRM" oninput="syncZtDeactivateButton()" class="mt-1.5 w-full rounded-[0.85rem] border border-white/20 bg-white/10 px-3 py-2 font-mono text-sm text-white placeholder-white/40 outline-none transition focus:border-white/50 focus:ring-2 focus:ring-white/20">
+                </label>
+            </div>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+                <button id="zt-deactivate-submit" type="button" disabled onclick="deactivateZeroTrust()" class="rounded-[0.85rem] border-2 border-white/40 bg-white px-5 py-2 text-sm font-bold text-[#dc2626] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40">{{ i18n.steam_zero_trust_deactivate_label }}</button>
+                <span id="zt-deactivate-status" class="text-[0.78rem] text-white/80"></span>
+            </div>
+        </div>
+
+        <div id="zero-trust-log-panel" class="zt-log-hidden mx-auto mt-3 max-w-6xl rounded-[1rem] border border-white/20 bg-[#991b1b] px-4 py-3">
+            <h3 class="text-[0.68rem] font-bold uppercase tracking-[0.18em] text-white/70">Sweep Log</h3>
+            <div id="zt-log-entries" class="mt-2 max-h-48 space-y-1 overflow-auto font-mono text-[0.72rem] leading-5 text-white/80"></div>
+        </div>
+    </div>
+    {% endif %}
+
     <main class="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
         <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm" style="border-top: 2px solid rgba(31,79,114,0.35)">
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1530,6 +1668,13 @@
                     <form method="post" action="{{ logout_action }}">
                         <button type="submit" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ i18n.logout }}</button>
                     </form>
+                    <button
+                        id="zt-activate-header-btn"
+                        type="button"
+                        onclick="showZeroTrustModal()"
+                        title="{{ i18n.steam_zero_trust_button_tooltip }}"
+                        class="{% if zero_trust_active %}zt-btn-active-pulse bg-[#b91c1c] border-[#991b1b]{% else %}bg-[#dc2626] border-[#b91c1c] hover:bg-[#b91c1c]{% endif %} rounded-full border px-3.5 py-1.5 text-sm font-bold text-white transition"
+                    >{{ i18n.steam_zero_trust_button_label }}</button>
                 </div>
             </div>
         </header>
@@ -1601,6 +1746,9 @@
                                             {% if account.is_manual_entry %}{{ i18n.steam_source_manual_label }}{% elif account.is_uploaded_mafile %}{{ i18n.steam_source_upload_label }}{% else %}{{ i18n.steam_source_legacy_label }}{% endif %}
                                         </span>
                                         <span class="inline-flex rounded-full border border-line/80 bg-paper px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ account.steam_id | default(value="-") }}</span>
+                                        {% if account.zero_trust_active %}
+                                        <span class="rounded-full border border-red-400 bg-red-100 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-red-700">{{ i18n.steam_zero_trust_account_badge }}</span>
+                                        {% endif %}
                                     </div>
                                     <p class="mt-2 truncate text-[0.74rem] text-ink/46">{{ account.storage_file }}</p>
                                 </div>
@@ -1692,6 +1840,9 @@
                                         <span class="inline-flex rounded-full border px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] {% if account.confirmation_ready %}border-steam/20 bg-steamMist text-steam{% elif account.has_confirmation_secret_material %}border-butter/40 bg-[#fff7df] text-[#8a6b24]{% else %}border-line bg-white text-ink/58{% endif %}">
                                             {% if account.confirmation_ready %}{{ i18n.steam_confirmation_ready_label }}{% elif account.has_confirmation_secret_material %}{{ i18n.steam_confirmation_secret_only_label }}{% else %}{{ i18n.steam_confirmation_missing_label }}{% endif %}
                                         </span>
+                                        {% if account.zero_trust_active %}
+                                        <span class="rounded-full border border-red-400 bg-red-100 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-red-700">{{ i18n.steam_zero_trust_account_badge }}</span>
+                                        {% endif %}
                                     </div>
                                 </summary>
 
@@ -1735,28 +1886,36 @@
 
                                     {% if account.can_manage %}
                                     <div class="mt-3 space-y-3">
-                                        <div class="rounded-[1rem] border border-steam/18 bg-steamMist/55 px-3.5 py-3">
+                                        {% if account.zero_trust_active %}
+                                        <div class="zt-locked-overlay rounded-[1rem] border-2 border-red-300 bg-red-50/60 px-3.5 py-3">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-base" aria-hidden="true">&#128274;</span>
+                                                <p class="text-sm font-semibold text-red-700">{{ i18n.steam_zero_trust_operation_locked_message }}</p>
+                                            </div>
+                                        </div>
+                                        {% endif %}
+                                        <div class="rounded-[1rem] border border-steam/18 bg-steamMist/55 px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-steam/74">{{ i18n.steam_login_existing_title }}</p>
                                             <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.steam_login_existing_description }}</p>
                                             <form method="post" action="{{ account.login_action }}" class="mt-3 grid gap-3">
                                                 <input type="hidden" name="lang" value="{{ lang }}">
                                                 <label class="block">
                                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.admin_audit_username_label }}</span>
-                                                    <input name="steam_username" type="text" autocomplete="username" value="{{ account.steam_username | default(value='') }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    <input name="steam_username" type="text" autocomplete="username" value="{{ account.steam_username | default(value='') }}" {% if account.zero_trust_active %}disabled{% endif %} class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                                 </label>
                                                 <label class="block">
                                                     <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.settings_current_password_label }}</span>
-                                                    <input name="steam_password" type="password" required autocomplete="current-password" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                                    <input name="steam_password" type="password" required autocomplete="current-password" {% if account.zero_trust_active %}disabled{% endif %} class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                                 </label>
-                                                <button type="submit" class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457]">{{ i18n.steam_login_existing_button }}</button>
+                                                <button type="submit" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] bg-steam px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#294457] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_login_existing_button }}</button>
                                             </form>
                                         </div>
 
                                         {% if account.has_session_tokens and not account.has_revocation_code %}
-                                        <div class="rounded-[1rem] border border-sage/25 bg-mint/60 px-3.5 py-3">
+                                        <div class="rounded-[1rem] border border-sage/25 bg-mint/60 px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
                                             <p class="text-[0.65rem] uppercase tracking-[0.18em] text-sageDeep/74">{{ i18n.steam_link_auth_title }}</p>
                                             <p class="mt-2 text-sm leading-6 text-ink/70">{{ i18n.steam_link_auth_description }}</p>
-                                            <button type="button" data-link-auth="{{ account.id }}" class="mt-3 w-full rounded-[1rem] bg-sage px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sageDeep">{{ i18n.steam_link_auth_button }}</button>
+                                            <button type="button" data-link-auth="{{ account.id }}" {% if account.zero_trust_active %}disabled{% endif %} class="mt-3 w-full rounded-[1rem] bg-sage px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_link_auth_button }}</button>
                                             <div id="link-auth-status-{{ account.id }}" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
                                         </div>
                                         {% endif %}
@@ -1773,9 +1932,9 @@
                                                 </label>
                                             </form>
 
-                                            <form method="post" action="{{ account.delete_action }}" data-confirm-submit="{{ i18n.steam_delete_confirm_message }}">
+                                            <form method="post" action="{{ account.delete_action }}" data-confirm-submit="{{ i18n.steam_delete_confirm_message }}" class="{% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
                                                 <input type="hidden" name="lang" value="{{ lang }}">
-                                                <button type="submit" class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_delete_button }}</button>
+                                                <button type="submit" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_delete_button }}</button>
                                             </form>
                                         </div>
                                     </div>
@@ -1959,11 +2118,22 @@
                                     {% if account.steam_username %}
                                     <span class="text-ink/52">{{ account.steam_username }}</span>
                                     {% endif %}
+                                    {% if account.zero_trust_active %}
+                                    <span class="rounded-full border border-red-400 bg-red-100 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-red-700">{{ i18n.steam_zero_trust_account_badge }}</span>
+                                    {% endif %}
                                 </span>
                             </summary>
 
                             <div class="mt-3 space-y-3">
-                                <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3">
+                                {% if account.zero_trust_active %}
+                                <div class="zt-locked-overlay rounded-[1rem] border-2 border-red-300 bg-red-50/60 px-3.5 py-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-base" aria-hidden="true">&#128274;</span>
+                                        <p class="text-sm font-semibold text-red-700">{{ i18n.steam_zero_trust_operation_locked_message }}</p>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
                                     <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_materials_title }}</p>
                                     <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_materials_description }}</p>
                                     <form method="post" action="{{ account.update_material_action }}" class="mt-3 grid gap-3">
@@ -2020,7 +2190,7 @@
                                 </div>
 
                                 {% if account.has_revocation_code %}
-                                <details class="steam-disclosure rounded-[1rem] border border-peach/30 bg-[#fdf5f2] px-3.5 py-3">
+                                <details class="steam-disclosure rounded-[1rem] border border-peach/30 bg-[#fdf5f2] px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
                                     <summary class="cursor-pointer text-sm font-medium text-[#98675f]">
                                         <span class="inline-flex items-center gap-2">
                                             <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
@@ -2031,11 +2201,43 @@
                                     <div class="mt-3 space-y-3">
                                         <label class="block">
                                             <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_remove_revocation_code_label }}</span>
-                                            <input id="revocation-code-{{ account.id }}" type="text" maxlength="10" placeholder="{{ i18n.steam_remove_revocation_code_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                            <input id="revocation-code-{{ account.id }}" type="text" maxlength="10" {% if account.zero_trust_active %}disabled{% endif %} placeholder="{{ i18n.steam_remove_revocation_code_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
                                         </label>
-                                        <button type="button" data-remove-auth="{{ account.id }}" class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_remove_button }}</button>
+                                        <button type="button" data-remove-auth="{{ account.id }}" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] border border-peach/35 bg-[#fbefec] px-4 py-2.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_remove_button }}</button>
                                     </div>
                                 </details>
+                                {% endif %}
+
+                                {% if account.has_session_tokens %}
+                                <div class="mt-3 rounded-[1rem] border border-line/80 bg-paper/90 p-3.5">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <h4 class="text-sm font-semibold text-ink">{{ i18n.steam_phone_status_check_label }}</h4>
+                                        <button type="button" data-phone-status="{{ account.id }}" class="rounded-[0.85rem] border border-steam/20 bg-white px-3 py-1.5 text-xs font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_phone_status_check_label }}</button>
+                                    </div>
+                                    <div data-phone-status-result="{{ account.id }}" class="mt-2 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm"></div>
+                                </div>
+
+                                <div class="mt-3 rounded-[1rem] border border-line/80 bg-paper/90 p-3.5">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <h4 class="text-sm font-semibold text-ink">{{ i18n.steam_emergency_codes_create_label }}</h4>
+                                        <div class="flex gap-1.5">
+                                            <button type="button" data-emergency-codes-create="{{ account.id }}" class="rounded-[0.85rem] border border-steam/20 bg-white px-3 py-1.5 text-xs font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_emergency_codes_create_label }}</button>
+                                            <button type="button" data-emergency-codes-destroy="{{ account.id }}" class="rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3 py-1.5 text-xs font-medium text-[#98675f] transition hover:bg-[#f7e4df]">{{ i18n.steam_emergency_codes_destroy_label }}</button>
+                                        </div>
+                                    </div>
+                                    <div data-emergency-codes-result="{{ account.id }}" class="mt-2 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm"></div>
+                                </div>
+
+                                <div class="mt-3 rounded-[1rem] border border-line/80 bg-paper/90 p-3.5">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <h4 class="text-sm font-semibold text-ink">{{ i18n.steam_validate_token_label }}</h4>
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" data-validate-token-input="{{ account.id }}" maxlength="10" placeholder="TOTP code" class="w-28 rounded-[0.85rem] border border-line bg-white px-3 py-1.5 text-xs outline-none transition focus:border-steam">
+                                            <button type="button" data-validate-token="{{ account.id }}" class="rounded-[0.85rem] border border-steam/20 bg-white px-3 py-1.5 text-xs font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_validate_token_label }}</button>
+                                        </div>
+                                    </div>
+                                    <div data-validate-token-result="{{ account.id }}" class="mt-2 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm"></div>
+                                </div>
                                 {% endif %}
                             </div>
                         </details>
@@ -2433,6 +2635,54 @@
             </section>
         </div>
     </main>
+
+    <!-- Zero Trust Activation Modal -->
+    <div id="zero-trust-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onclick="if(event.target===this)hideZeroTrustModal()">
+        <div class="relative mx-4 w-full max-w-lg overflow-hidden rounded-[1.35rem] border-2 border-red-700/50 bg-white shadow-[0_32px_80px_rgba(220,38,38,0.25)]" onclick="event.stopPropagation()">
+            <div class="border-b-2 border-red-200 bg-gradient-to-r from-[#dc2626] to-[#b91c1c] px-5 py-4 text-white">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-lg" aria-hidden="true">&#9888;</span>
+                    <div>
+                        <h2 class="text-base font-bold uppercase tracking-[0.12em]">{{ i18n.steam_zero_trust_modal_title }}</h2>
+                        <p class="mt-0.5 text-[0.78rem] leading-5 text-white/85">{{ i18n.steam_zero_trust_modal_warning }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="max-h-[60vh] overflow-auto px-5 py-4">
+                <div class="flex items-center justify-between gap-3">
+                    <p class="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/55">{{ i18n.stat_accounts }}</p>
+                    <button type="button" onclick="ztSelectAllAccounts()" class="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-[0.68rem] font-medium text-red-700 transition hover:bg-red-100">{{ i18n.steam_zero_trust_select_all_label }}</button>
+                </div>
+                <div id="zt-account-list" class="mt-3 max-h-56 space-y-2 overflow-auto rounded-[1rem] border border-line/80 bg-paper p-3">
+                    {% for account in snapshot.accounts %}
+                    <label class="flex cursor-pointer items-center gap-3 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300 hover:bg-red-50/50">
+                        <input type="checkbox" name="zt_account" value="{{ account.id }}" checked class="h-4 w-4 rounded border-line text-red-600 focus:ring-red-500">
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-medium text-ink">{{ account.account_name }}</p>
+                            <p class="truncate text-[0.68rem] text-ink/50">{{ account.steam_id | default(value="-") }}</p>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <div class="mt-4">
+                    <label class="block">
+                        <span class="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/55">{{ i18n.steam_zero_trust_confirm_label }}</span>
+                        <input id="zt-activate-confirm" type="text" placeholder="CONFIRM" oninput="syncZtActivateButton()" class="mt-1.5 w-full rounded-[0.85rem] border border-red-300 bg-white px-3.5 py-2.5 font-mono text-sm text-ink outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200">
+                    </label>
+                </div>
+
+                <div id="zt-activate-status" class="mt-3 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm"></div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 border-t border-line/80 bg-paper px-5 py-3">
+                <button type="button" onclick="hideZeroTrustModal()" class="rounded-[0.85rem] border border-line bg-white px-4 py-2 text-sm font-medium text-ink/70 transition hover:bg-latte">{{ i18n.cancel | default(value="Cancel") }}</button>
+                <button id="zt-activate-submit" type="button" disabled onclick="activateZeroTrust()" class="rounded-[0.85rem] border-2 border-red-800 bg-[#dc2626] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#b91c1c] disabled:cursor-not-allowed disabled:opacity-40">{{ i18n.steam_zero_trust_activate_button }}</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     (function() {
         // ----------- Setup wizard -----------
@@ -2952,6 +3202,137 @@
             proxyBtn.disabled = false;
         });
 
+        // ----------- Phone status check -----------
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest("[data-phone-status]");
+            if (!btn) return;
+            const accountId = btn.dataset.phoneStatus;
+            const resultEl = document.querySelector(`[data-phone-status-result="${accountId}"]`);
+            if (!resultEl) return;
+            btn.disabled = true;
+            resultEl.classList.remove("hidden");
+            resultEl.className = resultEl.className.replace(/border-\S+/g, "").replace(/bg-\S+/g, "").replace(/text-\S+/g, "") + " mt-2 rounded-[0.85rem] border border-line bg-paper px-3.5 py-2.5 text-sm text-ink/68";
+            resultEl.textContent = "...";
+            try {
+                const resp = await fetch(`/api/platforms/steam/accounts/${encodeURIComponent(accountId)}/phone-status?lang=${LANG}`);
+                const data = await resp.json();
+                if (data.ok) {
+                    resultEl.textContent = data.has_phone ? I18N.phoneHasPhone : I18N.phoneNoPhone;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border px-3.5 py-2.5 text-sm " + (data.has_phone ? "border-sage/35 bg-[#eef4ee] text-sageDeep" : "border-peach/35 bg-[#fbefec] text-[#98675f]");
+                } else {
+                    resultEl.textContent = data.message || I18N.phoneStatusFailed;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                }
+            } catch (err) {
+                resultEl.textContent = err.message || I18N.phoneStatusFailed;
+                resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ----------- Emergency codes create -----------
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest("[data-emergency-codes-create]");
+            if (!btn) return;
+            const accountId = btn.dataset.emergencyCodesCreate;
+            const resultEl = document.querySelector(`[data-emergency-codes-result="${accountId}"]`);
+            if (!resultEl) return;
+            btn.disabled = true;
+            resultEl.classList.remove("hidden");
+            resultEl.className = "mt-2 rounded-[0.85rem] border border-line bg-paper px-3.5 py-2.5 text-sm text-ink/68";
+            resultEl.textContent = "...";
+            try {
+                const resp = await fetch(`/api/platforms/steam/accounts/${encodeURIComponent(accountId)}/emergency-codes`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ lang: LANG })
+                });
+                const data = await resp.json();
+                if (data.ok && data.codes) {
+                    resultEl.textContent = data.codes.join("  ");
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm font-mono text-sageDeep select-all";
+                } else {
+                    resultEl.textContent = data.message || I18N.emergencyCodesFailed;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                }
+            } catch (err) {
+                resultEl.textContent = err.message || I18N.emergencyCodesFailed;
+                resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ----------- Emergency codes destroy -----------
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest("[data-emergency-codes-destroy]");
+            if (!btn) return;
+            const accountId = btn.dataset.emergencyCodesDestroy;
+            const resultEl = document.querySelector(`[data-emergency-codes-result="${accountId}"]`);
+            if (!resultEl) return;
+            btn.disabled = true;
+            resultEl.classList.remove("hidden");
+            resultEl.className = "mt-2 rounded-[0.85rem] border border-line bg-paper px-3.5 py-2.5 text-sm text-ink/68";
+            resultEl.textContent = "...";
+            try {
+                const resp = await fetch(`/api/platforms/steam/accounts/${encodeURIComponent(accountId)}/emergency-codes/destroy`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ lang: LANG })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    resultEl.textContent = "OK";
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm text-sageDeep";
+                } else {
+                    resultEl.textContent = data.message || I18N.emergencyCodesFailed;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                }
+            } catch (err) {
+                resultEl.textContent = err.message || I18N.emergencyCodesFailed;
+                resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ----------- Validate token -----------
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest("[data-validate-token]");
+            if (!btn) return;
+            const accountId = btn.dataset.validateToken;
+            const inputEl = document.querySelector(`[data-validate-token-input="${accountId}"]`);
+            const resultEl = document.querySelector(`[data-validate-token-result="${accountId}"]`);
+            if (!resultEl || !inputEl) return;
+            const code = inputEl.value.trim();
+            if (!code) return;
+            btn.disabled = true;
+            resultEl.classList.remove("hidden");
+            resultEl.className = "mt-2 rounded-[0.85rem] border border-line bg-paper px-3.5 py-2.5 text-sm text-ink/68";
+            resultEl.textContent = "...";
+            try {
+                const resp = await fetch(`/api/platforms/steam/accounts/${encodeURIComponent(accountId)}/validate-token`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ code, lang: LANG })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    resultEl.textContent = data.valid ? I18N.validateTokenValid : I18N.validateTokenInvalid;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border px-3.5 py-2.5 text-sm " + (data.valid ? "border-sage/35 bg-[#eef4ee] text-sageDeep" : "border-peach/35 bg-[#fbefec] text-[#98675f]");
+                } else {
+                    resultEl.textContent = data.message || I18N.validateTokenFailed;
+                    resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                }
+            } catch (err) {
+                resultEl.textContent = err.message || I18N.validateTokenFailed;
+                resultEl.className = "mt-2 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
         // ----------- Link authenticator for existing account -----------
         document.addEventListener("click", async (e) => {
             const linkBtn = e.target.closest("[data-link-auth]");
@@ -3002,6 +3383,243 @@
                 alert(err.message);
             }
             bulkBtn.disabled = false;
+        });
+    })();
+    </script>
+
+    <!-- Zero Trust Mode JavaScript -->
+    <script>
+    (function() {
+        // ----------- Zero Trust: Modal show/hide -----------
+        function showZeroTrustModal() {
+            const backdrop = document.getElementById("zero-trust-modal-backdrop");
+            if (backdrop) {
+                backdrop.classList.remove("zt-modal-hidden");
+            }
+        }
+        function hideZeroTrustModal() {
+            const backdrop = document.getElementById("zero-trust-modal-backdrop");
+            if (backdrop) {
+                backdrop.classList.add("zt-modal-hidden");
+            }
+            const statusEl = document.getElementById("zt-activate-status");
+            if (statusEl) {
+                statusEl.className = "mt-3 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm";
+                statusEl.textContent = "";
+            }
+            const confirmInput = document.getElementById("zt-activate-confirm");
+            if (confirmInput) { confirmInput.value = ""; }
+            syncZtActivateButton();
+        }
+        window.showZeroTrustModal = showZeroTrustModal;
+        window.hideZeroTrustModal = hideZeroTrustModal;
+
+        // ----------- Zero Trust: Activate button sync -----------
+        function syncZtActivateButton() {
+            const input = document.getElementById("zt-activate-confirm");
+            const btn = document.getElementById("zt-activate-submit");
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() !== "CONFIRM";
+        }
+        window.syncZtActivateButton = syncZtActivateButton;
+
+        // ----------- Zero Trust: Select all accounts -----------
+        function ztSelectAllAccounts() {
+            const checkboxes = document.querySelectorAll("#zt-account-list input[type='checkbox']");
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => { cb.checked = !allChecked; });
+        }
+        window.ztSelectAllAccounts = ztSelectAllAccounts;
+
+        // ----------- Zero Trust: Activation flow -----------
+        async function activateZeroTrust() {
+            const confirmInput = document.getElementById("zt-activate-confirm");
+            const statusEl = document.getElementById("zt-activate-status");
+            const submitBtn = document.getElementById("zt-activate-submit");
+
+            if (!confirmInput || confirmInput.value.trim() !== "CONFIRM") {
+                if (statusEl) {
+                    statusEl.className = "mt-3 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                    statusEl.textContent = I18N.ztInvalidConfirmMessage;
+                    statusEl.classList.remove("hidden");
+                }
+                return;
+            }
+
+            const checkboxes = document.querySelectorAll("#zt-account-list input[type='checkbox']:checked");
+            const accountIds = Array.from(checkboxes).map(cb => cb.value);
+            if (accountIds.length === 0) { return; }
+
+            if (submitBtn) { submitBtn.disabled = true; }
+            if (statusEl) {
+                statusEl.className = "mt-3 rounded-[0.85rem] border border-butter/35 bg-[#fff7df] px-3.5 py-2.5 text-sm text-[#8a6b24]";
+                statusEl.textContent = I18N.ztActivatingMessage;
+                statusEl.classList.remove("hidden");
+            }
+
+            try {
+                const resp = await fetch(ZERO_TRUST_ACTIVATE_API, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ account_ids: accountIds, confirm_phrase: confirmInput.value.trim(), lang: LANG })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    if (statusEl) {
+                        statusEl.className = "mt-3 rounded-[0.85rem] border border-sage/35 bg-[#eef4ee] px-3.5 py-2.5 text-sm text-sageDeep";
+                        statusEl.textContent = I18N.ztActivatedMessage;
+                    }
+                    setTimeout(() => { window.location.reload(); }, 800);
+                } else {
+                    if (statusEl) {
+                        statusEl.className = "mt-3 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                        statusEl.textContent = data.message || I18N.ztActivationFailedMessage;
+                    }
+                    if (submitBtn) { submitBtn.disabled = false; }
+                }
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.className = "mt-3 rounded-[0.85rem] border border-peach/35 bg-[#fbefec] px-3.5 py-2.5 text-sm text-[#98675f]";
+                    statusEl.textContent = err.message || I18N.ztActivationFailedMessage;
+                    statusEl.classList.remove("hidden");
+                }
+                if (submitBtn) { submitBtn.disabled = false; }
+            }
+        }
+        window.activateZeroTrust = activateZeroTrust;
+
+        // ----------- Zero Trust: Deactivation panel toggle -----------
+        function toggleZeroTrustDeactivation() {
+            const panel = document.getElementById("zero-trust-deactivation-panel");
+            if (panel) {
+                panel.classList.toggle("zt-panel-hidden");
+            }
+        }
+        window.toggleZeroTrustDeactivation = toggleZeroTrustDeactivation;
+
+        // ----------- Zero Trust: Deactivate button sync -----------
+        function syncZtDeactivateButton() {
+            const input = document.getElementById("zt-deactivate-confirm");
+            const btn = document.getElementById("zt-deactivate-submit");
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() !== "CONFIRM";
+        }
+        window.syncZtDeactivateButton = syncZtDeactivateButton;
+
+        // ----------- Zero Trust: Deactivation flow -----------
+        async function deactivateZeroTrust() {
+            const passwordInput = document.getElementById("zt-deactivate-password");
+            const totpInput = document.getElementById("zt-deactivate-totp");
+            const confirmInput = document.getElementById("zt-deactivate-confirm");
+            const statusEl = document.getElementById("zt-deactivate-status");
+            const submitBtn = document.getElementById("zt-deactivate-submit");
+
+            if (!confirmInput || confirmInput.value.trim() !== "CONFIRM") {
+                if (statusEl) { statusEl.textContent = I18N.ztInvalidConfirmMessage; }
+                return;
+            }
+
+            const password = passwordInput ? passwordInput.value : "";
+            if (!password) {
+                if (statusEl) { statusEl.textContent = I18N.ztPasswordRequiredMessage; }
+                return;
+            }
+
+            const totp = totpInput ? totpInput.value.trim() : "";
+
+            if (submitBtn) { submitBtn.disabled = true; }
+            if (statusEl) { statusEl.textContent = I18N.ztSweepRunningMessage; }
+
+            try {
+                const resp = await fetch(ZERO_TRUST_DEACTIVATE_API, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: password, totp: totp, confirm_phrase: confirmInput.value.trim(), lang: LANG })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    if (statusEl) { statusEl.textContent = I18N.ztDeactivatedMessage; }
+                    setTimeout(() => { window.location.reload(); }, 800);
+                } else {
+                    if (statusEl) { statusEl.textContent = data.message || I18N.ztDeactivationFailedMessage; }
+                    if (submitBtn) { submitBtn.disabled = false; }
+                }
+            } catch (err) {
+                if (statusEl) { statusEl.textContent = err.message || I18N.ztDeactivationFailedMessage; }
+                if (submitBtn) { submitBtn.disabled = false; }
+            }
+        }
+        window.deactivateZeroTrust = deactivateZeroTrust;
+
+        // ----------- Zero Trust: Log panel toggle -----------
+        function toggleZeroTrustLog() {
+            const panel = document.getElementById("zero-trust-log-panel");
+            if (panel) {
+                panel.classList.toggle("zt-log-hidden");
+            }
+        }
+        window.toggleZeroTrustLog = toggleZeroTrustLog;
+
+        // ----------- Zero Trust: Sweep polling -----------
+        let zeroTrustSweepTimer = null;
+        const ZERO_TRUST_SWEEP_INTERVAL_MS = 5000;
+
+        function updateZeroTrustLog(data) {
+            const logEl = document.getElementById("zt-log-entries");
+            if (!logEl) return;
+            if (data.log && Array.isArray(data.log)) {
+                data.log.forEach(function(entry) {
+                    const line = document.createElement("p");
+                    const ts = new Date().toLocaleTimeString();
+                    line.textContent = "[" + ts + "] " + entry;
+                    logEl.appendChild(line);
+                });
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+        }
+
+        function updateZeroTrustCounter(data) {
+            const counterEl = document.getElementById("zt-sweep-counter-value");
+            if (!counterEl) return;
+            if (typeof data.sweep_count !== "undefined") {
+                counterEl.textContent = "Sweeps: " + data.sweep_count;
+            } else if (typeof data.locked_count !== "undefined") {
+                counterEl.textContent = "Locked: " + data.locked_count;
+            } else {
+                counterEl.textContent = "Active";
+            }
+        }
+
+        function startZeroTrustPolling() {
+            if (zeroTrustSweepTimer) return;
+            zeroTrustSweepTimer = window.setInterval(async function() {
+                try {
+                    const resp = await fetch(ZERO_TRUST_SWEEP_API, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ lang: LANG })
+                    });
+                    const data = await resp.json();
+                    if (data.ok) {
+                        updateZeroTrustLog(data);
+                        updateZeroTrustCounter(data);
+                    }
+                } catch (e) {
+                    // Sweep poll failed silently
+                }
+            }, ZERO_TRUST_SWEEP_INTERVAL_MS);
+        }
+
+        // Start polling if zero trust is active on page load
+        if (document.getElementById("zero-trust-banner")) {
+            startZeroTrustPolling();
+        }
+
+        // Keyboard shortcut: Escape closes the modal
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") {
+                hideZeroTrustModal();
+            }
         });
     })();
     </script>

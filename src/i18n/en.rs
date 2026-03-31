@@ -885,4 +885,46 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_time_check_ok_message: "Time is synchronized (drift within 30 seconds).",
     steam_time_check_warning_message: "Time drift exceeds 30 seconds. Generated codes may be rejected.",
     steam_time_check_failed_message: "Failed to query Steam server time.",
+
+    // Phone status
+    steam_phone_status_check_label: "Check Phone",
+    steam_phone_status_has_phone: "Phone linked",
+    steam_phone_status_no_phone: "No phone linked",
+    steam_phone_status_failed: "Failed to check phone status",
+
+    // Emergency codes
+    steam_emergency_codes_create_label: "Generate Recovery Codes",
+    steam_emergency_codes_destroy_label: "Destroy Recovery Codes",
+    steam_emergency_codes_failed: "Failed to manage emergency codes",
+
+    // Validate token
+    steam_validate_token_label: "Verify Token",
+    steam_validate_token_valid: "Token is valid",
+    steam_validate_token_invalid: "Token is invalid",
+    steam_validate_token_failed: "Failed to validate token",
+
+    // Zero Trust Mode
+    steam_zero_trust_button_label: "Zero Trust",
+    steam_zero_trust_button_tooltip: "Emergency lockdown: reject all confirmations, revoke all devices, rotate recovery codes",
+    steam_zero_trust_modal_title: "Activate Zero Trust Mode",
+    steam_zero_trust_modal_warning: "This will immediately reject all pending confirmations, deny all login approvals, revoke all logged-in devices, and rotate emergency codes for the selected accounts. This cannot be undone.",
+    steam_zero_trust_confirm_label: "Type CONFIRM to activate",
+    steam_zero_trust_activate_button: "Activate Zero Trust",
+    steam_zero_trust_activating_message: "Activating zero trust mode...",
+    steam_zero_trust_activated_message: "Zero trust mode is now active. All selected accounts are locked down.",
+    steam_zero_trust_activation_failed_message: "Failed to activate zero trust mode.",
+    steam_zero_trust_banner_title: "Zero Trust Mode Active",
+    steam_zero_trust_banner_description: "All confirmations, login approvals, and new devices are being automatically rejected.",
+    steam_zero_trust_deactivate_label: "Deactivate Zero Trust",
+    steam_zero_trust_deactivate_password_label: "Web account password",
+    steam_zero_trust_deactivate_totp_label: "TOTP code (if enabled)",
+    steam_zero_trust_deactivated_message: "Zero trust mode has been deactivated.",
+    steam_zero_trust_deactivation_failed_message: "Failed to deactivate zero trust mode.",
+    steam_zero_trust_sweep_running_message: "Running protective sweep...",
+    steam_zero_trust_operation_locked_message: "This operation is blocked while zero trust mode is active for this account.",
+    steam_zero_trust_account_badge: "Zero Trust",
+    steam_zero_trust_select_all_label: "Lock all accounts",
+    steam_zero_trust_guard_changed_warning: "WARNING: Authenticator state or device binding has changed since activation. This may indicate unauthorized access.",
+    steam_zero_trust_invalid_confirm_message: "You must type CONFIRM to proceed.",
+    steam_zero_trust_password_required_message: "Password is required to deactivate zero trust mode.",
 };

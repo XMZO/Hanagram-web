@@ -91,6 +91,7 @@ pub(crate) async fn run() -> Result<()> {
         session_login_throttle,
         passkey_login_key,
         http_client: HttpClient::new(),
+        zero_trust: Default::default(),
     };
 
     maintenance::run_startup_maintenance(&app_state).await?;
@@ -102,12 +103,19 @@ pub(crate) async fn run() -> Result<()> {
 
     maintenance::spawn_background_maintenance(app_state.clone());
 
+    let steam_routes = platforms::steam::routes().route_layer(
+        axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            platforms::steam::zero_trust_guard,
+        ),
+    );
+
     let protected = Router::new()
         .merge(dashboard::routes())
         .merge(auth::protected_routes())
         .merge(notifications::routes())
         .merge(admin::routes())
-        .merge(platforms::steam::routes())
+        .merge(steam_routes)
         .merge(platforms::telegram::routes())
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),

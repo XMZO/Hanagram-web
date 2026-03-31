@@ -121,6 +121,45 @@ where
         Ok(resp)
     }
 
+    pub fn create_emergency_codes(
+        &self,
+        req: CTwoFactor_CreateEmergencyCodes_Request,
+        access_token: &Jwt,
+    ) -> Result<ApiResponse<CTwoFactor_CreateEmergencyCodes_Response>, TransportError> {
+        let req = ApiRequest::new(SERVICE_NAME, "CreateEmergencyCodes", 1, req)
+            .with_access_token(access_token);
+        let resp = self
+            .transport
+            .send_request::<CTwoFactor_CreateEmergencyCodes_Request, CTwoFactor_CreateEmergencyCodes_Response>(req)?;
+        Ok(resp)
+    }
+
+    pub fn destroy_emergency_codes(
+        &self,
+        req: CTwoFactor_DestroyEmergencyCodes_Request,
+        access_token: &Jwt,
+    ) -> Result<ApiResponse<CTwoFactor_DestroyEmergencyCodes_Response>, TransportError> {
+        let req = ApiRequest::new(SERVICE_NAME, "DestroyEmergencyCodes", 1, req)
+            .with_access_token(access_token);
+        let resp = self
+            .transport
+            .send_request::<CTwoFactor_DestroyEmergencyCodes_Request, CTwoFactor_DestroyEmergencyCodes_Response>(req)?;
+        Ok(resp)
+    }
+
+    pub fn validate_token(
+        &self,
+        req: CTwoFactor_ValidateToken_Request,
+        access_token: &Jwt,
+    ) -> Result<ApiResponse<CTwoFactor_ValidateToken_Response>, TransportError> {
+        let req = ApiRequest::new(SERVICE_NAME, "ValidateToken", 1, req)
+            .with_access_token(access_token);
+        let resp = self
+            .transport
+            .send_request::<CTwoFactor_ValidateToken_Request, CTwoFactor_ValidateToken_Response>(req)?;
+        Ok(resp)
+    }
+
     pub fn query_time(&self) -> Result<ApiResponse<CTwoFactor_Time_Response>, TransportError> {
         let req = ApiRequest::new(SERVICE_NAME, "QueryTime", 1, CTwoFactor_Time_Request::new());
         let resp = self
@@ -157,3 +196,6 @@ impl_buildable_req!(
 );
 impl_buildable_req!(CTwoFactor_Status_Request, true);
 impl_buildable_req!(CTwoFactor_Time_Request, false);
+impl_buildable_req!(CTwoFactor_CreateEmergencyCodes_Request, true);
+impl_buildable_req!(CTwoFactor_DestroyEmergencyCodes_Request, true);
+impl_buildable_req!(CTwoFactor_ValidateToken_Request, true);

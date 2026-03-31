@@ -885,4 +885,46 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_time_check_ok_message: "时间已同步（偏差在 30 秒以内）。",
     steam_time_check_warning_message: "时间偏差超过 30 秒，生成的验证码可能被拒绝。",
     steam_time_check_failed_message: "查询 Steam 服务器时间失败。",
+
+    // 手机状态
+    steam_phone_status_check_label: "查询手机",
+    steam_phone_status_has_phone: "已绑定手机",
+    steam_phone_status_no_phone: "未绑定手机",
+    steam_phone_status_failed: "查询手机状态失败",
+
+    // 恢复码
+    steam_emergency_codes_create_label: "生成恢复码",
+    steam_emergency_codes_destroy_label: "销毁恢复码",
+    steam_emergency_codes_failed: "恢复码操作失败",
+
+    // 验证 Token
+    steam_validate_token_label: "验证 Token",
+    steam_validate_token_valid: "Token 有效",
+    steam_validate_token_invalid: "Token 无效",
+    steam_validate_token_failed: "验证 Token 失败",
+
+    // 零信任模式
+    steam_zero_trust_button_label: "零信任模式",
+    steam_zero_trust_button_tooltip: "紧急锁定：拒绝所有确认、撤销所有设备、轮换恢复码",
+    steam_zero_trust_modal_title: "激活零信任模式",
+    steam_zero_trust_modal_warning: "这将立即拒绝所有待处理确认、拒绝所有登录审批、撤销所有已登录设备，并为所选账号轮换恢复码。此操作不可撤销。",
+    steam_zero_trust_confirm_label: "输入 CONFIRM 以激活",
+    steam_zero_trust_activate_button: "激活零信任",
+    steam_zero_trust_activating_message: "正在激活零信任模式...",
+    steam_zero_trust_activated_message: "零信任模式已激活，所选账号已全部锁定。",
+    steam_zero_trust_activation_failed_message: "激活零信任模式失败。",
+    steam_zero_trust_banner_title: "零信任模式已激活",
+    steam_zero_trust_banner_description: "所有确认、登录审批和新设备正在被自动拒绝。",
+    steam_zero_trust_deactivate_label: "解除零信任",
+    steam_zero_trust_deactivate_password_label: "Web 账号密码",
+    steam_zero_trust_deactivate_totp_label: "TOTP 验证码（如已启用）",
+    steam_zero_trust_deactivated_message: "零信任模式已解除。",
+    steam_zero_trust_deactivation_failed_message: "解除零信任模式失败。",
+    steam_zero_trust_sweep_running_message: "正在执行保护扫描...",
+    steam_zero_trust_operation_locked_message: "零信任模式激活期间，此操作被禁止。",
+    steam_zero_trust_account_badge: "零信任",
+    steam_zero_trust_select_all_label: "锁定所有账号",
+    steam_zero_trust_guard_changed_warning: "警告：自激活以来，验证器状态或设备绑定已发生变化。这可能表示未授权访问。",
+    steam_zero_trust_invalid_confirm_message: "请输入 CONFIRM 以继续。",
+    steam_zero_trust_password_required_message: "需要输入密码才能解除零信任模式。",
 };

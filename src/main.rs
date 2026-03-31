@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
+#![recursion_limit = "256"]
+
 mod i18n;
 mod platforms;
 mod state;

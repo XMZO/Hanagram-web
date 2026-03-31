@@ -102,6 +102,12 @@ pub(crate) const STEAM_SETUP_TRANSFER_START_PATH: &str = "/platforms/steam/setup
 pub(crate) const STEAM_SETUP_TRANSFER_FINISH_PATH: &str = "/platforms/steam/setup/transfer/finish";
 pub(crate) const STEAM_IMPORT_WINAUTH_PATH: &str = "/platforms/steam/import/winauth";
 pub(crate) const STEAM_TIME_CHECK_API_PATH: &str = "/api/platforms/steam/time-check";
+pub(crate) const STEAM_ZERO_TRUST_ACTIVATE_PATH: &str =
+    "/api/platforms/steam/zero-trust/activate";
+pub(crate) const STEAM_ZERO_TRUST_DEACTIVATE_PATH: &str =
+    "/api/platforms/steam/zero-trust/deactivate";
+pub(crate) const STEAM_ZERO_TRUST_STATUS_PATH: &str = "/api/platforms/steam/zero-trust/status";
+pub(crate) const STEAM_ZERO_TRUST_SWEEP_PATH: &str = "/api/platforms/steam/zero-trust/sweep";
 pub(crate) const TELEGRAM_SETUP_PATH: &str = "/platforms/telegram/setup";
 pub(crate) const TELEGRAM_IMPORT_STRING_PATH: &str = "/platforms/telegram/import/string";
 pub(crate) const TELEGRAM_IMPORT_UPLOAD_PATH: &str = "/platforms/telegram/import/upload";
@@ -180,6 +186,20 @@ pub(crate) type MetaStoreHandle = Arc<MetaStore>;
 pub(crate) type UnlockCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
 pub(crate) type UserKeyCache = Arc<RwLock<HashMap<String, SharedMasterKey>>>;
 pub(crate) type SessionLoginThrottle = Arc<Mutex<HashMap<String, i64>>>;
+pub(crate) type ZeroTrustState = Arc<RwLock<HashMap<String, ZeroTrustUserState>>>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ZeroTrustAccountEntry {
+    pub(crate) activated_at_unix: i64,
+    pub(crate) activated_by_username: String,
+    pub(crate) initial_guard_state: Option<u32>,
+    pub(crate) initial_device_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(crate) struct ZeroTrustUserState {
+    pub(crate) locked_accounts: HashMap<String, ZeroTrustAccountEntry>,
+}
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -202,6 +222,7 @@ pub(crate) struct AppState {
     pub(crate) session_login_throttle: SessionLoginThrottle,
     pub(crate) passkey_login_key: SharedMasterKey,
     pub(crate) http_client: HttpClient,
+    pub(crate) zero_trust: ZeroTrustState,
 }
 
 pub(crate) struct Config {
@@ -1859,10 +1880,30 @@ mod tests {
                     "rename_action": "/platforms/steam/accounts/demo/rename",
                     "delete_action": "/platforms/steam/accounts/demo/delete",
                     "session_devices_api": "/api/platforms/steam/accounts/demo/devices",
-                    "session_device_revoke_api": "/api/platforms/steam/accounts/demo/devices/revoke"
+                    "session_device_revoke_api": "/api/platforms/steam/accounts/demo/devices/revoke",
+                    "zero_trust_active": false
                 }],
                 "issues": []
             }),
+        );
+        context.insert("zero_trust_active", &false);
+        let zt_empty_ids: Vec<String> = Vec::new();
+        context.insert("zero_trust_account_ids", &zt_empty_ids);
+        context.insert(
+            "zero_trust_activate_api",
+            "/api/platforms/steam/zero-trust/activate",
+        );
+        context.insert(
+            "zero_trust_deactivate_api",
+            "/api/platforms/steam/zero-trust/deactivate",
+        );
+        context.insert(
+            "zero_trust_status_api",
+            "/api/platforms/steam/zero-trust/status",
+        );
+        context.insert(
+            "zero_trust_sweep_api",
+            "/api/platforms/steam/zero-trust/sweep",
         );
         context.insert("now", "2026-03-14 09:00:00 UTC");
         context.insert("steam_setup_begin_action", STEAM_SETUP_BEGIN_PATH);

@@ -895,6 +895,48 @@ pub struct TranslationSet {
     pub steam_time_check_ok_message: &'static str,
     pub steam_time_check_warning_message: &'static str,
     pub steam_time_check_failed_message: &'static str,
+
+    // Phone status
+    pub steam_phone_status_check_label: &'static str,
+    pub steam_phone_status_has_phone: &'static str,
+    pub steam_phone_status_no_phone: &'static str,
+    pub steam_phone_status_failed: &'static str,
+
+    // Emergency codes
+    pub steam_emergency_codes_create_label: &'static str,
+    pub steam_emergency_codes_destroy_label: &'static str,
+    pub steam_emergency_codes_failed: &'static str,
+
+    // Validate token
+    pub steam_validate_token_label: &'static str,
+    pub steam_validate_token_valid: &'static str,
+    pub steam_validate_token_invalid: &'static str,
+    pub steam_validate_token_failed: &'static str,
+
+    // Zero Trust Mode
+    pub steam_zero_trust_button_label: &'static str,
+    pub steam_zero_trust_button_tooltip: &'static str,
+    pub steam_zero_trust_modal_title: &'static str,
+    pub steam_zero_trust_modal_warning: &'static str,
+    pub steam_zero_trust_confirm_label: &'static str,
+    pub steam_zero_trust_activate_button: &'static str,
+    pub steam_zero_trust_activating_message: &'static str,
+    pub steam_zero_trust_activated_message: &'static str,
+    pub steam_zero_trust_activation_failed_message: &'static str,
+    pub steam_zero_trust_banner_title: &'static str,
+    pub steam_zero_trust_banner_description: &'static str,
+    pub steam_zero_trust_deactivate_label: &'static str,
+    pub steam_zero_trust_deactivate_password_label: &'static str,
+    pub steam_zero_trust_deactivate_totp_label: &'static str,
+    pub steam_zero_trust_deactivated_message: &'static str,
+    pub steam_zero_trust_deactivation_failed_message: &'static str,
+    pub steam_zero_trust_sweep_running_message: &'static str,
+    pub steam_zero_trust_operation_locked_message: &'static str,
+    pub steam_zero_trust_account_badge: &'static str,
+    pub steam_zero_trust_select_all_label: &'static str,
+    pub steam_zero_trust_guard_changed_warning: &'static str,
+    pub steam_zero_trust_invalid_confirm_message: &'static str,
+    pub steam_zero_trust_password_required_message: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
