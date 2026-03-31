@@ -5443,12 +5443,9 @@ pub(crate) async fn zero_trust_guard(
         return next.run(request).await;
     };
 
-    // 2. Ensure zero trust state is loaded from disk
-    if let Some(mk) = middleware::resolved_user_master_key(&app_state, &authenticated).await {
-        ensure_zero_trust_loaded(&app_state, &authenticated.user.id, mk.as_ref().as_slice()).await;
-    }
-
-    // 3. Read zero trust state — if no locked accounts, pass through immediately
+    // 2. Read zero trust state from memory (no disk I/O in the hot path).
+    // The state is loaded from disk by render_workspace_page when the user
+    // first visits the workspace, and by the activate handler when locking.
     let locked_ids: HashSet<String> = {
         let zt = app_state.zero_trust.read().await;
         match zt.get(&authenticated.user.id) {
@@ -6130,25 +6127,12 @@ async fn zero_trust_status_handler(
 async fn zero_trust_sweep_handler(
     State(app_state): State<AppState>,
     Extension(authenticated): Extension<AuthenticatedSession>,
-    headers: HeaderMap,
-    Json(form): Json<ZeroTrustSweepForm>,
+    _headers: HeaderMap,
+    Json(_form): Json<ZeroTrustSweepForm>,
 ) -> Response {
-    let language = detect_language(&headers, form.lang.as_deref());
-    let translations = language.translations();
-
-    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
-    else {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "ok": false,
-                "message": translations.session_data_locked_message
-            })),
-        )
-            .into_response();
-    };
-
-    // Get locked accounts for this user
+    // This endpoint is polled by the frontend to check zero trust status.
+    // It does NOT run sweeps — the only sweep runs once in the background
+    // when zero trust is first activated.
     let locked_accounts = {
         let zt = app_state.zero_trust.read().await;
         match zt.get(&authenticated.user.id) {
@@ -6166,31 +6150,6 @@ async fn zero_trust_sweep_handler(
 
     let locked_count = locked_accounts.len();
     let account_ids: Vec<String> = locked_accounts.keys().cloned().collect();
-
-    // Spawn the sweep in the background — do NOT block the HTTP response.
-    // The frontend polls this endpoint to confirm zero trust is still active;
-    // the actual sweep runs asynchronously.
-    let bg_app_state = app_state.clone();
-    let bg_user_id = authenticated.user.id.clone();
-    let bg_master_key: Vec<u8> = master_key.as_ref().to_vec();
-    let bg_http_client = app_state.http_client.clone();
-
-    tokio::spawn(async move {
-        let steam_root = steam_accounts_dir(&bg_app_state.runtime, &bg_user_id);
-
-        for (account_id, entry) in &locked_accounts {
-            let _ = steam_platform::execute_zero_trust_sweep(
-                &steam_root,
-                &bg_master_key,
-                &bg_http_client,
-                account_id,
-                entry.initial_guard_state,
-                entry.initial_device_id.as_deref(),
-                true, // periodic sweeps always skip emergency code rotation
-            )
-            .await;
-        }
-    });
 
     Json(serde_json::json!({
         "ok": true,
