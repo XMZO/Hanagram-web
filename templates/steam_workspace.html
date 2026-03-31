@@ -200,6 +200,20 @@
         let focusedSteamApprovalDropzone = null;
         const STEAM_APPROVALS_REFRESH_INTERVAL_MS = 20000;
         const STEAM_CONFIRMATIONS_REFRESH_INTERVAL_MS = 20000;
+        async function readJsonResponse(resp, fallbackMessage) {
+            const contentType = resp.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error(`${fallbackMessage || "Server returned non-JSON response"} (HTTP ${resp.status || 0})`);
+            }
+            return resp.json();
+        }
+        async function maybeReadJsonResponse(resp, fallbackMessage) {
+            try {
+                return await readJsonResponse(resp, fallbackMessage);
+            } catch (_) {
+                return null;
+            }
+        }
     </script>
     <style>
         :root { color-scheme: light; }
@@ -2744,20 +2758,6 @@
                 el.classList.add("border-peach/35", "bg-[#fbefec]", "text-[#98675f]");
             } else {
                 el.classList.add("border-sage/30", "bg-mint", "text-sageDeep");
-            }
-        }
-        async function readJsonResponse(resp, fallbackMessage) {
-            const contentType = resp.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-                throw new Error(`${fallbackMessage || "Server returned non-JSON response"} (HTTP ${resp.status || 0})`);
-            }
-            return resp.json();
-        }
-        async function maybeReadJsonResponse(resp, fallbackMessage) {
-            try {
-                return await readJsonResponse(resp, fallbackMessage);
-            } catch (_) {
-                return null;
             }
         }
         async function jsonPost(url, body) {
