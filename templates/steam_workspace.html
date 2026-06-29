@@ -349,10 +349,12 @@
         .zt-btn-active-pulse {
             animation: ztButtonPulse 1.6s ease-in-out infinite;
         }
-        #zero-trust-modal-backdrop {
+        #zero-trust-modal-backdrop,
+        #trade-restore-modal-backdrop {
             transition: opacity 180ms ease;
         }
-        #zero-trust-modal-backdrop.zt-modal-hidden {
+        #zero-trust-modal-backdrop.zt-modal-hidden,
+        #trade-restore-modal-backdrop.zt-modal-hidden {
             opacity: 0;
             pointer-events: none;
         }
@@ -1676,6 +1678,13 @@
                     <form method="post" action="{{ logout_action }}">
                         <button type="submit" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ i18n.logout }}</button>
                     </form>
+                    {% if managed_accounts > 0 %}
+                    <button
+                        type="button"
+                        onclick="showTradeRestoreModal()"
+                        class="rounded-full border border-peach/40 bg-[#fbefec] px-3.5 py-1.5 text-sm font-bold text-[#98675f] transition hover:bg-[#f7e4df]"
+                    >{{ i18n.steam_trade_restore_title }}</button>
+                    {% endif %}
                     <button
                         id="zt-activate-header-btn"
                         type="button"
@@ -2196,27 +2205,6 @@
                                 </div>
                                 {% endif %}
 
-                                <details class="steam-disclosure rounded-[1rem] border border-peach/35 bg-[#fdf5f2] px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
-                                    <summary class="cursor-pointer text-sm font-semibold text-[#98675f]">
-                                        <span class="inline-flex items-center gap-2">
-                                            <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
-                                            <span>{{ i18n.steam_trade_restore_title }}</span>
-                                            <span class="rounded-full border border-peach/30 bg-white/70 px-2 py-0.5 text-[0.65rem] font-medium text-[#98675f]/80">{{ i18n.steam_trade_restore_subtitle }}</span>
-                                        </span>
-                                    </summary>
-                                    <p class="mt-2 text-sm leading-6 text-[#98675f]/82">{{ i18n.steam_trade_restore_description }}</p>
-                                    <p class="mt-2 rounded-[0.9rem] border border-peach/25 bg-white/72 px-3 py-2 text-sm leading-6 text-[#98675f]">{{ i18n.steam_trade_restore_warning }}</p>
-                                    <div class="mt-3 grid gap-3">
-                                        <button type="button" data-trade-restore-check="{{ account.id }}" data-trade-restore-check-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore?lang={{ lang }}" {% if account.zero_trust_active %}disabled{% endif %} class="rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_check_button }}</button>
-                                        <label class="block">
-                                            <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_trade_restore_confirm_label }}</span>
-                                            <input id="trade-restore-confirm-{{ account.id }}" type="text" {% if account.zero_trust_active %}disabled{% endif %} placeholder="{{ i18n.steam_trade_restore_confirm_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
-                                        </label>
-                                        <button type="button" data-trade-restore-revert="{{ account.id }}" data-trade-restore-revert-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore/revert" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] border border-peach/40 bg-[#fbefec] px-4 py-2.5 text-sm font-semibold text-[#98675f] transition hover:bg-[#f7e4df] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_revert_button }}</button>
-                                        <div id="trade-restore-status-{{ account.id }}" class="hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
-                                    </div>
-                                </details>
-
                                 <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3">
                                     <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_proxy_title }}</p>
                                     <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_proxy_hint }}</p>
@@ -2674,24 +2662,24 @@
     </main>
 
     <!-- Zero Trust Activation Modal -->
-    <div id="zero-trust-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-        <div class="relative mx-4 w-full max-w-lg overflow-hidden rounded-[1.35rem] border-2 border-red-700/50 bg-white shadow-[0_32px_80px_rgba(220,38,38,0.25)]">
-            <div class="border-b-2 border-red-200 bg-gradient-to-r from-[#dc2626] to-[#b91c1c] px-5 py-4 text-white">
-                <div class="flex items-center gap-3">
-                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-lg" aria-hidden="true">&#9888;</span>
-                    <div>
-                        <h2 class="text-base font-bold uppercase tracking-[0.12em]">{{ i18n.steam_zero_trust_modal_title }}</h2>
+    <div id="zero-trust-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-stretch justify-center overflow-y-auto bg-black/60 p-3 backdrop-blur-sm sm:items-center sm:p-4">
+        <div class="relative flex max-h-[calc(100vh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-[1rem] border-2 border-red-700/50 bg-white shadow-[0_32px_80px_rgba(220,38,38,0.25)] sm:max-h-[calc(100vh-2rem)] sm:rounded-[1.35rem]">
+            <div class="shrink-0 border-b-2 border-red-200 bg-gradient-to-r from-[#dc2626] to-[#b91c1c] px-4 py-3 text-white sm:px-5 sm:py-4">
+                <div class="flex items-start gap-3 sm:items-center">
+                    <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-lg" aria-hidden="true">&#9888;</span>
+                    <div class="min-w-0">
+                        <h2 class="text-sm font-bold uppercase tracking-[0.12em] sm:text-base">{{ i18n.steam_zero_trust_modal_title }}</h2>
                         <p class="mt-0.5 text-[0.78rem] leading-5 text-white/85">{{ i18n.steam_zero_trust_modal_warning }}</p>
                     </div>
                 </div>
             </div>
 
-            <div class="max-h-[60vh] overflow-auto px-5 py-4">
-                <div class="flex items-center justify-between gap-3">
+            <div class="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-5 sm:py-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
                     <p class="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-ink/55">{{ i18n.stat_accounts }}</p>
                     <button type="button" onclick="ztSelectAllAccounts()" class="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-[0.68rem] font-medium text-red-700 transition hover:bg-red-100">{{ i18n.steam_zero_trust_select_all_label }}</button>
                 </div>
-                <div id="zt-account-list" class="mt-3 max-h-56 space-y-2 overflow-auto rounded-[1rem] border border-line/80 bg-paper p-3">
+                <div id="zt-account-list" class="mt-3 max-h-[28vh] space-y-2 overflow-auto rounded-[1rem] border border-line/80 bg-paper p-3 sm:max-h-56">
                     {% for account in snapshot.accounts %}
                     <label class="flex cursor-pointer items-center gap-3 rounded-[0.85rem] border border-line/60 bg-white px-3 py-2 transition hover:border-red-300 hover:bg-red-50/50">
                         <input type="checkbox" name="zt_account" value="{{ account.id }}" checked class="h-4 w-4 rounded border-line text-red-600 focus:ring-red-500">
@@ -2713,9 +2701,62 @@
                 <div id="zt-activate-status" class="mt-3 hidden rounded-[0.85rem] border px-3.5 py-2.5 text-sm"></div>
             </div>
 
-            <div class="flex items-center justify-end gap-3 border-t border-line/80 bg-paper px-5 py-3">
-                <button type="button" onclick="hideZeroTrustModal()" class="rounded-[0.85rem] border border-line bg-white px-4 py-2 text-sm font-medium text-ink/70 transition hover:bg-latte">{{ i18n.cancel | default(value="Cancel") }}</button>
-                <button id="zt-activate-submit" type="button" disabled onclick="activateZeroTrust()" class="rounded-[0.85rem] border-2 border-red-800 bg-[#dc2626] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#b91c1c] disabled:cursor-not-allowed disabled:opacity-40">{{ i18n.steam_zero_trust_activate_button }}</button>
+            <div class="flex shrink-0 flex-col-reverse gap-2 border-t border-line/80 bg-paper px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3 sm:px-5">
+                <button type="button" onclick="hideZeroTrustModal()" class="w-full rounded-[0.85rem] border border-line bg-white px-4 py-2 text-sm font-medium text-ink/70 transition hover:bg-latte sm:w-auto">{{ i18n.cancel | default(value="Cancel") }}</button>
+                <button id="zt-activate-submit" type="button" disabled onclick="activateZeroTrust()" class="w-full rounded-[0.85rem] border-2 border-red-800 bg-[#dc2626] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#b91c1c] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto">{{ i18n.steam_zero_trust_activate_button }}</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trade Protection Restore Modal -->
+    <div id="trade-restore-modal-backdrop" class="zt-modal-hidden fixed inset-0 z-[70] flex items-stretch justify-center overflow-y-auto bg-black/55 p-3 backdrop-blur-sm sm:items-center sm:p-4">
+        <div class="relative flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[1rem] border border-peach/45 bg-white shadow-[0_32px_80px_rgba(152,103,95,0.22)] sm:max-h-[calc(100vh-2rem)] sm:rounded-[1.35rem]">
+            <div class="shrink-0 border-b border-peach/25 bg-[#fbefec] px-4 py-3 sm:px-5 sm:py-4">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h2 class="font-display text-xl font-semibold text-[#98675f]">{{ i18n.steam_trade_restore_title }}</h2>
+                            <span class="rounded-full border border-peach/30 bg-white/70 px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.14em] text-[#98675f]/80">{{ i18n.steam_trade_restore_subtitle }}</span>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-[#98675f]/82">{{ i18n.steam_trade_restore_description }}</p>
+                    </div>
+                    <button type="button" onclick="hideTradeRestoreModal()" class="w-full rounded-full border border-peach/30 bg-white px-3 py-1.5 text-sm font-medium text-[#98675f] transition hover:bg-[#f7e4df] sm:w-auto">{{ i18n.cancel | default(value="Cancel") }}</button>
+                </div>
+                <p class="mt-3 rounded-[0.9rem] border border-peach/25 bg-white/72 px-3 py-2 text-sm leading-6 text-[#98675f]">{{ i18n.steam_trade_restore_warning }}</p>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-5 sm:py-4">
+                <div class="grid gap-3">
+                    {% for account in snapshot.accounts %}
+                    {% if account.can_manage %}
+                    <article class="rounded-[1rem] border border-line/80 bg-paper/88 px-3.5 py-3 {% if account.zero_trust_active %}opacity-55{% endif %}">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="truncate text-sm font-semibold text-ink">{{ account.account_name }}</p>
+                                <p class="mt-1 truncate text-[0.72rem] text-ink/52">{{ account.steam_id | default(value="-") }}</p>
+                            </div>
+                            {% if account.zero_trust_active %}
+                            <span class="rounded-full border border-red-400 bg-red-100 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-red-700">{{ i18n.steam_zero_trust_account_badge }}</span>
+                            {% endif %}
+                        </div>
+
+                        {% if account.zero_trust_active %}
+                        <div class="mt-3 rounded-[0.9rem] border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ i18n.steam_zero_trust_operation_locked_message }}</div>
+                        {% endif %}
+
+                        <div class="mt-3 grid gap-3">
+                            <button type="button" data-trade-restore-check="{{ account.id }}" data-trade-restore-check-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore?lang={{ lang }}" {% if account.zero_trust_active %}disabled{% endif %} class="rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_check_button }}</button>
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_trade_restore_confirm_label }}</span>
+                                <input id="trade-restore-confirm-{{ account.id }}" type="text" {% if account.zero_trust_active %}disabled{% endif %} placeholder="{{ i18n.steam_trade_restore_confirm_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                            </label>
+                            <button type="button" data-trade-restore-revert="{{ account.id }}" data-trade-restore-revert-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore/revert" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] border border-peach/40 bg-[#fbefec] px-4 py-2.5 text-sm font-semibold text-[#98675f] transition hover:bg-[#f7e4df] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_revert_button }}</button>
+                            <div id="trade-restore-status-{{ account.id }}" class="hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
+                        </div>
+                    </article>
+                    {% endif %}
+                    {% endfor %}
+                </div>
             </div>
         </div>
     </div>
@@ -3177,6 +3218,21 @@
         });
 
         // ----------- Trade Protection restore -----------
+        function showTradeRestoreModal() {
+            const backdrop = document.getElementById("trade-restore-modal-backdrop");
+            if (backdrop) {
+                backdrop.classList.remove("zt-modal-hidden");
+            }
+        }
+        function hideTradeRestoreModal() {
+            const backdrop = document.getElementById("trade-restore-modal-backdrop");
+            if (backdrop) {
+                backdrop.classList.add("zt-modal-hidden");
+            }
+        }
+        window.showTradeRestoreModal = showTradeRestoreModal;
+        window.hideTradeRestoreModal = hideTradeRestoreModal;
+
         document.addEventListener("click", async (e) => {
             const checkBtn = e.target.closest("[data-trade-restore-check]");
             const revertBtn = e.target.closest("[data-trade-restore-revert]");
