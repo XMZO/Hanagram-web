@@ -3318,6 +3318,49 @@ pub(crate) fn generate_totp_uri(account: &SteamGuardAccount) -> Result<String> {
     ))
 }
 
+pub(crate) fn export_mafile_json_bytes(account: &SteamGuardAccount) -> Result<Vec<u8>> {
+    let uri = match account
+        .uri
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(value) => value.to_owned(),
+        None => generate_totp_uri(account)?,
+    };
+    let session = account.session.as_ref();
+    let session_value = if session.is_some() || account.steam_id.is_some() {
+        serde_json::json!({
+            "SteamID": account.steam_id,
+            "AccessToken": session.and_then(|value| value.access_token.clone()),
+            "RefreshToken": session.and_then(|value| value.refresh_token.clone()),
+            "SessionID": session.and_then(|value| value.session_id.clone()),
+            "SteamLogin": session.and_then(|value| value.steam_login.clone()),
+            "SteamLoginSecure": session.and_then(|value| value.steam_login_secure.clone()),
+            "WebCookie": session.and_then(|value| value.web_cookie.clone()),
+            "OAuthToken": session.and_then(|value| value.oauth_token.clone()),
+        })
+    } else {
+        serde_json::Value::Null
+    };
+    let payload = serde_json::json!({
+        "shared_secret": account.shared_secret.clone(),
+        "serial_number": account.serial_number.clone().unwrap_or_default(),
+        "revocation_code": account.revocation_code.clone().unwrap_or_default(),
+        "uri": uri,
+        "server_time": 0,
+        "account_name": account.account_name.clone(),
+        "token_gid": account.token_gid.clone().unwrap_or_default(),
+        "identity_secret": account.identity_secret.clone().unwrap_or_default(),
+        "secret_1": account.secret_1.clone().unwrap_or_default(),
+        "status": 0,
+        "device_id": account.device_id.clone().unwrap_or_default(),
+        "fully_enrolled": true,
+        "Session": session_value,
+    });
+
+    serde_json::to_vec_pretty(&payload).context("failed encoding maFile export")
+}
+
 // ---------------------------------------------------------------------------
 // Third-party guard import (WinAuth / otpauth URI)
 // ---------------------------------------------------------------------------

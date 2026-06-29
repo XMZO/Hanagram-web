@@ -846,6 +846,10 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_export_qr_copy_uri_button: "复制 URI",
     steam_export_qr_copied_message: "已复制到剪贴板。",
     steam_export_qr_failed_message: "生成 QR 码失败。",
+    steam_export_mafile_title: "导出 maFile",
+    steam_export_mafile_warning: "导出的 maFile 包含完整认证器密钥和可用登录令牌，请只保存在可信位置。",
+    steam_export_mafile_button: "下载 maFile",
+    steam_export_mafile_failed_message: "导出 maFile 失败。",
 
     // WinAuth 导入
     steam_import_winauth_title: "从 WinAuth 导入",

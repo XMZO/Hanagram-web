@@ -713,8 +713,8 @@
                                     ? `<span class="inline-flex rounded-full border border-peach/35 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-[#98675f]">${escapeHtml(I18N.confirmationsAccountError)}</span>`
                                     : ""}
                                 ${(!account.error && account.confirmation_count > 0)
-                                    ? `<button type="button" data-bulk-accept="${escapeHtml(account.id)}" class="inline-flex rounded-full border border-steam/25 bg-steamMist px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-steam transition hover:bg-steam hover:text-white">${escapeHtml(I18N.bulkAcceptBtn)}</button>
-                                       <button type="button" data-bulk-deny="${escapeHtml(account.id)}" class="inline-flex rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-[#98675f] transition hover:bg-peach hover:text-white">${escapeHtml(I18N.bulkDenyBtn)}</button>`
+                                    ? `<button type="button" data-bulk-accept="${escapeHtml(account.account_id)}" class="inline-flex rounded-full border border-steam/25 bg-steamMist px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-steam transition hover:bg-steam hover:text-white">${escapeHtml(I18N.bulkAcceptBtn)}</button>
+                                       <button type="button" data-bulk-deny="${escapeHtml(account.account_id)}" class="inline-flex rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-[#98675f] transition hover:bg-peach hover:text-white">${escapeHtml(I18N.bulkDenyBtn)}</button>`
                                     : ""}
                             </div>
                         </div>
@@ -2173,6 +2173,14 @@
                                     <button type="button" data-export-qr="{{ account.id }}" class="mt-3 rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_export_qr_generate_button }}</button>
                                     <div id="qr-result-{{ account.id }}" class="mt-3 hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3"></div>
                                 </div>
+
+                                {% if account.can_manage %}
+                                <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3">
+                                    <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_export_mafile_title }}</p>
+                                    <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_export_mafile_warning }}</p>
+                                    <a href="/api/platforms/steam/accounts/{{ account.id }}/export/mafile?lang={{ lang }}" download class="mt-3 inline-flex rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist">{{ i18n.steam_export_mafile_button }}</a>
+                                </div>
+                                {% endif %}
 
                                 {% if account.has_session_tokens %}
                                 <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3">

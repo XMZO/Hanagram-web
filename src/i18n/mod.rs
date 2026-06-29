@@ -856,6 +856,10 @@ pub struct TranslationSet {
     pub steam_export_qr_copy_uri_button: &'static str,
     pub steam_export_qr_copied_message: &'static str,
     pub steam_export_qr_failed_message: &'static str,
+    pub steam_export_mafile_title: &'static str,
+    pub steam_export_mafile_warning: &'static str,
+    pub steam_export_mafile_button: &'static str,
+    pub steam_export_mafile_failed_message: &'static str,
 
     // WinAuth import
     pub steam_import_winauth_title: &'static str,

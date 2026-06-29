@@ -846,6 +846,10 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_export_qr_copy_uri_button: "Copy URI",
     steam_export_qr_copied_message: "Copied to clipboard.",
     steam_export_qr_failed_message: "Failed to generate the QR code.",
+    steam_export_mafile_title: "Export maFile",
+    steam_export_mafile_warning: "The exported maFile contains full authenticator secrets and usable login tokens. Store it only somewhere you trust.",
+    steam_export_mafile_button: "Download maFile",
+    steam_export_mafile_failed_message: "Failed to export the maFile.",
 
     // WinAuth import
     steam_import_winauth_title: "Import from WinAuth",

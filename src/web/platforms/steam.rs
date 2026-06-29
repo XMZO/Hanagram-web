@@ -1084,6 +1084,10 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/platforms/steam/accounts/{account_id}/export/qr",
             get(account_export_qr_handler),
         )
+        .route(
+            "/api/platforms/steam/accounts/{account_id}/export/mafile",
+            get(account_export_mafile_handler),
+        )
         // WinAuth import
         .route(STEAM_IMPORT_WINAUTH_PATH, post(import_winauth_handler))
         // Bulk confirmations
@@ -4795,6 +4799,143 @@ async fn account_export_qr_handler(
     }
 }
 
+fn steam_mafile_download_filename(account: &steam_platform::SteamGuardAccount) -> String {
+    let raw = account
+        .steam_id
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| account.account_name.clone());
+    let mut filename = String::new();
+    let mut pending_dash = false;
+
+    for ch in raw.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            Some(ch)
+        } else if ch.is_whitespace() {
+            Some('-')
+        } else {
+            None
+        };
+
+        match mapped {
+            Some('-') if filename.is_empty() || pending_dash => {}
+            Some('-') => pending_dash = true,
+            Some(ch) => {
+                if pending_dash {
+                    filename.push('-');
+                    pending_dash = false;
+                }
+                filename.push(ch);
+            }
+            None => {}
+        }
+    }
+
+    let filename = filename.trim_matches(['.', '_', '-']);
+    if filename.is_empty() {
+        String::from("steam-account.maFile")
+    } else {
+        format!("{filename}.maFile")
+    }
+}
+
+async fn account_export_mafile_handler(
+    State(app_state): State<AppState>,
+    Extension(authenticated): Extension<AuthenticatedSession>,
+    AxumPath(account_id): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<LangQuery>,
+) -> Response {
+    let language = detect_language(&headers, query.lang.as_deref());
+    let translations = language.translations();
+
+    if !steam_platform::is_valid_managed_account_id(&account_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.steam_account_missing_message
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(master_key) = middleware::resolved_user_master_key(&app_state, &authenticated).await
+    else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "ok": false,
+                "message": translations.session_data_locked_message
+            })),
+        )
+            .into_response();
+    };
+
+    let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
+    let account = match steam_platform::load_managed_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        &account_id,
+    )
+    .await
+    {
+        Ok(Some(account)) => account,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_account_missing_message
+                })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            warn!("failed loading Steam account {}: {}", account_id, error);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_export_mafile_failed_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let bytes = match steam_platform::export_mafile_json_bytes(&account) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            warn!(
+                "failed exporting maFile for account {}: {}",
+                account_id, error
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_export_mafile_failed_message
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let filename = steam_mafile_download_filename(&account);
+    let content_disposition = format!("attachment; filename=\"{filename}\"");
+    let mut response = bytes.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&content_disposition) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
+}
+
 // ---------------------------------------------------------------------------
 // Third-party guard import handler
 // ---------------------------------------------------------------------------
@@ -4946,12 +5087,15 @@ async fn bulk_confirmation_action(
     };
 
     let steam_root = steam_accounts_dir(&app_state.runtime, &authenticated.user.id);
-    let (accounts, _) =
-        steam_platform::discover_accounts(&steam_root, Some(master_key.as_ref().as_slice())).await;
-
-    let account = match accounts.into_iter().find(|a| a.id == account_id) {
-        Some(a) => a,
-        None => {
+    let account = match steam_platform::load_managed_account(
+        &steam_root,
+        master_key.as_ref().as_slice(),
+        account_id,
+    )
+    .await
+    {
+        Ok(Some(account)) => account,
+        Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({
@@ -4961,7 +5105,27 @@ async fn bulk_confirmation_action(
             )
                 .into_response();
         }
+        Err(error) => {
+            warn!("failed loading Steam account {}: {}", account_id, error);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_bulk_action_failed_message
+                })),
+            )
+                .into_response();
+        }
     };
+
+    let account = refresh_account_confirmation_session_if_needed(
+        app_state,
+        authenticated,
+        master_key.as_ref().as_slice(),
+        account,
+        false,
+    )
+    .await;
 
     let result = if accept {
         steam_platform::batch_approve_trades(&app_state.http_client, &account).await
