@@ -140,6 +140,12 @@
             bulkAcceptConfirm: {{ i18n.steam_bulk_accept_confirm_prompt | json_encode | safe }},
             bulkDenyConfirm: {{ i18n.steam_bulk_deny_confirm_prompt | json_encode | safe }},
             bulkRunning: {{ i18n.steam_bulk_action_running_message | json_encode | safe }},
+            tradeRestoreCheckRunning: {{ i18n.steam_trade_restore_check_running_message | json_encode | safe }},
+            tradeRestoreRunning: {{ i18n.steam_trade_restore_running_message | json_encode | safe }},
+            tradeRestoreConfirmPrompt: {{ i18n.steam_trade_restore_confirm_prompt | json_encode | safe }},
+            tradeRestoreInvalidConfirm: {{ i18n.steam_trade_restore_invalid_confirm_message | json_encode | safe }},
+            tradeRestoreFailed: {{ i18n.steam_trade_restore_failed_message | json_encode | safe }},
+            tradeRestoreConfirmPhrase: {{ i18n.steam_trade_restore_confirm_phrase | json_encode | safe }},
             timeCheckOk: {{ i18n.steam_time_check_ok_message | json_encode | safe }},
             timeCheckWarning: {{ i18n.steam_time_check_warning_message | json_encode | safe }},
             timeCheckFailed: {{ i18n.steam_time_check_failed_message | json_encode | safe }},
@@ -2190,6 +2196,27 @@
                                 </div>
                                 {% endif %}
 
+                                <details class="steam-disclosure rounded-[1rem] border border-peach/35 bg-[#fdf5f2] px-3.5 py-3 {% if account.zero_trust_active %}pointer-events-none opacity-40{% endif %}">
+                                    <summary class="cursor-pointer text-sm font-semibold text-[#98675f]">
+                                        <span class="inline-flex items-center gap-2">
+                                            <span data-role="steam-disclosure-icon" class="inline-flex transition-transform">▶</span>
+                                            <span>{{ i18n.steam_trade_restore_title }}</span>
+                                            <span class="rounded-full border border-peach/30 bg-white/70 px-2 py-0.5 text-[0.65rem] font-medium text-[#98675f]/80">{{ i18n.steam_trade_restore_subtitle }}</span>
+                                        </span>
+                                    </summary>
+                                    <p class="mt-2 text-sm leading-6 text-[#98675f]/82">{{ i18n.steam_trade_restore_description }}</p>
+                                    <p class="mt-2 rounded-[0.9rem] border border-peach/25 bg-white/72 px-3 py-2 text-sm leading-6 text-[#98675f]">{{ i18n.steam_trade_restore_warning }}</p>
+                                    <div class="mt-3 grid gap-3">
+                                        <button type="button" data-trade-restore-check="{{ account.id }}" data-trade-restore-check-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore?lang={{ lang }}" {% if account.zero_trust_active %}disabled{% endif %} class="rounded-[1rem] border border-steam/20 bg-white px-3.5 py-2 text-sm font-medium text-steam transition hover:bg-steamMist disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_check_button }}</button>
+                                        <label class="block">
+                                            <span class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.steam_trade_restore_confirm_label }}</span>
+                                            <input id="trade-restore-confirm-{{ account.id }}" type="text" {% if account.zero_trust_active %}disabled{% endif %} placeholder="{{ i18n.steam_trade_restore_confirm_placeholder }}" class="mt-2 w-full rounded-[1rem] border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition focus:border-steam focus:ring-2 focus:ring-steam/20">
+                                        </label>
+                                        <button type="button" data-trade-restore-revert="{{ account.id }}" data-trade-restore-revert-api="/api/platforms/steam/accounts/{{ account.id }}/trade-restore/revert" {% if account.zero_trust_active %}disabled{% endif %} class="w-full rounded-[1rem] border border-peach/40 bg-[#fbefec] px-4 py-2.5 text-sm font-semibold text-[#98675f] transition hover:bg-[#f7e4df] disabled:cursor-not-allowed disabled:opacity-50">{{ i18n.steam_trade_restore_revert_button }}</button>
+                                        <div id="trade-restore-status-{{ account.id }}" class="hidden rounded-[1rem] border border-line/80 bg-white px-4 py-3 text-sm"></div>
+                                    </div>
+                                </details>
+
                                 <div class="rounded-[1rem] border border-line/80 bg-white/92 px-3.5 py-3">
                                     <p class="text-[0.65rem] uppercase tracking-[0.18em] text-ink/45">{{ i18n.steam_proxy_title }}</p>
                                     <p class="mt-2 text-sm leading-6 text-ink/66">{{ i18n.steam_proxy_hint }}</p>
@@ -3146,6 +3173,56 @@
                 alert(err.message);
             } finally {
                 removeBtn.disabled = false;
+            }
+        });
+
+        // ----------- Trade Protection restore -----------
+        document.addEventListener("click", async (e) => {
+            const checkBtn = e.target.closest("[data-trade-restore-check]");
+            const revertBtn = e.target.closest("[data-trade-restore-revert]");
+            if (!checkBtn && !revertBtn) return;
+
+            const accountId = checkBtn
+                ? checkBtn.dataset.tradeRestoreCheck
+                : revertBtn.dataset.tradeRestoreRevert;
+            const statusEl = document.getElementById("trade-restore-status-" + accountId);
+            if (!statusEl) return;
+
+            if (checkBtn) {
+                checkBtn.disabled = true;
+                showStatus(statusEl, I18N.tradeRestoreCheckRunning, false);
+                try {
+                    const resp = await fetch(checkBtn.dataset.tradeRestoreCheckApi || ("/api/platforms/steam/accounts/" + accountId + "/trade-restore?lang=" + LANG));
+                    const data = await readJsonResponse(resp, I18N.tradeRestoreFailed);
+                    showStatus(statusEl, data.message || I18N.tradeRestoreFailed, !(data.ok && data.can_revert));
+                } catch (err) {
+                    showStatus(statusEl, err.message || I18N.tradeRestoreFailed, true);
+                } finally {
+                    checkBtn.disabled = false;
+                }
+                return;
+            }
+
+            const confirmInput = document.getElementById("trade-restore-confirm-" + accountId);
+            const confirmPhrase = confirmInput?.value?.trim() || "";
+            if (confirmPhrase !== I18N.tradeRestoreConfirmPhrase) {
+                showStatus(statusEl, I18N.tradeRestoreInvalidConfirm, true);
+                return;
+            }
+            if (!confirm(I18N.tradeRestoreConfirmPrompt)) return;
+
+            revertBtn.disabled = true;
+            showStatus(statusEl, I18N.tradeRestoreRunning, false);
+            try {
+                const data = await jsonPost(
+                    revertBtn.dataset.tradeRestoreRevertApi || ("/api/platforms/steam/accounts/" + accountId + "/trade-restore/revert"),
+                    { confirm_phrase: confirmPhrase, lang: LANG }
+                );
+                showStatus(statusEl, data.message || I18N.tradeRestoreFailed, !data.ok);
+            } catch (err) {
+                showStatus(statusEl, err.message || I18N.tradeRestoreFailed, true);
+            } finally {
+                revertBtn.disabled = false;
             }
         });
 

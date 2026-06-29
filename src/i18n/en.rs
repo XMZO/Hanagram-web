@@ -871,6 +871,26 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_bulk_action_failed_message: "Bulk action failed. Some confirmations may have been processed.",
     steam_bulk_action_running_message: "Processing…",
 
+    // Trade protection restore
+    steam_trade_restore_title: "Withdrawal Operation",
+    steam_trade_restore_subtitle: "Steam Trade Protection",
+    steam_trade_restore_description: "Check the Steam Support Trade Protection page and submit a restore request after explicit confirmation.",
+    steam_trade_restore_warning: "This will revert all eligible Trade Protected item trades from the last 7 days. You cannot choose a single trade. Submitting it also applies a 30-day Steam trading and Community Market restriction.",
+    steam_trade_restore_check_button: "Check Reversible Trades",
+    steam_trade_restore_check_running_message: "Checking Steam Trade Protection status...",
+    steam_trade_restore_ready_message: "Steam exposes the trade revert action for this account. Review the warning before submitting.",
+    steam_trade_restore_unavailable_message: "No eligible trade revert action was detected on the Steam Support page.",
+    steam_trade_restore_session_missing_message: "The Steam Help login session is not usable. Refresh this account's Steam sign-in session first.",
+    steam_trade_restore_revert_button: "Revert Eligible Trades",
+    steam_trade_restore_confirm_label: "Type Withdrawal Operation to confirm",
+    steam_trade_restore_confirm_phrase: "Withdrawal Operation",
+    steam_trade_restore_confirm_placeholder: "Withdrawal Operation",
+    steam_trade_restore_confirm_prompt: "Submit the trade revert request now? This affects all eligible Trade Protected item trades.",
+    steam_trade_restore_invalid_confirm_message: "The confirmation phrase is incorrect.",
+    steam_trade_restore_running_message: "Submitting trade revert request...",
+    steam_trade_restore_success_message: "Trade revert request submitted.",
+    steam_trade_restore_failed_message: "Failed to revert eligible trades.",
+
     // Proxy
     steam_proxy_title: "Network Proxy",
     steam_proxy_url_label: "Proxy URL",

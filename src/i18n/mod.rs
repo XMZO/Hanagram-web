@@ -881,6 +881,26 @@ pub struct TranslationSet {
     pub steam_bulk_action_failed_message: &'static str,
     pub steam_bulk_action_running_message: &'static str,
 
+    // Trade protection restore
+    pub steam_trade_restore_title: &'static str,
+    pub steam_trade_restore_subtitle: &'static str,
+    pub steam_trade_restore_description: &'static str,
+    pub steam_trade_restore_warning: &'static str,
+    pub steam_trade_restore_check_button: &'static str,
+    pub steam_trade_restore_check_running_message: &'static str,
+    pub steam_trade_restore_ready_message: &'static str,
+    pub steam_trade_restore_unavailable_message: &'static str,
+    pub steam_trade_restore_session_missing_message: &'static str,
+    pub steam_trade_restore_revert_button: &'static str,
+    pub steam_trade_restore_confirm_label: &'static str,
+    pub steam_trade_restore_confirm_phrase: &'static str,
+    pub steam_trade_restore_confirm_placeholder: &'static str,
+    pub steam_trade_restore_confirm_prompt: &'static str,
+    pub steam_trade_restore_invalid_confirm_message: &'static str,
+    pub steam_trade_restore_running_message: &'static str,
+    pub steam_trade_restore_success_message: &'static str,
+    pub steam_trade_restore_failed_message: &'static str,
+
     // Proxy
     pub steam_proxy_title: &'static str,
     pub steam_proxy_url_label: &'static str,

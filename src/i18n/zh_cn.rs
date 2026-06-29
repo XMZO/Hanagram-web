@@ -871,6 +871,26 @@ pub const TRANSLATIONS: TranslationSet = TranslationSet {
     steam_bulk_action_failed_message: "批量操作失败，部分确认可能已处理。",
     steam_bulk_action_running_message: "正在处理…",
 
+    // 交易保护撤销
+    steam_trade_restore_title: "撤回大行动",
+    steam_trade_restore_subtitle: "Steam 交易保护",
+    steam_trade_restore_description: "检查 Steam 客服的交易保护页面，并在确认后撤销符合条件的交易。",
+    steam_trade_restore_warning: "此操作会撤销最近 7 天内所有符合条件的受交易保护物品交易，不能选择单笔交易。提交后账号会受到 30 天交易与 Steam 社区市场限制。",
+    steam_trade_restore_check_button: "检查可撤销交易",
+    steam_trade_restore_check_running_message: "正在检查 Steam 交易保护状态…",
+    steam_trade_restore_ready_message: "检测到 Steam 页面提供撤销入口。请确认后再提交。",
+    steam_trade_restore_unavailable_message: "当前没有检测到可撤销交易，或 Steam 未在此页面提供撤销入口。",
+    steam_trade_restore_session_missing_message: "Steam Help 登录会话不可用，请先刷新此账号的 Steam 登录会话。",
+    steam_trade_restore_revert_button: "撤销符合条件的交易",
+    steam_trade_restore_confirm_label: "输入撤回大行动以确认",
+    steam_trade_restore_confirm_phrase: "撤回大行动",
+    steam_trade_restore_confirm_placeholder: "撤回大行动",
+    steam_trade_restore_confirm_prompt: "确定要提交撤销交易请求？这会影响所有符合条件的受交易保护物品交易。",
+    steam_trade_restore_invalid_confirm_message: "确认短语不正确。",
+    steam_trade_restore_running_message: "正在提交撤销交易请求…",
+    steam_trade_restore_success_message: "撤销请求已提交。",
+    steam_trade_restore_failed_message: "撤销交易失败。",
+
     // 代理
     steam_proxy_title: "网络代理",
     steam_proxy_url_label: "代理地址",
