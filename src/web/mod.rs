@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Hanagram-web contributors
 
 pub(crate) mod admin;
+pub(crate) mod assets;
 pub(crate) mod auth;
 pub(crate) mod bootstrap;
 pub(crate) mod dashboard;

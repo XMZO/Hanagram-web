@@ -1,445 +1,137 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Hanagram-web contributors -->
-<!DOCTYPE html>
-<html lang="{{ i18n.html_lang }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ i18n.login_page_title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        display: ["Noto Serif SC", "serif"],
-                        sans: ["Noto Sans SC", "sans-serif"],
-                        mono: ["Space Mono", "monospace"]
-                    },
-                    colors: {
-                        oat: "#f6f1e8",
-                        paper: "#fffaf2",
-                        latte: "#f0e5d6",
-                        line: "#ded3c6",
-                        ink: "#4b4038",
-                        sage: "#8ca38c",
-                        sageDeep: "#6f866f",
-                        peach: "#d9a69a",
-                        butter: "#e8d3ad"
-                    }
-                }
-            }
-        };
+{% extends "base.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Copyright (C) 2026 Hanagram-web contributors #}
 
-        function base64UrlToBuffer(value) {
-            const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
-            const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
-            const binary = window.atob(padded);
-            const bytes = new Uint8Array(binary.length);
-            for (let index = 0; index < binary.length; index += 1) {
-                bytes[index] = binary.charCodeAt(index);
-            }
-            return bytes.buffer;
-        }
+{% block title %}{{ i18n.login_page_title }}{% endblock title %}
+{% block page_id %}login{% endblock page_id %}
+{% block canonical %}/login{% endblock canonical %}
 
-        function bufferToBase64Url(buffer) {
-            const bytes = new Uint8Array(buffer);
-            let binary = "";
-            bytes.forEach((value) => {
-                binary += String.fromCharCode(value);
-            });
-            return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-        }
-
-        function mapPublicKeyRequestOptions(options) {
-            const publicKey = { ...options };
-            publicKey.challenge = base64UrlToBuffer(publicKey.challenge);
-            if (Array.isArray(publicKey.allowCredentials)) {
-                publicKey.allowCredentials = publicKey.allowCredentials.map((credential) => ({
-                    ...credential,
-                    id: base64UrlToBuffer(credential.id)
-                }));
-            }
-            return publicKey;
-        }
-
-        function serializeAuthenticationCredential(credential) {
-            return {
-                id: credential.id,
-                rawId: bufferToBase64Url(credential.rawId),
-                type: credential.type,
-                response: {
-                    authenticatorData: bufferToBase64Url(credential.response.authenticatorData),
-                    clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
-                    signature: bufferToBase64Url(credential.response.signature),
-                    userHandle: credential.response.userHandle ? bufferToBase64Url(credential.response.userHandle) : null
-                },
-                clientExtensionResults: credential.getClientExtensionResults()
-            };
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
-            const AUTH_PANE_STORAGE_KEY = "hanagram-login-pane";
-            const feedback = document.getElementById("login-feedback");
-            const authTabs = Array.from(document.querySelectorAll("[data-auth-tab]"));
-            const authPanes = Array.from(document.querySelectorAll("[data-auth-pane]"));
-            const totpBlock = document.querySelector("[data-totp-block]");
-            const recoveryBlock = document.querySelector("[data-recovery-block]");
-            const recoveryToggle = document.querySelector("[data-recovery-toggle]");
-            const recoveryBack = document.querySelector("[data-recovery-back]");
-            const mfaInput = document.querySelector('input[name="mfa_code"]');
-            const recoveryInput = document.querySelector('input[name="recovery_code"]');
-            const passkeyButton = document.querySelector("[data-passkey-login]");
-            const langInput = document.querySelector('input[name="lang"]');
-
-            function setFeedback(message, isError) {
-                if (!feedback) { return; }
-                if (!message) {
-                    feedback.classList.add("hidden");
-                    feedback.textContent = "";
-                    return;
-                }
-                feedback.classList.remove("hidden");
-                feedback.textContent = message;
-                feedback.classList.toggle("border-peach/40", Boolean(isError));
-                feedback.classList.toggle("bg-[#fbefec]", Boolean(isError));
-                feedback.classList.toggle("text-[#98675f]", Boolean(isError));
-                feedback.classList.toggle("border-sage/35", !isError);
-                feedback.classList.toggle("bg-[#eef4ee]", !isError);
-                feedback.classList.toggle("text-sageDeep", !isError);
-            }
-
-            function setAuthPane(paneId) {
-                authTabs.forEach((button) => {
-                    const active = button.dataset.authTab === paneId;
-                    button.classList.toggle("bg-white", active);
-                    button.classList.toggle("text-ink", active);
-                    button.classList.toggle("shadow-sm", active);
-                    button.classList.toggle("text-ink/58", !active);
-                });
-                authPanes.forEach((pane) => {
-                    pane.classList.toggle("hidden", pane.dataset.authPane !== paneId);
-                });
-                try {
-                    window.localStorage.setItem(AUTH_PANE_STORAGE_KEY, paneId);
-                } catch (_error) {}
-            }
-
-            function showRecoveryMode(showRecovery) {
-                if (!totpBlock || !recoveryBlock) { return; }
-                totpBlock.classList.toggle("hidden", showRecovery);
-                recoveryBlock.classList.toggle("hidden", !showRecovery);
-                if (mfaInput) { mfaInput.disabled = showRecovery; }
-                if (recoveryInput) { recoveryInput.disabled = !showRecovery; }
-                if (showRecovery) {
-                    if (mfaInput) { mfaInput.value = ""; }
-                    if (recoveryInput) { recoveryInput.focus(); }
-                } else if (mfaInput) {
-                    if (recoveryInput) { recoveryInput.value = ""; }
-                    mfaInput.focus();
-                }
-            }
-
-            authTabs.forEach((button) => {
-                button.addEventListener("click", () => setAuthPane(button.dataset.authTab || "password"));
-            });
-
-            const initialPane = (() => {
-                try {
-                    return window.localStorage.getItem(AUTH_PANE_STORAGE_KEY) || "password";
-                } catch (_error) {
-                    return "password";
-                }
-            })();
-            setAuthPane(authTabs.some((button) => button.dataset.authTab === initialPane) ? initialPane : "password");
-            showRecoveryMode(false);
-            recoveryToggle?.addEventListener("click", () => showRecoveryMode(true));
-            recoveryBack?.addEventListener("click", () => showRecoveryMode(false));
-
-            passkeyButton?.addEventListener("click", async () => {
-                if (!window.PublicKeyCredential || !navigator.credentials?.get) {
-                    setFeedback(passkeyButton.dataset.unsupported, true);
-                    return;
-                }
-
-                passkeyButton.disabled = true;
-                setFeedback(passkeyButton.dataset.starting, false);
-
-                try {
-                    const optionsResponse = await fetch("/login/passkey/options", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        body: JSON.stringify({
-                            lang: langInput?.value || null
-                        })
-                    });
-                    const optionsPayload = await optionsResponse.json().catch(() => ({}));
-                    if (!optionsResponse.ok) {
-                        throw new Error(optionsPayload.error || passkeyButton.dataset.failed);
-                    }
-
-                    setFeedback(passkeyButton.dataset.awaiting, false);
-                    const credential = await navigator.credentials.get({
-                        publicKey: mapPublicKeyRequestOptions(optionsPayload.options.publicKey)
-                    });
-                    if (!credential) {
-                        throw new Error(passkeyButton.dataset.failed);
-                    }
-
-                    const finishResponse = await fetch("/login/passkey/finish", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        body: JSON.stringify({
-                            request_id: optionsPayload.request_id,
-                            credential: serializeAuthenticationCredential(credential),
-                            lang: langInput?.value || null
-                        })
-                    });
-                    const finishPayload = await finishResponse.json().catch(() => ({}));
-                    if (!finishResponse.ok) {
-                        throw new Error(finishPayload.error || passkeyButton.dataset.failed);
-                    }
-
-                    window.location.href = finishPayload.redirect_to || "/";
-                } catch (error) {
-                    setFeedback(error instanceof Error ? error.message : passkeyButton.dataset.failed, true);
-                } finally {
-                    passkeyButton.disabled = false;
-                }
-            });
-        });
-    </script>
-    <style>
-        body {
-            background:
-                radial-gradient(circle at 16% 20%, rgba(140, 163, 140, 0.18), transparent 24%),
-                radial-gradient(circle at 84% 14%, rgba(217, 166, 154, 0.16), transparent 20%),
-                radial-gradient(circle at 76% 82%, rgba(232, 211, 173, 0.2), transparent 24%),
-                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 44%, #f3ede3 100%);
-        }
-
-        .paper-shadow {
-            box-shadow: 0 22px 60px rgba(122, 106, 90, 0.09);
-        }
-
-        .soft-grid {
-            background-image:
-                linear-gradient(rgba(222, 211, 198, 0.32) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(222, 211, 198, 0.32) 1px, transparent 1px);
-            background-size: 28px 28px;
-            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.52), transparent 88%);
-        }
-    </style>
-</head>
-<body class="min-h-screen font-sans text-ink antialiased">
-    <div class="pointer-events-none fixed inset-0 -z-10 soft-grid opacity-40"></div>
-
-    <main class="mx-auto flex min-h-screen max-w-7xl items-center px-4 py-4 sm:px-6 lg:px-8">
-        <section class="paper-shadow grid w-full overflow-hidden rounded-[2rem] border border-line/80 bg-paper/95 xl:grid-cols-[1.08fr,0.92fr]">
-            <div class="order-2 border-t border-line px-6 py-6 lg:px-8 lg:py-8 xl:order-1 xl:flex xl:min-h-[40rem] xl:flex-col xl:justify-center xl:border-t-0 xl:border-r">
-                <span class="inline-flex items-center rounded-full border border-line bg-white/85 px-4 py-2 text-[0.72rem] font-medium uppercase tracking-[0.28em] text-ink/60">
-                    {{ i18n.hero_eyebrow }}
-                </span>
-                <h1 class="mt-4 max-w-3xl font-display text-[2.25rem] font-semibold tracking-tight text-ink sm:text-5xl xl:text-[4.4rem] xl:leading-[0.96]">{{ i18n.hero_title }}</h1>
-                <p class="mt-3 max-w-2xl text-sm leading-6 text-ink/72 sm:text-[15px] sm:leading-8">
-                    {{ i18n.hero_description_prefix }} <span class="rounded-full bg-latte px-3 py-1 font-mono text-[0.95rem] text-ink">777000</span>{{ i18n.hero_description_suffix }}
-                </p>
-
-                <div class="mt-5 flex flex-wrap gap-2 text-sm text-ink/62 sm:hidden">
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ ready_label }}</span>
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ i18n.nav_dashboard_label }}</span>
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ i18n.settings_nav_security }}</span>
-                </div>
-
-                <div class="mt-7 hidden gap-3 sm:grid sm:grid-cols-3">
-                    <div class="rounded-[1.35rem] border border-line/80 bg-white/80 p-4">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.stat_accounts }}</p>
-                        <p class="mt-3 font-display text-2xl font-semibold text-ink">∞</p>
-                    </div>
-                    <div class="rounded-[1.35rem] border border-butter/60 bg-[#f7f0e4] p-4">
-                        <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_otp }}</p>
-                        <p class="mt-3 font-mono text-2xl font-semibold text-ink">123456</p>
-                    </div>
-                    <div class="rounded-[1.35rem] border border-sage/35 bg-[#eef4ee] p-4">
-                        <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/80">{{ i18n.status_connected }}</p>
-                        <p class="mt-3 font-display text-2xl font-semibold text-sageDeep">{{ ready_label }}</p>
-                    </div>
-                </div>
-
-                <div class="mt-6 hidden flex-wrap gap-2 text-sm text-ink/62 md:flex">
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ i18n.nav_dashboard_label }}</span>
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ i18n.settings_nav_security }}</span>
-                    <span class="rounded-full border border-line bg-white/80 px-3 py-1.5">{{ i18n.settings_nav_notifications }}</span>
-                </div>
+{% block body %}
+<div class="auth">
+    <aside class="auth__aside" aria-hidden="true">
+        <div class="brand">
+            <span class="brand__mark"><svg><use href="#i-flower"></use></svg></span>
+            <span class="brand__text"><span class="brand__name" style="color:#fff">Hanagram</span><span class="brand__tag" style="color:rgba(255,255,255,.62)">Web</span></span>
+        </div>
+        <div>
+            <p class="eyebrow" style="color:rgba(255,255,255,.68)">{{ i18n.hero_eyebrow }}</p>
+            <h1 class="auth-hero__title mt-3">{{ i18n.hero_title }}</h1>
+            <p class="auth-hero__desc">{{ i18n.hero_description_prefix }} <code>777000</code>{{ i18n.hero_description_suffix }}</p>
+            <div class="auth-features">
+                <div class="auth-feature" style="--i:0"><span class="auth-feature__icon"><svg class="icon"><use href="#i-send"></use></svg></span>{{ i18n.dashboard_sessions_title }}</div>
+                <div class="auth-feature" style="--i:1"><span class="auth-feature__icon"><svg class="icon"><use href="#i-gamepad"></use></svg></span>{{ i18n.steam_workspace_title }}</div>
+                <div class="auth-feature" style="--i:2"><span class="auth-feature__icon"><svg class="icon"><use href="#i-shield-check"></use></svg></span>{{ i18n.settings_security_tab_totp_label }} · {{ i18n.settings_security_tab_passkeys_label }}</div>
             </div>
+        </div>
+        <p class="text-xs" style="color:rgba(255,255,255,.5)">AGPL-3.0 · Hanagram-web</p>
+        <div class="auth-orb"></div>
+    </aside>
 
-            <div class="order-1 px-5 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8 xl:order-2 xl:flex xl:min-h-[40rem] xl:flex-col xl:justify-center">
-                <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.language_switch }}</p>
-                    <div class="inline-flex flex-wrap rounded-full border border-line bg-paper p-1">
-                        {% for option in languages %}
-                        <a
-                            href="{{ option.href }}"
-                            hreflang="{{ option.code }}"
-                            class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
-                        >
-                            {{ option.label }}
-                        </a>
-                        {% endfor %}
+    <main class="auth__main" id="main">
+        <div class="auth__top">
+            <a class="brand auth__brand" href="/login">
+                <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
+                <span class="brand__text"><span class="brand__name">Hanagram</span><span class="brand__tag">Web</span></span>
+            </a>
+            <button type="button" class="btn btn--ghost btn--sm" data-menu-toggle="prefs-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="#i-globe"></use></svg><span>{% if lang == "zh-CN" %}中文{% else %}English{% endif %}</span>
+            </button>
+        </div>
+
+        <div class="auth__center">
+            <div class="auth__card">
+                <span class="badge badge--success"><span class="dot dot--success dot--pulse"></span>{{ ready_label }}</span>
+                <h2 class="auth__title mt-3">{{ i18n.login_title }}</h2>
+                <p class="auth__desc">{{ i18n.login_description }}</p>
+
+                <div class="stack mt-4">
+                    {% if transport_warning %}
+                    <div class="alert alert--warning">
+                        <svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg>
+                        <div class="alert__body"><p class="alert__title">{{ transport_warning.title }}</p><p class="alert__text">{{ transport_warning.message }}</p></div>
                     </div>
-                </div>
-
-                {% if transport_warning %}
-                <section class="mb-4 rounded-[1.35rem] border border-butter/70 bg-[#fff6e6] px-4 py-3.5 text-sm leading-6 text-[#866434]">
-                    <p class="font-semibold">{{ transport_warning.title }}</p>
-                    <p class="mt-2">{{ transport_warning.message }}</p>
-                </section>
-                {% endif %}
-
-                <div class="rounded-[1.45rem] border border-line/80 bg-white/82 p-4 sm:p-6">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <h2 class="font-display text-[2rem] font-semibold text-ink sm:text-3xl">{{ i18n.login_title }}</h2>
-                            <p class="mt-2 text-sm leading-6 text-ink/62">{{ i18n.login_description }}</p>
-                        </div>
-                        <span class="inline-flex items-center rounded-full border border-sage/30 bg-[#eef4ee] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.2em] text-sageDeep">
-                            {{ ready_label }}
-                        </span>
-                    </div>
-
-                    {% if error_message %}
-                    <div id="login-feedback" class="mt-4 rounded-[1.15rem] border border-peach/40 bg-[#fbefec] px-4 py-3 text-sm text-[#98675f]">
-                        {{ error_message }}
-                    </div>
-                    {% else %}
-                    <div id="login-feedback" class="mt-4 hidden rounded-[1.15rem] border px-4 py-3 text-sm"></div>
                     {% endif %}
-
-                    <div class="mt-5 inline-flex w-full rounded-[1.15rem] border border-line bg-paper/82 p-1">
-                        <button
-                            type="button"
-                            data-auth-tab="password"
-                            class="flex-1 rounded-[0.95rem] px-4 py-2.5 text-sm font-semibold transition"
-                        >
-                            {{ i18n.login_password_tab_label }}
-                        </button>
-                        <button
-                            type="button"
-                            data-auth-tab="passkey"
-                            class="flex-1 rounded-[0.95rem] px-4 py-2.5 text-sm font-semibold transition"
-                        >
-                            {{ passkey_label }}
-                        </button>
+                    <div id="login-feedback" class="inline-status inline-status--error" {% if not error_message %}hidden{% endif %} role="alert">
+                        {% if error_message %}<svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg><span>{{ error_message }}</span>{% endif %}
                     </div>
 
-                    <section data-auth-pane="password" class="mt-5">
-                        <form method="post" action="/login" class="space-y-3.5">
+                    <div class="seg seg--block seg--lg" role="tablist" data-auth-tabs>
+                        <button type="button" class="seg__btn is-active" role="tab" data-auth-tab="password"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg>{{ i18n.login_password_tab_label }}</button>
+                        <button type="button" class="seg__btn" role="tab" data-auth-tab="passkey"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg>{{ passkey_label }}</button>
+                    </div>
+
+                    <section data-auth-pane="password" class="panel is-active">
+                        <form method="post" action="/login" class="form">
                             <input type="hidden" name="lang" value="{{ lang }}">
-
-                            <div class="grid gap-3 sm:grid-cols-2">
-                                <label class="block">
-                                    <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.login_username }}</span>
-                                    <input
-                                        type="text"
-                                        name="username"
-                                        autocomplete="username webauthn"
-                                        required
-                                        class="w-full rounded-[1.05rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
-                                    >
-                                </label>
-
-                                <label class="block">
-                                    <span class="mb-2 block text-sm font-medium text-ink/70">{{ i18n.login_password }}</span>
-                                    <input
-                                        type="password"
-                                        name="password"
-                                        autocomplete="current-password"
-                                        required
-                                        class="w-full rounded-[1.05rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
-                                    >
-                                </label>
-                            </div>
-
-                            <div class="rounded-[1.05rem] border border-line/70 bg-paper/70 px-4 py-3 text-sm leading-6 text-ink/65">
-                                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                    <span>{{ mfa_hint }}</span>
-                                    <button type="button" data-recovery-toggle class="text-left font-semibold text-sageDeep transition hover:text-sage">{{ recovery_toggle_label }}</button>
-                                </div>
-                            </div>
-
-                            <label class="block" data-totp-block>
-                                <span class="mb-2 block text-sm font-medium text-ink/70">{{ mfa_label }}</span>
-                                <input
-                                    type="text"
-                                    name="mfa_code"
-                                    autocomplete="one-time-code"
-                                    class="w-full rounded-[1.05rem] border border-line bg-paper px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage focus:bg-white"
-                                >
+                            <label class="field">
+                                <span class="field__label">{{ i18n.login_username }}</span>
+                                <span class="input-group">
+                                    <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+                                    <input class="input input--lg" type="text" name="username" autocomplete="username webauthn" autocapitalize="none" spellcheck="false" required autofocus>
+                                </span>
+                            </label>
+                            <label class="field">
+                                <span class="field__label">{{ i18n.login_password }}</span>
+                                <span class="input-group">
+                                    <svg class="icon" aria-hidden="true"><use href="#i-lock"></use></svg>
+                                    <input class="input input--lg" type="password" name="password" autocomplete="current-password" required>
+                                </span>
                             </label>
 
-                            <div data-recovery-block class="hidden space-y-3 rounded-[1.05rem] border border-line/70 bg-paper/75 px-4 py-4">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <span class="text-sm font-medium text-ink/70">{{ recovery_label }}</span>
-                                    <button type="button" data-recovery-back class="text-sm font-semibold text-sageDeep transition hover:text-sage">{{ recovery_back_label }}</button>
-                                </div>
-                                <input
-                                    type="text"
-                                    name="recovery_code"
-                                    class="w-full rounded-[1.05rem] border border-line bg-white px-4 py-3 text-base text-ink outline-none transition placeholder:text-ink/35 focus:border-sage"
-                                >
-                                <p class="text-xs leading-6 text-ink/58">{{ i18n.login_recovery_notice_hint }}</p>
+                            <div data-totp-block class="field">
+                                <span class="field__label">
+                                    <span>{{ mfa_label }} <span class="field__opt">· {{ mfa_hint }}</span></span>
+                                </span>
+                                <input class="input input--lg input--mono" type="text" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" maxlength="12">
+                                <button type="button" class="link text-sm" data-recovery-toggle style="align-self:flex-start">{{ recovery_toggle_label }}</button>
                             </div>
 
-                            <button
-                                type="submit"
-                                class="w-full rounded-[1.05rem] bg-sage px-4 py-3 text-base font-semibold text-white transition hover:bg-sageDeep"
-                            >
-                                {{ i18n.login_submit }}
-                            </button>
+                            <div data-recovery-block class="field" hidden>
+                                <span class="field__label">
+                                    <span>{{ recovery_label }}</span>
+                                    <button type="button" class="link text-sm" data-recovery-back>{{ recovery_back_label }}</button>
+                                </span>
+                                <input class="input input--lg input--mono" type="text" name="recovery_code" autocomplete="off" disabled>
+                                <span class="field__hint">{{ i18n.login_recovery_notice_hint }}</span>
+                            </div>
+
+                            <button type="submit" class="btn btn--primary btn--lg btn--block">{{ i18n.login_submit }}<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button>
                         </form>
                     </section>
 
-                    <section data-auth-pane="passkey" class="mt-5 hidden">
-                        <div class="rounded-[1.05rem] border border-line/70 bg-paper/75 p-4 sm:p-5">
-                            <div class="flex flex-col gap-4">
-                                <div>
-                                    <p class="text-sm leading-6 text-ink/62">
-                                        {% if passkey_supported %}{{ passkey_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
-                                    </p>
-                                </div>
-                                <button
-                                    type="button"
-                                    data-passkey-login
-                                    data-starting="{{ i18n.login_passkey_start_message }}"
-                                    data-awaiting="{{ i18n.login_passkey_finish_message }}"
-                                    data-failed="{{ i18n.login_passkey_error_message }}"
-                                    data-unsupported="{{ passkey_unavailable_message }}"
-                                    {% if not passkey_supported %}disabled{% endif %}
-                                    class="w-full rounded-[1.05rem] border border-line bg-white px-4 py-3 text-base font-semibold text-ink transition enabled:hover:border-sage enabled:hover:bg-latte disabled:cursor-not-allowed disabled:opacity-55"
-                                >
-                                    {{ passkey_label }}
-                                </button>
-                            </div>
+                    <section data-auth-pane="passkey" class="panel">
+                        <div class="card card--subtle card--pad stack" style="align-items:center;text-align:center">
+                            <span class="empty__icon" style="margin:0"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg></span>
+                            <p class="text-sm muted">{% if passkey_supported %}{{ passkey_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}</p>
+                            <button
+                                type="button"
+                                class="btn btn--primary btn--lg btn--block"
+                                data-passkey-login
+                                data-starting="{{ i18n.login_passkey_start_message }}"
+                                data-awaiting="{{ i18n.login_passkey_finish_message }}"
+                                data-failed="{{ i18n.login_passkey_error_message }}"
+                                data-unsupported="{{ passkey_unavailable_message }}"
+                                {% if not passkey_supported %}disabled{% endif %}
+                            ><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg><span>{{ passkey_label }}</span></button>
                         </div>
                     </section>
 
                     {% if show_register %}
-                    <div class="mt-4 rounded-[1.05rem] border border-line/70 bg-paper/72 px-4 py-3.5 text-sm text-ink/68">
-                        <a href="{{ register_href }}" class="font-semibold text-sageDeep hover:text-sage">{{ register_label }}</a>
-                    </div>
+                    <p class="text-sm muted" style="text-align:center">
+                        <a class="link" href="{{ register_href }}">{{ register_label }}</a>
+                    </p>
                     {% endif %}
                 </div>
             </div>
-        </section>
+        </div>
+        <p class="auth__foot">Hanagram Web</p>
     </main>
-</body>
-</html>
+</div>
+<div class="menu" id="prefs-menu" data-state="closed" role="menu">
+    {% include "_prefs.html" %}
+</div>
+{% endblock body %}
+
+{% block scripts %}
+<script src="/static/login.js?v=__ASSET_VERSION__" defer></script>
+{% endblock scripts %}

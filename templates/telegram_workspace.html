@@ -1,1288 +1,340 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Hanagram-web contributors -->
-<!DOCTYPE html>
-<html lang="{{ i18n.html_lang }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ i18n.page_title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        display: ["Noto Serif SC", "serif"],
-                        sans: ["Noto Sans SC", "sans-serif"],
-                        mono: ["JetBrains Mono", "monospace"]
-                    },
-                    colors: {
-                        oat: "#f6f1e8",
-                        paper: "#fffaf2",
-                        latte: "#efe3d3",
-                        line: "#ddd0c1",
-                        ink: "#4f433b",
-                        sage: "#91a792",
-                        sageDeep: "#69806b",
-                        peach: "#d8a79b",
-                        butter: "#e7d5ae",
-                        mint: "#eef5ee"
-                    }
-                }
-            }
-        };
-
-        const I18N = {
-            statusConnecting: {{ i18n.status_connecting | json_encode | safe }},
-            statusConnected: {{ i18n.status_connected | json_encode | safe }},
-            statusError: {{ i18n.status_error | json_encode | safe }},
-            noMessages: {{ i18n.no_messages | json_encode | safe }},
-            noNote: {{ i18n.session_note_placeholder | json_encode | safe }},
-            otpPlaceholder: {{ i18n.otp_placeholder | json_encode | safe }},
-            otpHideCountdown: {{ i18n.otp_hide_countdown_label | json_encode | safe }},
-            otpHidden: {{ i18n.otp_hidden_label | json_encode | safe }},
-            latestUpdateLabel: {{ i18n.latest_update_label | json_encode | safe }},
-            openDetails: {{ i18n.open_details | json_encode | safe }},
-            attentionEmpty: {{ i18n.dashboard_attention_empty | json_encode | safe }},
-            recentActivityEmpty: {{ i18n.dashboard_recent_activity_empty | json_encode | safe }},
-            copy: {{ i18n.copy | json_encode | safe }},
-            copied: {{ i18n.copied | json_encode | safe }},
-            copyFallback: {{ i18n.copy_fallback | json_encode | safe }},
-            phoneReveal: {{ i18n.session_phone_reveal_label | json_encode | safe }},
-            phoneHide: {{ i18n.session_phone_hide_label | json_encode | safe }},
-            exportStringLoading: {{ i18n.export_string_loading | json_encode | safe }},
-            exportStringCopy: {{ i18n.export_string_copy | json_encode | safe }},
-            exportStringReady: {{ i18n.export_string_ready | json_encode | safe }},
-            exportStringError: {{ i18n.export_string_error | json_encode | safe }}
-        };
-        const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
-        const TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS = {{ telegram_workspace_incremental_refresh_seconds }} * 1000;
-        const TELEGRAM_WORKSPACE_FULL_REFRESH_MS = {{ telegram_workspace_full_refresh_seconds }} * 1000;
-        const WORKSPACE_PANES = ["telegram", "activity"];
-        let workspaceSyncInFlight = false;
-    </script>
-    <style>
-        :root { color-scheme: light; }
-        body {
-            background:
-                radial-gradient(circle at 12% 16%, rgba(145, 167, 146, 0.17), transparent 24%),
-                radial-gradient(circle at 88% 18%, rgba(216, 167, 155, 0.14), transparent 20%),
-                radial-gradient(circle at 78% 82%, rgba(231, 213, 174, 0.18), transparent 24%),
-                linear-gradient(180deg, #faf6ef 0%, #f6f1e8 42%, #f3ede3 100%);
-        }
-        .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
-        .paper-grid {
-            background-image:
-                linear-gradient(rgba(221, 208, 193, 0.35) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(221, 208, 193, 0.35) 1px, transparent 1px);
-            background-size: 28px 28px;
-            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 92%);
-        }
-        .float-in { animation: float-in 0.72s ease both; }
-        .card-flash { animation: card-flash 1.35s ease; }
-        .copy-chip-active {
-            border-color: rgba(145, 167, 146, 0.78) !important;
-            background: #e7f1e8 !important;
-            box-shadow: 0 0 0 5px rgba(145, 167, 146, 0.12);
-        }
-        .copy-chip-feedback { animation: copy-chip-feedback 0.8s ease; }
-        .modal-panel {
-            background: rgba(255, 250, 242, 0.985);
-            box-shadow: 0 28px 72px rgba(79, 67, 59, 0.16);
-        }
-        .modal-pane-scroll { scrollbar-gutter: stable; }
-        .tab-strip { scrollbar-width: none; }
-        .tab-strip::-webkit-scrollbar { display: none; }
-        .clamp-2 {
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 2;
-            overflow: hidden;
-        }
-        .clamp-1 {
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 1;
-            overflow: hidden;
-        }
-        @keyframes float-in {
-            from { opacity: 0; transform: translateY(14px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes card-flash {
-            0% { transform: translateY(0); box-shadow: 0 20px 42px rgba(113, 94, 76, 0.08); }
-            30% { transform: translateY(-4px); box-shadow: 0 26px 48px rgba(145, 167, 146, 0.18); }
-            100% { transform: translateY(0); box-shadow: 0 20px 42px rgba(113, 94, 76, 0.08); }
-        }
-        @keyframes copy-chip-feedback {
-            0% { transform: translateY(0); }
-            35% { transform: translateY(-1px); }
-            100% { transform: translateY(0); }
-        }
-        @keyframes modal-rise {
-            from { opacity: 0; transform: translateY(12px) scale(0.985); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes modal-slide-in {
-            from { opacity: 0; transform: translateX(18px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-            .float-in, .card-flash, .modal-panel { animation: none; }
-            * { scroll-behavior: auto !important; transition: none !important; }
-        }
-        @media (min-width: 640px) {
-            .modal-panel {
-                animation: modal-slide-in 0.24s ease;
-            }
-        }
-        @media (max-width: 640px) {
-            .modal-panel {
-                animation: modal-rise 0.28s ease;
-            }
-            .modal-mobile-safe {
-                padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
-                padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.85rem);
-            }
-        }
-    </style>
-    <script>
-        function seenStorageKey(sessionKey) { return `hanagram_seen_${sessionKey}`; }
-
-        function markSessionSeen(sessionKey, latestCodeAt) {
-            if (!sessionKey || !latestCodeAt) { return; }
-            window.localStorage.setItem(seenStorageKey(sessionKey), String(latestCodeAt));
-        }
-
-        function escapeSelectorValue(value) {
-            if (window.CSS && typeof window.CSS.escape === "function") { return window.CSS.escape(value); }
-            return String(value).replace(/["\\]/g, "\\$&");
-        }
-
-        function findSessionCard(sessionKey) {
-            return document.querySelector(`[data-session-card][data-session-key="${escapeSelectorValue(sessionKey)}"]`);
-        }
-
-        function findSessionModal(sessionKey) {
-            return document.querySelector(`[data-session-modal][data-session-key="${escapeSelectorValue(sessionKey)}"]`);
-        }
-
-        function escapeHtml(value) {
-            return String(value)
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#39;");
-        }
-
-        function sessionStatusLabel(kind) {
-            if (kind === "connected") { return I18N.statusConnected; }
-            if (kind === "connecting") { return I18N.statusConnecting; }
-            return I18N.statusError;
-        }
-
-        function statusBadgeClass(kind) {
-            if (kind === "connected") { return "border-sage/45 bg-[#eef4ee] text-sageDeep"; }
-            if (kind === "connecting") { return "border-butter/60 bg-[#f7f0e4] text-ink/75"; }
-            return "border-peach/45 bg-[#f8ece8] text-[#a66c60]";
-        }
-
-        function statusDotClass(kind) {
-            if (kind === "connected") { return "bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]"; }
-            if (kind === "connecting") { return "bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]"; }
-            return "bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]";
-        }
-
-        function renderRecentMessages(messages) {
-            if (!messages || messages.length === 0) {
-                return `<div class="rounded-[1rem] border border-dashed border-line bg-white/70 px-4 py-8 text-sm text-ink/50">${escapeHtml(I18N.noMessages)}</div>`;
-            }
-
-            return messages.map((message) => {
-                const codeChip = message.code
-                    ? `<span class="rounded-full border border-sage/35 bg-[#eef4ee] px-3 py-1 font-mono text-sm font-semibold text-sageDeep">${escapeHtml(message.code)}</span>`
-                    : "<span></span>";
-
-                return `<div class="rounded-[1rem] border border-line/80 bg-white/84 px-3.5 py-3">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        ${codeChip}
-                        <p class="font-mono text-[0.72rem] tracking-[0.08em] text-ink/42">${escapeHtml(message.received_at)}</p>
-                    </div>
-                    <p class="mt-3 break-words whitespace-pre-line text-sm leading-6 text-ink/76">${escapeHtml(message.text)}</p>
-                </div>`;
-            }).join("");
-        }
-
-        function refreshStatusBlock(root, status) {
-            const badge = root.querySelector("[data-role='status-badge']");
-            if (badge) {
-                badge.className = `rounded-full border px-3 py-1.5 text-sm ${statusBadgeClass(status.kind)}`;
-                badge.textContent = sessionStatusLabel(status.kind);
-            }
-
-            const dot = root.querySelector("[data-role='status-dot']");
-            if (dot) { dot.className = `h-3 w-3 rounded-full ${statusDotClass(status.kind)}`; }
-
-            const error = root.querySelector("[data-role='session-error']");
-            if (error) {
-                if (status.error) {
-                    error.textContent = status.error;
-                    error.classList.remove("hidden");
-                } else {
-                    error.textContent = "";
-                    error.classList.add("hidden");
-                }
-            }
-        }
-
-        function flashRefresh(root) {
-            root.classList.remove("card-flash");
-            void root.offsetWidth;
-            root.classList.add("card-flash");
-            window.setTimeout(() => root.classList.remove("card-flash"), 1400);
-        }
-
-        function resetWorkspaceCodeChip(chip) {
-            if (!chip) { return; }
-            if (chip.__copyResetTimer) {
-                window.clearTimeout(chip.__copyResetTimer);
-                chip.__copyResetTimer = undefined;
-            }
-            chip.classList.remove("copy-chip-active", "copy-chip-feedback");
-
-            const label = chip.querySelector("[data-role='copy-code-label']");
-            if (label) { label.textContent = chip.dataset.label || ""; }
-        }
-
-        function parseUnixTimestamp(value) {
-            const parsed = Number(value || 0);
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-        }
-
-        function formatOtpHideCountdown(totalSeconds) {
-            const remaining = Math.max(0, Math.floor(totalSeconds));
-            const hours = Math.floor(remaining / 3600);
-            const minutes = Math.floor((remaining % 3600) / 60);
-            const seconds = remaining % 60;
-
-            if (hours > 0) {
-                return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-            }
-
-            return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-        }
-
-        function otpVisibilityScopes(root) {
-            if (!root) { return []; }
-            const scopes = [];
-            if (root.matches && root.matches("[data-otp-scope]")) { scopes.push(root); }
-            scopes.push(...root.querySelectorAll("[data-otp-scope]"));
-            return scopes;
-        }
-
-        function refreshOtpVisibility(root = document) {
-            const nowUnix = Math.floor(Date.now() / 1000);
-            otpVisibilityScopes(root).forEach((scope) => {
-                const expiresAt = parseUnixTimestamp(scope.dataset.latestCodeExpiresAt);
-                const latestCode = scope.querySelector("[data-role='latest-code']");
-                const visibilityLabel = scope.querySelector("[data-role='otp-visibility-label']");
-                const copyButton = scope.querySelector("[data-role='copy-code-chip'], [data-role='copy-code'], [data-role='recent-activity-code']");
-
-                if (!latestCode && !copyButton && !visibilityLabel) { return; }
-
-                const expired = expiresAt > 0 && nowUnix >= expiresAt;
-                if (expired) {
-                    if (latestCode) { latestCode.textContent = I18N.otpPlaceholder; }
-                    if (copyButton) {
-                        copyButton.dataset.code = "";
-                        copyButton.disabled = true;
-                        if (!latestCode) { copyButton.textContent = I18N.otpPlaceholder; }
-                        resetWorkspaceCodeChip(copyButton);
-                    }
-                    if (visibilityLabel) {
-                        visibilityLabel.textContent = I18N.otpHidden;
-                        visibilityLabel.classList.remove("hidden");
-                    }
-                    return;
-                }
-
-                if (copyButton) {
-                    const currentCode = copyButton.dataset.code || "";
-                    copyButton.disabled = !currentCode;
-                    if (!latestCode) {
-                        copyButton.textContent = currentCode || I18N.otpPlaceholder;
-                    }
-                }
-
-                if (visibilityLabel) {
-                    if (expiresAt > 0) {
-                        visibilityLabel.textContent = I18N.otpHideCountdown.replace(
-                            "{countdown}",
-                            formatOtpHideCountdown(expiresAt - nowUnix)
-                        );
-                        visibilityLabel.classList.remove("hidden");
-                    } else {
-                        visibilityLabel.textContent = "";
-                        visibilityLabel.classList.add("hidden");
-                    }
-                }
-            });
-        }
-
-        async function writeTextToClipboard(text) {
-            if (!text) { return false; }
-
-            if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-                try {
-                    await navigator.clipboard.writeText(text);
-                    return true;
-                } catch (_) {}
-            }
-
-            const textarea = document.createElement("textarea");
-            textarea.value = text;
-            textarea.setAttribute("readonly", "");
-            textarea.style.position = "fixed";
-            textarea.style.top = "0";
-            textarea.style.left = "0";
-            textarea.style.width = "1px";
-            textarea.style.height = "1px";
-            textarea.style.opacity = "0";
-            textarea.style.pointerEvents = "none";
-            document.body.appendChild(textarea);
-            textarea.focus();
-            textarea.select();
-            textarea.setSelectionRange(0, textarea.value.length);
-
-            let copied = false;
-            try {
-                copied = document.execCommand("copy");
-            } catch (_) {
-                copied = false;
-            }
-
-            document.body.removeChild(textarea);
-            return copied;
-        }
-
-        function toggleMaskedPhone(button) {
-            if (!button || button.disabled) { return; }
-            const phone = button.dataset.phone || "";
-            const maskedPhone = button.dataset.maskedPhone || phone;
-            const value = button.querySelector("[data-role='phone-value']");
-            if (!value) { return; }
-
-            const reveal = button.dataset.revealed !== "true";
-            button.dataset.revealed = reveal ? "true" : "false";
-            value.textContent = reveal ? phone : maskedPhone;
-
-            const nextLabel = reveal ? I18N.phoneHide : I18N.phoneReveal;
-            button.setAttribute("title", nextLabel);
-            button.setAttribute("aria-label", nextLabel);
-        }
-
-        function activateWorkspacePane(rawHash) {
-            const requested = String(rawHash || window.location.hash || "#telegram").replace(/^#/, "");
-            const activePane = WORKSPACE_PANES.includes(requested) ? requested : "telegram";
-
-            document.querySelectorAll("[data-workspace-pane]").forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.workspacePane !== activePane);
-            });
-
-            document.querySelectorAll("[data-workspace-tab]").forEach((tab) => {
-                const active = tab.dataset.workspaceTab === activePane;
-                tab.classList.toggle("bg-sage", active);
-                tab.classList.toggle("text-white", active);
-                tab.classList.toggle("border-sage", active);
-                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-                tab.classList.toggle("bg-white", !active);
-                tab.classList.toggle("text-ink/74", !active);
-                tab.classList.toggle("border-line", !active);
-            });
-        }
-
-        function activateSessionModalPane(modal, rawTarget) {
-            if (!modal) { return ""; }
-            const tabs = Array.from(modal.querySelectorAll("[data-session-pane-tab]"));
-            const panels = Array.from(modal.querySelectorAll("[data-session-pane]"));
-            if (tabs.length === 0 || panels.length === 0) { return ""; }
-
-            const fallbackTarget = tabs[0]?.dataset.sessionPaneTarget || "";
-            const activeTarget = tabs.some((tab) => tab.dataset.sessionPaneTarget === rawTarget)
-                ? rawTarget
-                : (modal.dataset.sessionPaneActive || fallbackTarget);
-
-            modal.dataset.sessionPaneActive = activeTarget;
-            tabs.forEach((tab) => {
-                const active = tab.dataset.sessionPaneTarget === activeTarget;
-                tab.classList.toggle("bg-sage", active);
-                tab.classList.toggle("text-white", active);
-                tab.classList.toggle("border-sage", active);
-                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-                tab.classList.toggle("bg-white", !active);
-                tab.classList.toggle("text-ink/74", !active);
-                tab.classList.toggle("border-line", !active);
-                tab.setAttribute("aria-selected", active ? "true" : "false");
-            });
-            panels.forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.sessionPane !== activeTarget);
-            });
-
-            return activeTarget;
-        }
-
-        function attachSessionModalPane(modal) {
-            const tabs = Array.from(modal.querySelectorAll("[data-session-pane-tab]"));
-            if (tabs.length === 0) { return; }
-            tabs.forEach((tab) => {
-                tab.addEventListener("click", () => {
-                    activateSessionModalPane(modal, tab.dataset.sessionPaneTarget || "");
-                });
-            });
-            activateSessionModalPane(modal, modal.dataset.sessionPaneActive || "");
-        }
-    </script>
-    <script>
-        function refreshNewBadges() {
-            document.querySelectorAll("[data-session-card]").forEach((card) => {
-                const latestCodeAt = card.dataset.latestCodeAt;
-                const latestCodeExpiresAt = parseUnixTimestamp(card.dataset.latestCodeExpiresAt);
-                const sessionKey = card.dataset.sessionKey;
-                const indicator = card.querySelector("[data-new-indicator]");
-                if (!indicator) { return; }
-
-                if (!latestCodeAt || !sessionKey) {
-                    indicator.classList.add("hidden");
-                    return;
-                }
-
-                const hasVisibleCode = latestCodeExpiresAt > 0 && Math.floor(Date.now() / 1000) < latestCodeExpiresAt;
-                if (!hasVisibleCode) {
-                    indicator.classList.add("hidden");
-                    return;
-                }
-
-                const modal = findSessionModal(sessionKey);
-                const seenAt = window.localStorage.getItem(seenStorageKey(sessionKey));
-                const modalOpen = modal && !modal.classList.contains("hidden");
-                const isNew = (!seenAt || Number(latestCodeAt) > Number(seenAt)) && !modalOpen;
-                indicator.classList.toggle("hidden", !isNew);
-            });
-        }
-
-        function openSessionModal(modalId, sessionKey) {
-            const modal = document.getElementById(modalId);
-            if (!modal) { return; }
-            modal.classList.remove("hidden");
-            document.body.classList.add("overflow-hidden");
-            activateSessionModalPane(modal, modal.dataset.sessionPaneActive || "");
-
-            const card = findSessionCard(sessionKey);
-            if (card) { markSessionSeen(sessionKey, card.dataset.latestCodeAt); }
-            refreshNewBadges();
-        }
-
-        function openSessionModalBySessionKey(sessionKey) {
-            const card = findSessionCard(sessionKey);
-            if (!card || !card.dataset.sessionModalId) { return; }
-            openSessionModal(card.dataset.sessionModalId, sessionKey);
-        }
-
-        function closeSessionModal(modalId) {
-            const modal = document.getElementById(modalId);
-            if (!modal) { return; }
-            modal.classList.add("hidden");
-
-            if (!document.querySelector("[data-session-modal]:not(.hidden)")) {
-                document.body.classList.remove("overflow-hidden");
-            }
-        }
-
-        function applySessionCardUpdate(card, session, options = {}) {
-            const previousCodeAt = Number(card.dataset.latestCodeAt || 0);
-            const nextCodeAt = Number(session.latest_code_at_unix || 0);
-            const hadCodeChange = nextCodeAt && nextCodeAt > previousCodeAt;
-            card.dataset.latestCodeAt = session.latest_code_at_unix || "";
-            card.dataset.latestCodeExpiresAt = session.latest_code_expires_at_unix || "";
-
-            const sessionName = card.querySelector("[data-role='session-name']");
-            if (sessionName) { sessionName.textContent = session.key; }
-
-            const phone = card.querySelector("[data-role='session-phone']");
-            if (phone) { phone.textContent = session.phone; }
-
-            const note = card.querySelector("[data-role='session-note']");
-            if (note) { note.textContent = session.note || I18N.noNote; }
-
-            const latestCode = card.querySelector("[data-role='latest-code']");
-            if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
-
-            const latestCodeChip = card.querySelector("[data-role='copy-code-chip']");
-            if (latestCodeChip) {
-                latestCodeChip.dataset.code = session.latest_code || "";
-                latestCodeChip.disabled = !session.latest_code;
-                resetWorkspaceCodeChip(latestCodeChip);
-            }
-
-            const latestUpdate = card.querySelector("[data-role='latest-update']");
-            if (latestUpdate) { latestUpdate.textContent = session.latest_message_at || "-"; }
-
-            refreshStatusBlock(card, session.status);
-            refreshOtpVisibility(card);
-            if (hadCodeChange && !options.silent) { flashRefresh(card); }
-        }
-
-        function applySessionModalUpdate(modal, session) {
-            const otpScope = modal.querySelector("[data-otp-scope]");
-            if (otpScope) { otpScope.dataset.latestCodeExpiresAt = session.latest_code_expires_at_unix || ""; }
-            const sessionName = modal.querySelector("[data-role='session-name']");
-            if (sessionName) { sessionName.textContent = session.key; }
-
-            const phone = modal.querySelector("[data-role='session-phone']");
-            if (phone) { phone.textContent = session.phone; }
-
-            const note = modal.querySelector("[data-role='session-note']");
-            if (note) { note.textContent = session.note || I18N.noNote; }
-
-            const latestCode = modal.querySelector("[data-role='latest-code']");
-            if (latestCode) { latestCode.textContent = session.latest_code || I18N.otpPlaceholder; }
-
-            const latestUpdate = modal.querySelector("[data-role='latest-update']");
-            if (latestUpdate) { latestUpdate.textContent = session.latest_message_at || "-"; }
-
-            const renameInput = modal.querySelector("[data-role='rename-input']");
-            if (renameInput && document.activeElement !== renameInput) { renameInput.value = session.key; }
-
-            const copyButton = modal.querySelector("[data-role='copy-code']");
-            if (copyButton) {
-                copyButton.dataset.code = session.latest_code || "";
-                copyButton.disabled = !session.latest_code;
-            }
-
-            const recentMessages = modal.querySelector("[data-role='recent-messages']");
-            if (recentMessages) { recentMessages.innerHTML = renderRecentMessages(session.recent_messages); }
-
-            refreshStatusBlock(modal, session.status);
-            refreshOtpVisibility(modal);
-        }
-
-        async function copyCode(button) {
-            if (!button || button.disabled) { return; }
-            const code = button.dataset.code;
-            if (!code) { return; }
-
-            try {
-                const copied = await writeTextToClipboard(code);
-                if (!copied) { throw new Error("copy failed"); }
-                const originalLabel = button.dataset.label || I18N.copy;
-                button.textContent = button.dataset.copied || I18N.copied;
-                window.setTimeout(() => { button.textContent = originalLabel; }, 1200);
-            } catch (_) {
-                window.prompt(button.dataset.promptLabel || I18N.copyFallback, code);
-            }
-        }
-
-        async function copyWorkspaceCode(button) {
-            const code = button.dataset.code;
-            if (!code || button.disabled) { return; }
-
-            const copied = await writeTextToClipboard(code);
-            if (!copied) { return; }
-
-            resetWorkspaceCodeChip(button);
-            button.classList.add("copy-chip-active", "copy-chip-feedback");
-
-            const label = button.querySelector("[data-role='copy-code-label']");
-            if (label) { label.textContent = button.dataset.copied || I18N.copied; }
-
-            button.__copyResetTimer = window.setTimeout(() => {
-                resetWorkspaceCodeChip(button);
-            }, 1200);
-        }
-
-        async function copyExportString(button) {
-            const panel = button.closest("[data-role='export-string-panel']");
-            const textarea = panel ? panel.querySelector("textarea") : null;
-            if (!textarea || !textarea.value) { return; }
-
-            try {
-                const copied = await writeTextToClipboard(textarea.value);
-                if (!copied) { throw new Error("copy failed"); }
-                const originalLabel = button.dataset.label || I18N.exportStringCopy;
-                button.textContent = button.dataset.copied || I18N.copied;
-                window.setTimeout(() => { button.textContent = originalLabel; }, 1200);
-            } catch (_) {
-                window.prompt(I18N.copyFallback, textarea.value);
-            }
-        }
-    </script>
-    <script>
-        async function fetchSessionString(button) {
-            const targetSelector = button.dataset.target;
-            const exportUrl = button.dataset.exportUrl;
-            const panel = targetSelector ? document.querySelector(targetSelector) : null;
-            if (!panel || !exportUrl) { return; }
-
-            const textarea = panel.querySelector("textarea");
-            const title = panel.querySelector("[data-role='export-title']");
-            const error = panel.querySelector("[data-role='export-error']");
-            const copyButton = panel.querySelector("[data-role='copy-string']");
-
-            button.disabled = true;
-            button.textContent = I18N.exportStringLoading;
-            panel.classList.remove("hidden");
-            if (error) {
-                error.classList.add("hidden");
-                error.textContent = "";
-            }
-
-            try {
-                const response = await fetch(exportUrl, { headers: { "Accept": "application/json" } });
-                const payload = await response.json();
-                if (!response.ok) { throw new Error(payload.error || I18N.exportStringError); }
-
-                if (title) { title.textContent = I18N.exportStringReady; }
-                if (textarea) { textarea.value = payload.session_string || ""; }
-                if (copyButton) { copyButton.disabled = !(payload.session_string || ""); }
-            } catch (errorObject) {
-                if (textarea) { textarea.value = ""; }
-                if (copyButton) { copyButton.disabled = true; }
-                if (error) {
-                    error.textContent = errorObject.message || I18N.exportStringError;
-                    error.classList.remove("hidden");
-                }
-            } finally {
-                button.disabled = false;
-                button.textContent = button.dataset.label || "";
-            }
-        }
-
-        function renderAttentionQueue(sessions) {
-            const attention = (sessions || []).filter((session) => session.status.kind !== "connected").slice(0, 8);
-            if (attention.length === 0) {
-                return `<div class="rounded-[1.2rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52">${escapeHtml(I18N.attentionEmpty)}</div>`;
-            }
-
-            return attention.map((session) => `<article class="rounded-[1.15rem] border ${session.status.kind === "error" ? "border-peach/35 bg-[#fbefec]" : "border-butter/60 bg-[#f7f0e4]"} px-4 py-4">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-3">
-                            <span class="h-3 w-3 rounded-full ${statusDotClass(session.status.kind)}"></span>
-                            <p class="truncate text-sm font-semibold text-ink">${escapeHtml(session.key)}</p>
-                        </div>
-                        <p class="mt-2 inline-flex rounded-full border border-line/80 bg-white/85 px-3 py-1 font-mono text-[0.72rem] text-ink/58">${escapeHtml(session.phone)}</p>
-                    </div>
-                    <span class="rounded-full border px-3 py-1 text-xs ${statusBadgeClass(session.status.kind)}">${escapeHtml(sessionStatusLabel(session.status.kind))}</span>
-                </div>
-                ${session.status.error ? `<p class="mt-3 rounded-[0.95rem] border border-peach/30 bg-white/72 px-3 py-2 text-sm leading-6 text-[#98675f]">${escapeHtml(session.status.error)}</p>` : ""}
-                <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p class="text-[0.72rem] text-ink/52">${escapeHtml(I18N.latestUpdateLabel)}: <span class="font-mono">${escapeHtml(session.latest_message_at || "-")}</span></p>
-                    <button type="button" class="rounded-full border border-line bg-white px-3 py-1.5 text-sm text-ink/78 transition hover:border-sage hover:text-ink" onclick="openSessionModalBySessionKey('${session.id}')">${escapeHtml(I18N.openDetails)}</button>
-                </div>
-            </article>`).join("");
-        }
-
-        function renderRecentActivity(sessions) {
-            const recent = (sessions || []).slice(0, 12);
-            if (recent.length === 0) {
-                return `<div class="rounded-[1.2rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52">${escapeHtml(I18N.recentActivityEmpty)}</div>`;
-            }
-
-            return recent.map((session) => {
-                const maskedPhone = session.masked_phone || session.phone || "";
-                const phoneToggle = session.phone && session.phone !== maskedPhone
-                    ? `<button type="button" data-phone="${escapeHtml(session.phone)}" data-masked-phone="${escapeHtml(maskedPhone)}" data-revealed="false" title="${escapeHtml(I18N.phoneReveal)}" aria-label="${escapeHtml(I18N.phoneReveal)}" class="inline-flex rounded-full border border-line/75 bg-white/90 px-2.5 py-1 font-mono text-[0.68rem] text-ink/58 transition hover:border-sage hover:bg-[#faf6ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35" onclick="toggleMaskedPhone(this)"><span data-role="phone-value">${escapeHtml(maskedPhone)}</span></button>`
-                    : `<span class="inline-flex rounded-full border border-line/75 bg-white/82 px-2.5 py-1 font-mono text-[0.68rem] text-ink/52">${escapeHtml(maskedPhone)}</span>`;
-
-                return `<article class="rounded-[1.05rem] border border-line/80 bg-white/86 px-3.5 py-3" data-otp-scope data-latest-code-expires-at="${escapeHtml(session.latest_code_expires_at_unix || "")}">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-2.5">
-                            <span class="h-3 w-3 rounded-full ${statusDotClass(session.status.kind)}"></span>
-                            <p class="truncate text-[0.95rem] font-semibold text-ink">${escapeHtml(session.key)}</p>
-                            ${phoneToggle}
-                        </div>
-                        <p class="clamp-1 mt-1.5 text-[0.82rem] leading-6 text-ink/62">${escapeHtml(session.note || I18N.noNote)}</p>
-                    </div>
-                    <div class="flex items-center gap-2 self-start">
-                        <span class="rounded-full border px-2.5 py-1 text-[0.68rem] ${statusBadgeClass(session.status.kind)}">${escapeHtml(sessionStatusLabel(session.status.kind))}</span>
-                        <button type="button" class="rounded-full border border-line bg-latte px-3 py-1.5 text-[0.82rem] text-ink transition hover:border-sage hover:bg-[#e8dccb]" onclick="openSessionModalBySessionKey('${session.id}')">${escapeHtml(I18N.openDetails)}</button>
+{% extends "layout_app.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Copyright (C) 2026 Hanagram-web contributors #}
+
+{% block title %}Telegram · {{ i18n.page_title }}{% endblock title %}
+{% block page_id %}telegram{% endblock page_id %}
+{% block canonical %}/platforms/telegram{% endblock canonical %}
+{% block topbar_title %}Telegram{% endblock topbar_title %}
+{% block topbar_actions %}
+<a class="btn btn--soft btn--icon" href="{{ setup_href }}" aria-label="{{ i18n.dashboard_add_session }}" title="{{ i18n.dashboard_add_session }}"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></a>
+{% endblock topbar_actions %}
+
+{% block content %}
+<header class="page-head">
+    <div class="page-head__main">
+        <span class="platform-mark platform-mark--tg"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg></span>
+        <div class="page-head__text">
+            <p class="eyebrow">{{ i18n.hero_eyebrow }}</p>
+            <h1 class="page-head__title">{{ i18n.dashboard_sessions_title }}</h1>
+            <p class="page-head__desc">{{ i18n.dashboard_sessions_description }}</p>
+        </div>
+    </div>
+    <div class="page-head__actions hide-lt-lg">
+        <a class="btn btn--primary" href="{{ setup_href }}"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>{{ i18n.dashboard_add_session }}</a>
+    </div>
+</header>
+
+<div class="stats" aria-label="{{ i18n.dashboard_nav_status }}">
+    <div class="stat">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-layers"></use></svg>{{ i18n.stat_accounts }}</span>
+        <span class="stat__value" data-role="total-count">{{ total_sessions }}</span>
+    </div>
+    <div class="stat stat--success">
+        <span class="stat__label"><span class="dot dot--success"></span>{{ i18n.stat_connected }}</span>
+        <span class="stat__value" data-role="connected-count">{{ connected_count }}</span>
+    </div>
+    <div class="stat stat--warning">
+        <span class="stat__label"><span class="dot dot--warning"></span>{{ i18n.status_connecting }}</span>
+        <span class="stat__value" data-role="connecting-count">{{ connecting_count }}</span>
+    </div>
+    <div class="stat stat--danger">
+        <span class="stat__label"><span class="dot dot--danger"></span>{{ i18n.status_error }}</span>
+        <span class="stat__value" data-role="error-count">{{ error_count }}</span>
+    </div>
+    <div class="stat">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-clock"></use></svg>{{ i18n.stat_updated }}</span>
+        <span class="stat__value stat__value--sm truncate" data-role="updated-at">{{ now }}</span>
+    </div>
+</div>
+
+{% include "_alerts.html" %}
+
+<section data-role="attention-wrap" {% if attention_count == 0 %}hidden{% endif %}>
+    <div class="cluster mb-4" style="margin-bottom:10px">
+        <span class="card-icon card-icon--warning" style="width:28px;height:28px;border-radius:8px"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+        <h2 class="section-title">{{ i18n.dashboard_attention_title }}</h2>
+        <span class="count count--danger" data-role="attention-count">{{ attention_count }}</span>
+    </div>
+    <div class="attention-strip" data-role="attention-list">
+        {% for session in attention_sessions %}
+        <button type="button" class="attention-card{% if session.status.kind == "error" %} attention-card--error{% endif %}" onclick="openSessionModalBySessionKey('{{ session.id }}')">
+            <span class="attention-card__title">
+                <span class="dot {% if session.status.kind == "error" %}dot--danger{% else %}dot--warning dot--pulse{% endif %}"></span>
+                <span>{{ session.key }}</span>
+                <span class="badge {% if session.status.kind == "error" %}badge--danger{% else %}badge--warning{% endif %}">{% if session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}</span>
+            </span>
+            {% if session.status.error %}<span class="attention-card__error clamp-2">{{ session.status.error }}</span>{% endif %}
+            <span class="attention-card__meta mono">{{ session.phone }} · {{ session.latest_message_at | default(value="-") }}</span>
+        </button>
+        {% endfor %}
+    </div>
+</section>
+
+<div data-panels data-filter-scope id="telegram-panels">
+    <div class="toolbar" data-panels-anchor>
+        <div class="seg" role="tablist">
+            <a class="seg__btn is-active" role="tab" href="#telegram" data-panel-link="telegram"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>{{ i18n.ui_tg_sessions_tab }}<span class="count" data-role="total-count">{{ total_sessions }}</span></a>
+            <a class="seg__btn" role="tab" href="#activity" data-panel-link="activity"><svg class="icon" aria-hidden="true"><use href="#i-activity"></use></svg>{{ i18n.dashboard_recent_activity_title }}</a>
+        </div>
+        {% if sessions | length > 0 %}
+        <label class="input-group grow">
+            <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+            <input class="input" type="search" placeholder="{{ i18n.ui_search_sessions_placeholder }}" data-filter-input="[data-session-card]" data-hotkey-search autocomplete="off">
+        </label>
+        {% endif %}
+    </div>
+
+    <section class="panel is-active" data-panel="telegram" aria-label="{{ i18n.dashboard_nav_sessions }}">
+        {% if sessions | length == 0 %}
+        <div class="empty">
+            <span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg></span>
+            <p class="empty__title">{{ i18n.empty_state_title }}</p>
+            <p class="empty__desc">{{ i18n.empty_state_description_prefix }} <code>.session</code> {{ i18n.empty_state_description_suffix }}</p>
+            <div class="empty__actions"><a class="btn btn--primary" href="{{ setup_href }}"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>{{ i18n.dashboard_add_session }}</a></div>
+        </div>
+        {% else %}
+        <div class="code-grid">
+            {% for session in sessions %}
+            <article
+                class="session-card reveal"
+                style="--i:{{ loop.index0 }}"
+                data-session-card
+                data-otp-scope
+                data-session-key="{{ session.id }}"
+                data-session-modal-id="session-modal-{{ loop.index }}"
+                data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
+                data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}"
+                data-filter-text="{{ session.key }} {{ session.phone }} {{ session.note }}"
+            >
+                <div class="session-card__head">
+                    <span class="avatar avatar--tg">{{ session.key | truncate(length=1, end="") | upper }}</span>
+                    <div class="session-card__who">
+                        <p class="session-card__name">
+                            <span data-role="session-name">{{ session.key }}</span>
+                            <span data-new-indicator class="badge badge--new" hidden>{{ i18n.new_code_badge }}</span>
+                        </p>
+                        <p class="session-card__sub">
+                            <span data-role="status-dot" class="dot {% if session.status.kind == "connected" %}dot--success{% elif session.status.kind == "connecting" %}dot--warning dot--pulse{% else %}dot--danger{% endif %}"></span>
+                            <span data-role="status-badge">{% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}</span>
+                            <span class="subtle">·</span>
+                            <span class="mono" data-role="session-phone">{{ session.phone }}</span>
+                        </p>
                     </div>
                 </div>
-                <div class="mt-2.5 flex flex-wrap items-end justify-between gap-2.5">
-                    <div class="grid gap-1">
-                        <button
-                            type="button"
-                            data-role="recent-activity-code"
-                            data-code="${escapeHtml(session.latest_code || "")}"
-                            data-copied="${escapeHtml(I18N.copied)}"
-                            title="${escapeHtml(I18N.copy)}"
-                            aria-label="${escapeHtml(I18N.copy)}"
-                            class="rounded-full border border-sage/35 bg-[#eef4ee] px-2.5 py-1.5 font-mono text-[0.95rem] font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e7f1e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-75"
-                            onclick="copyWorkspaceCode(this)"
-                            ${session.latest_code ? "" : "disabled"}
-                        >${escapeHtml(session.latest_code || I18N.otpPlaceholder)}</button>
-                        <p data-role="otp-visibility-label" class="min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
-                    </div>
-                    <p class="text-[0.7rem] text-ink/52">${escapeHtml(I18N.latestUpdateLabel)}: <span class="font-mono">${escapeHtml(session.latest_message_at || "-")}</span></p>
-                </div>
-            </article>`;
-            }).join("");
-        }
 
-        function updateWorkspaceMeta(snapshot) {
-            document.querySelectorAll("[data-role='total-count']").forEach((element) => {
-                element.textContent = snapshot.total_count;
-            });
-            document.querySelectorAll("[data-role='connected-count']").forEach((element) => {
-                element.textContent = snapshot.connected_count;
-            });
-            document.querySelectorAll("[data-role='connecting-count']").forEach((element) => {
-                element.textContent = snapshot.connecting_count;
-            });
-            document.querySelectorAll("[data-role='error-count']").forEach((element) => {
-                element.textContent = snapshot.error_count;
-            });
-            document.querySelectorAll("[data-role='attention-count']").forEach((element) => {
-                element.textContent = snapshot.connecting_count + snapshot.error_count;
-            });
-            document.querySelectorAll("[data-role='updated-at']").forEach((element) => {
-                element.textContent = snapshot.generated_at;
-            });
-            document.querySelectorAll("[data-role='connected-summary']").forEach((element) => {
-                element.textContent = `${snapshot.connected_count}/${snapshot.total_count}`;
-            });
-            document.querySelectorAll("[data-role='attention-list']").forEach((element) => {
-                element.innerHTML = renderAttentionQueue(snapshot.sessions);
-            });
-            document.querySelectorAll("[data-role='recent-activity-list']").forEach((element) => {
-                element.innerHTML = renderRecentActivity(snapshot.sessions);
-                refreshOtpVisibility(element);
-            });
-        }
-
-        function currentPageSessionKeys() {
-            return Array.from(document.querySelectorAll("[data-session-card]"))
-                .map((element) => element.dataset.sessionKey)
-                .sort();
-        }
-
-        function snapshotSessionKeys(snapshot) {
-            return snapshot.sessions.map((session) => session.id).sort();
-        }
-
-        async function syncWorkspace(forceFull) {
-            if (workspaceSyncInFlight) { return; }
-            workspaceSyncInFlight = true;
-
-            try {
-                const response = await fetch(SNAPSHOT_API, {
-                    headers: { "Accept": "application/json" },
-                    cache: "no-store"
-                });
-                if (!response.ok) { return; }
-
-                const snapshot = await response.json();
-                const currentKeys = currentPageSessionKeys();
-                const nextKeys = snapshotSessionKeys(snapshot);
-                if (currentKeys.length !== nextKeys.length || currentKeys.join("|") !== nextKeys.join("|")) {
-                    window.location.reload();
-                    return;
-                }
-
-                updateWorkspaceMeta(snapshot);
-                snapshot.sessions.forEach((session) => {
-                    const card = findSessionCard(session.id);
-                    const modal = findSessionModal(session.id);
-                    if (card) { applySessionCardUpdate(card, session, { silent: forceFull }); }
-                    if (modal) {
-                        applySessionModalUpdate(modal, session);
-                        if (!modal.classList.contains("hidden")) {
-                            markSessionSeen(session.id, session.latest_code_at_unix || "");
-                        }
-                    }
-                });
-
-                refreshNewBadges();
-            } catch (_) {
-                // Ignore transient sync failures.
-            } finally {
-                workspaceSyncInFlight = false;
-            }
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
-            activateWorkspacePane();
-            refreshNewBadges();
-            refreshOtpVisibility();
-            document.querySelectorAll("[data-session-modal]").forEach((modal) => {
-                attachSessionModalPane(modal);
-            });
-
-            document.querySelectorAll("[data-modal-close]").forEach((element) => {
-                element.addEventListener("click", () => closeSessionModal(element.dataset.modalClose));
-            });
-
-            document.addEventListener("keydown", (event) => {
-                if (event.key !== "Escape") { return; }
-                const openModal = document.querySelector("[data-session-modal]:not(.hidden)");
-                if (openModal) { closeSessionModal(openModal.id); }
-            });
-
-            window.setInterval(
-                () => syncWorkspace(false),
-                TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS
-            );
-            window.setInterval(
-                () => syncWorkspace(true),
-                TELEGRAM_WORKSPACE_FULL_REFRESH_MS
-            );
-            window.setInterval(() => refreshOtpVisibility(), 1000);
-        });
-        window.addEventListener("hashchange", () => activateWorkspacePane());
-    </script>
-</head>
-<body class="min-h-screen font-sans text-ink antialiased">
-    <div class="pointer-events-none fixed inset-0 -z-10 paper-grid opacity-40"></div>
-
-    <main class="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8">
-        <!-- Slim top bar -->
-        <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex flex-wrap items-center gap-2.5">
-                    <span class="inline-flex items-center rounded-full border border-sage/35 bg-mint px-3 py-1.5 text-sm text-sageDeep">
-                        {{ current_username }}
+                <button
+                    type="button"
+                    class="otp{% if not session.latest_code %} is-empty{% endif %}"
+                    data-role="copy-code-chip"
+                    data-code="{{ session.latest_code | default(value="") }}"
+                    data-label="{{ i18n.latest_otp }}"
+                    data-copied="{{ i18n.copied }}"
+                    title="{{ i18n.copy }}"
+                    aria-label="{{ i18n.copy }}"
+                    onclick="copyWorkspaceCode(this)"
+                    {% if not session.latest_code %}disabled{% endif %}
+                >
+                    <span class="otp__top">
+                        <span class="otp__label" data-role="copy-code-label">{{ i18n.latest_otp }}</span>
+                        <span class="otp__hint"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</span>
                     </span>
-                    <h1 class="font-display text-lg font-semibold tracking-tight text-ink">{{ i18n.hero_title }}</h1>
-                </div>
+                    <span class="otp__row">
+                        <span class="otp__code" data-role="latest-code">{{ session.latest_code | default(value=i18n.otp_placeholder) }}</span>
+                        <span class="otp__time" data-role="otp-visibility-label"></span>
+                    </span>
+                </button>
 
-                <div class="flex flex-wrap items-center gap-1.5">
-                    <a
-                        href="{{ setup_href }}"
-                        class="rounded-full border border-sage/30 bg-sage px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-sageDeep"
-                    >
-                        {{ i18n.dashboard_add_session }}
-                    </a>
-                    <div class="inline-flex rounded-full border border-line bg-paper p-1">
-                        {% for option in languages %}
-                        <a
-                            href="{{ option.href }}"
-                            hreflang="{{ option.code }}"
-                            class="rounded-full px-3 py-1.5 text-sm transition {% if option.active %}bg-sage text-white{% else %}text-ink/70 hover:bg-latte{% endif %}"
-                        >
-                            {{ option.label }}
-                        </a>
-                        {% endfor %}
-                    </div>
-                    <a
-                        href="{{ dashboard_href }}"
-                        class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                    >
-                        {{ i18n.nav_dashboard_label }}
-                    </a>
-                    <a
-                        href="{{ settings_href }}"
-                        class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                    >
-                        {{ settings_label }}
-                    </a>
-                    {% if show_admin %}
-                    <a
-                        href="{{ admin_href }}"
-                        class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                    >
-                        {{ admin_label }}
-                    </a>
-                    {% endif %}
-                    <form method="post" action="{{ logout_action }}">
-                        <button
-                            type="submit"
-                            class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink"
-                        >
-                            {{ i18n.logout }}
-                        </button>
+                <p class="session-card__note clamp-1" data-role="session-note">{% if session.note %}{{ session.note }}{% else %}{{ i18n.session_note_placeholder }}{% endif %}</p>
+                <p class="session-card__error" data-role="session-error" {% if not session.status.error %}hidden{% endif %}>{{ session.status.error | default(value="") }}</p>
+
+                <div class="session-card__foot">
+                    <span class="cluster cluster--xs truncate"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-clock"></use></svg><span class="mono truncate" data-role="latest-update">{{ session.latest_message_at | default(value="-") }}</span></span>
+                    <button type="button" class="btn btn--sm" onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')">{{ i18n.open_details }}<svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        <div class="empty empty--compact mt-3" data-filter-empty hidden>
+            <span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+            <p class="empty__title">{{ i18n.ui_no_matches }}</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="panel" data-panel="activity" aria-label="{{ i18n.dashboard_recent_activity_title }}">
+        <div class="list list--card" data-role="recent-activity-list">
+            {% if recent_activity_sessions | length == 0 %}
+            <div class="empty empty--compact" style="border:0;border-radius:0">
+                <span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-activity"></use></svg></span>
+                <p class="empty__desc">{{ i18n.dashboard_recent_activity_empty }}</p>
+            </div>
+            {% else %}
+            {% for session in recent_activity_sessions %}
+            <div class="activity-item" data-otp-scope data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}">
+                <span class="dot {% if session.status.kind == "connected" %}dot--success{% elif session.status.kind == "connecting" %}dot--warning{% else %}dot--danger{% endif %}"></span>
+                <div class="activity-item__main">
+                    <p class="row__title"><span>{{ session.key }}</span>
+                        {% if session.phone != session.masked_phone %}
+                        <button type="button" class="phone-toggle" data-phone="{{ session.phone }}" data-masked-phone="{{ session.masked_phone }}" data-revealed="false" title="{{ i18n.session_phone_reveal_label }}" aria-label="{{ i18n.session_phone_reveal_label }}" onclick="toggleMaskedPhone(this)"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg><span data-role="phone-value">{{ session.masked_phone }}</span></button>
+                        {% else %}
+                        <span class="phone-toggle">{{ session.masked_phone }}</span>
+                        {% endif %}
+                    </p>
+                    <p class="row__meta"><span class="clamp-1">{% if session.note %}{{ session.note }}{% else %}{{ i18n.session_note_placeholder }}{% endif %}</span><span class="mono">{{ session.latest_message_at | default(value="-") }}</span><span data-role="otp-visibility-label" class="mono"></span></p>
+                </div>
+                <button type="button" class="activity-item__code" data-role="recent-activity-code" data-code="{{ session.latest_code | default(value="") }}" data-copied="{{ i18n.copied }}" title="{{ i18n.copy }}" aria-label="{{ i18n.copy }}" onclick="copyWorkspaceCode(this)" {% if not session.latest_code %}disabled{% endif %}>{{ session.latest_code | default(value=i18n.otp_placeholder) }}</button>
+                <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="openSessionModalBySessionKey('{{ session.id }}')" aria-label="{{ i18n.open_details }}" title="{{ i18n.open_details }}"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock content %}
+
+{% block overlays %}
+{% for session in sessions %}
+<div id="session-modal-{{ loop.index }}" class="sheet" data-session-modal data-session-key="{{ session.id }}" data-panels data-state="closed" aria-hidden="true" inert role="dialog" aria-modal="true" aria-labelledby="session-modal-{{ loop.index }}-title">
+    <div class="sheet__backdrop" data-sheet-close></div>
+    <div class="sheet__panel" tabindex="-1">
+        <div class="sheet__grab"></div>
+        <header class="sheet__head">
+            <span class="avatar avatar--tg avatar--lg">{{ session.key | truncate(length=1, end="") | upper }}</span>
+            <div class="sheet__heading">
+                <p class="sheet__eyebrow">{{ i18n.session_details }}</p>
+                <h2 class="sheet__title" id="session-modal-{{ loop.index }}-title" data-role="session-name">{{ session.key }}</h2>
+                <div class="sheet__sub">
+                    <span data-role="status-badge" class="badge {% if session.status.kind == "connected" %}badge--success{% elif session.status.kind == "connecting" %}badge--warning{% else %}badge--danger{% endif %}">{% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}</span>
+                    <span class="badge badge--mono" data-role="session-phone">{{ session.phone }}</span>
+                </div>
+            </div>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </header>
+        <div class="sheet__tabs">
+            <div class="seg seg--block" role="tablist">
+                <button type="button" class="seg__btn is-active" role="tab" data-panel-link="overview">{{ i18n.session_modal_overview_tab }}</button>
+                <button type="button" class="seg__btn" role="tab" data-panel-link="tools">{{ i18n.session_modal_tools_tab }}</button>
+                <button type="button" class="seg__btn" role="tab" data-panel-link="messages">{{ i18n.session_modal_messages_tab }}</button>
+            </div>
+        </div>
+        <div class="sheet__body">
+            <p class="session-card__error mb-4" data-role="session-error" {% if not session.status.error %}hidden{% endif %}>{{ session.status.error | default(value="") }}</p>
+
+            <section class="panel is-active stack" data-panel="overview">
+                <div class="otp" data-otp-scope data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}">
+                    <span class="otp__top">
+                        <span class="otp__label">{{ i18n.latest_otp }}</span>
+                        <span class="otp__time" data-role="otp-visibility-label"></span>
+                    </span>
+                    <span class="otp__code otp__code--lg" data-role="latest-code">{{ session.latest_code | default(value=i18n.otp_placeholder) }}</span>
+                    <span class="text-xs muted">{{ i18n.latest_update_label }} · <span class="mono" data-role="latest-update">{{ session.latest_message_at | default(value="-") }}</span></span>
+                </div>
+                <div class="btn-row">
+                    <button type="button" class="btn btn--primary btn--grow" data-role="copy-code" data-code="{{ session.latest_code | default(value="") }}" data-label="{{ i18n.copy }}" data-copied="{{ i18n.copied }}" data-prompt-label="{{ i18n.copy_fallback }}" onclick="copyCode(this)" {% if not session.latest_code %}disabled{% endif %}><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>{{ i18n.copy }}</span></button>
+                    <form method="post" action="/platforms/telegram/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" class="btn--grow" style="display:flex">
+                        <button type="submit" class="btn btn--danger-soft btn--block"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>{{ i18n.delete_session }}</button>
                     </form>
                 </div>
-            </div>
-        </header>
+                <div class="tile">
+                    <p class="tile__label">{{ i18n.session_note_label }}</p>
+                    <p class="tile__value" data-role="session-note">{% if session.note %}{{ session.note }}{% else %}{{ i18n.session_note_placeholder }}{% endif %}</p>
+                </div>
+            </section>
 
-        <!-- Inline stats bar -->
-        <div class="mt-3 flex flex-wrap items-center gap-2">
-            <span class="inline-flex items-center rounded-full border border-line/80 bg-white/88 px-2.5 py-1 text-[0.78rem]">
-                <span data-role="total-count">{{ total_sessions }}</span>&nbsp;{{ i18n.stat_accounts }}
-            </span>
-            <span class="inline-flex items-center rounded-full border border-sage/30 bg-mint px-2.5 py-1 text-[0.78rem] text-sageDeep">
-                <span data-role="connected-count">{{ connected_count }}</span>&nbsp;{{ i18n.stat_connected }}
-            </span>
-            <span class="inline-flex items-center rounded-full border border-butter/50 bg-[#f7f0e4] px-2.5 py-1 text-[0.78rem] text-ink/72">
-                <span data-role="connecting-count">{{ connecting_count }}</span>&nbsp;{{ i18n.status_connecting }}
-            </span>
-            <span class="inline-flex items-center rounded-full border border-peach/35 bg-[#fbefec] px-2.5 py-1 text-[0.78rem] text-[#98675f]">
-                <span data-role="error-count">{{ error_count }}</span>&nbsp;{{ i18n.status_error }}
-            </span>
-            <span class="hidden items-center text-[0.78rem] text-ink/50 sm:inline-flex">
-                {{ i18n.stat_updated }} · <span data-role="updated-at" class="ml-1 font-mono text-xs">{{ now }}</span>
-            </span>
-            <span class="hidden items-center text-[0.78rem] text-ink/50 sm:inline-flex">
-                <span data-role="connected-summary" class="font-mono text-xs">{{ connected_count }}/{{ total_sessions }}</span>
-            </span>
-        </div>
-
-        {% if banner %}
-        <section class="paper-shadow mt-3 rounded-[1.2rem] border px-4 py-3.5 text-sm leading-6 whitespace-pre-line {% if banner.kind == "success" %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-            {{ banner.message }}
-        </section>
-        {% endif %}
-
-        {% if transport_warning %}
-        <section class="paper-shadow mt-3 rounded-[1.2rem] border border-butter/70 bg-[#fff6e6] px-4 py-3.5 text-sm leading-6 text-[#866434]">
-            <p class="font-semibold">{{ transport_warning.title }}</p>
-            <p class="mt-2">{{ transport_warning.message }}</p>
-        </section>
-        {% endif %}
-
-        <!-- Attention banner (collapsible) -->
-        {% if attention_sessions | length > 0 %}
-        <details open class="mt-3 rounded-[1.15rem] border border-peach/30 bg-[#fdf5f2] p-3.5">
-            <summary class="flex cursor-pointer items-center gap-2 text-sm font-semibold text-[#98675f]">
-                {{ i18n.dashboard_attention_title }} · <span data-role="attention-count">{{ attention_count }}</span>
-            </summary>
-            <div class="mt-3 grid gap-2.5 max-h-[22rem] overflow-y-auto pr-1 sm:grid-cols-2" data-role="attention-list">
-                {% for session in attention_sessions %}
-                <article class="rounded-[1rem] border {% if session.status.kind == 'error' %}border-peach/35 bg-[#fbefec]{% else %}border-butter/60 bg-[#f7f0e4]{% endif %} px-3.5 py-3">
-                    <div class="flex flex-wrap items-start justify-between gap-2">
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <span class="h-2.5 w-2.5 rounded-full {% if session.status.kind == 'connected' %}bg-sage shadow-[0_0_0_6px_rgba(145,167,146,0.14)]{% elif session.status.kind == 'connecting' %}bg-butter shadow-[0_0_0_6px_rgba(231,213,174,0.24)]{% else %}bg-peach shadow-[0_0_0_6px_rgba(216,167,155,0.18)]{% endif %}"></span>
-                                <p class="truncate text-sm font-semibold text-ink">{{ session.key }}</p>
-                            </div>
-                            <p class="mt-1.5 inline-flex rounded-full border border-line/80 bg-white/85 px-2.5 py-0.5 font-mono text-[0.68rem] text-ink/58">{{ session.phone }}</p>
+            <section class="panel stack" data-panel="tools">
+                <div class="tool-card">
+                    <div class="tool-card__head"><span class="card-icon card-icon--tg"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></span><p class="tool-card__title">{{ i18n.export_session_title }}</p></div>
+                    <div class="btn-row">
+                        <a href="/platforms/telegram/{{ session.id }}/export/file" class="btn btn--grow" download><svg class="icon" aria-hidden="true"><use href="#i-file"></use></svg>{{ i18n.export_file }}</a>
+                        <button type="button" class="btn btn--grow" data-label="{{ i18n.export_string }}" data-export-url="/platforms/telegram/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" onclick="fetchSessionString(this)"><svg class="icon" aria-hidden="true"><use href="#i-code"></use></svg><span>{{ i18n.export_string }}</span></button>
+                    </div>
+                    <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="stack stack--sm" hidden>
+                        <div class="cluster cluster--between">
+                            <p class="text-sm strong" data-role="export-title">{{ i18n.export_string_ready }}</p>
+                            <button type="button" class="btn btn--sm" data-role="copy-string" data-label="{{ i18n.export_string_copy }}" data-copied="{{ i18n.copied }}" onclick="copyExportString(this)" disabled>{{ i18n.export_string_copy }}</button>
                         </div>
-                        <span class="rounded-full border px-2.5 py-0.5 text-[0.68rem] {% if session.status.kind == 'connected' %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == 'connecting' %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
-                            {% if session.status.kind == 'connected' %}{{ i18n.status_connected }}{% elif session.status.kind == 'connecting' %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
+                        <textarea rows="5" readonly class="textarea textarea--mono"></textarea>
+                        <p data-role="export-error" class="text-sm text-danger" hidden></p>
+                    </div>
+                </div>
+
+                <form method="post" action="/platforms/telegram/{{ session.id }}/note" class="tool-card">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="field">
+                        <span class="field__label">{{ i18n.session_note_label }}</span>
+                        <textarea name="note" rows="3" class="textarea">{{ session.note }}</textarea>
+                    </label>
+                    <button type="submit" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg>{{ i18n.save_note_label }}</button>
+                </form>
+
+                <form method="post" action="/platforms/telegram/{{ session.id }}/rename" class="tool-card">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="field">
+                        <span class="field__label">{{ i18n.rename_session }}</span>
+                        <span class="input-combo">
+                            <input type="text" name="session_name" value="{{ session.key }}" data-role="rename-input" class="input">
+                            <button type="submit" class="btn">{{ i18n.rename_submit }}</button>
                         </span>
-                    </div>
-                    {% if session.status.error %}
-                    <p class="mt-2 rounded-[0.85rem] border border-peach/25 bg-white/65 px-2.5 py-2 text-sm leading-6 text-[#98675f]">{{ session.status.error }}</p>
-                    {% endif %}
-                    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-[0.68rem] text-ink/50">{{ i18n.latest_update_label }}: <span class="font-mono">{{ session.latest_message_at | default(value='-') }}</span></p>
-                        <button type="button" class="rounded-full border border-line bg-white px-2.5 py-1 text-[0.78rem] text-ink/72 transition hover:border-sage hover:text-ink" onclick="openSessionModalBySessionKey('{{ session.id }}')">{{ i18n.open_details }}</button>
-                    </div>
-                </article>
-                {% endfor %}
-            </div>
-        </details>
-        {% endif %}
+                    </label>
+                </form>
+            </section>
 
-        <!-- Main workspace -->
-        <section class="paper-shadow mt-3 rounded-[1.35rem] border border-line/80 bg-paper/95 p-3.5 sm:p-4">
-            <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                <a href="#telegram" data-workspace-tab="telegram" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_nav_sessions }}</a>
-                <a href="#activity" data-workspace-tab="activity" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.dashboard_recent_activity_title }}</a>
-            </div>
-
-            <div class="mt-4">
-                <!-- Sessions pane (default) -->
-                <section data-workspace-pane="telegram" class="space-y-4">
-                    {% if sessions | length == 0 %}
-                    <section class="rounded-[1.2rem] border border-dashed border-line bg-white/78 px-5 py-8 text-center">
-                        <p class="text-sm uppercase tracking-[0.32em] text-ink/45">{{ i18n.empty_state_title }}</p>
-                        <p class="mx-auto mt-3 max-w-xl text-base leading-7 text-ink/70">
-                            {{ i18n.empty_state_description_prefix }}
-                            <span class="rounded-full bg-latte px-3 py-1 font-mono text-sm text-ink">.session</span>
-                            {{ i18n.empty_state_description_suffix }}
-                        </p>
-                        <a
-                            href="{{ setup_href }}"
-                            class="mt-6 inline-flex rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
-                        >
-                            {{ i18n.dashboard_add_session }}
-                        </a>
-                    </section>
+            <section class="panel" data-panel="messages">
+                <div class="cluster cluster--between mb-4" style="margin-bottom:10px">
+                    <h3 class="section-title">{{ i18n.recent_messages }}</h3>
+                    <span class="text-xs muted">{{ i18n.newest_first }}</span>
+                </div>
+                <div data-role="recent-messages" class="stack stack--sm">
+                    {% if session.recent_messages | length == 0 %}
+                    <div class="empty empty--compact"><p class="empty__desc">{{ i18n.no_messages }}</p></div>
                     {% else %}
-                    <section class="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
-                        {% for session in sessions %}
-                        <article
-                            class="float-in rounded-[1.18rem] border border-line/80 bg-white/88 p-3.5 transition hover:border-sage/45"
-                            style="animation-delay: {{ loop.index0 * 70 }}ms;"
-                            data-session-card
-                            data-otp-scope
-                            data-session-key="{{ session.id }}"
-                            data-session-modal-id="session-modal-{{ loop.index }}"
-                            data-latest-code-at="{{ session.latest_code_at_unix | default(value="") }}"
-                            data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}"
-                        >
-                            <div class="flex items-start justify-between gap-3">
-                                <div class="min-w-0">
-                                    <div class="flex items-center gap-2.5">
-                                        <span data-role="status-dot" class="h-2.5 w-2.5 rounded-full {% if session.status.kind == "connected" %}bg-sage shadow-[0_0_0_6px_rgba(145,167,146,0.14)]{% elif session.status.kind == "connecting" %}bg-butter shadow-[0_0_0_6px_rgba(231,213,174,0.24)]{% else %}bg-peach shadow-[0_0_0_6px_rgba(216,167,155,0.18)]{% endif %}"></span>
-                                        <p data-role="session-name" class="truncate text-[1rem] font-semibold text-ink">{{ session.key }}</p>
-                                    </div>
-                                    <div class="mt-2 flex flex-wrap items-center gap-2">
-                                        <p data-role="session-phone" class="inline-flex rounded-full border border-line/80 bg-white/92 px-2.5 py-1 font-mono text-[0.72rem] text-ink/58">{{ session.phone }}</p>
-                                        <span data-new-indicator class="hidden rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-[#a66c60]">
-                                            {{ i18n.new_code_badge }}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div class="flex flex-col items-end gap-2">
-                                    <span data-role="status-badge" class="rounded-full border px-2.5 py-1 text-[0.68rem] {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
-                                        {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
-                                <div class="min-w-0">
-                                    <p data-role="session-note" class="clamp-2 text-sm leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
-                                    <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ i18n.latest_update_label }}</p>
-                                    <p data-role="latest-update" class="mt-1 truncate font-mono text-[0.7rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    data-role="copy-code-chip"
-                                    data-code="{{ session.latest_code | default(value="") }}"
-                                    data-label="{{ i18n.latest_otp }}"
-                                    data-copied="{{ i18n.copied }}"
-                                    title="{{ i18n.copy }}"
-                                    aria-label="{{ i18n.copy }}"
-                                    class="w-full rounded-[1rem] border border-line/80 bg-white/92 px-3 py-2.5 text-left transition hover:border-sage hover:bg-[#faf6ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-70 sm:min-w-[8.25rem]"
-                                    onclick="copyWorkspaceCode(this)"
-                                    {% if not session.latest_code %}disabled{% endif %}
-                                >
-                                    <p data-role="copy-code-label" class="text-[0.65rem] uppercase tracking-[0.2em] text-ink/45">{{ i18n.latest_otp }}</p>
-                                    <p data-role="latest-code" class="mt-1.5 font-mono text-[1.3rem] font-semibold tracking-[0.12em] text-ink">
-                                        {{ session.latest_code | default(value=i18n.otp_placeholder) }}
-                                    </p>
-                                    <p data-role="otp-visibility-label" class="mt-1.5 min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
-                                </button>
-                            </div>
-
-                            <div class="mt-3 flex items-center justify-end gap-2">
-                                <button
-                                    type="button"
-                                    class="shrink-0 rounded-full border border-line bg-latte px-3.5 py-1.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]"
-                                    onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')"
-                                >
-                                    {{ i18n.open_details }}
-                                </button>
-                            </div>
-
-                            <p data-role="session-error" class="mt-2.5 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm leading-6 text-[#98675f] {% if not session.status.error %}hidden{% endif %}">
-                                {{ session.status.error | default(value="") }}
-                            </p>
-                        </article>
-                        {% endfor %}
-                    </section>
+                    {% for message in session.recent_messages %}
+                    <div class="message">
+                        <div class="message__head">
+                            {% if message.code %}<span class="badge badge--success badge--mono">{{ message.code }}</span>{% else %}<span></span>{% endif %}
+                            <span class="message__time">{{ message.received_at }}</span>
+                        </div>
+                        <p class="message__text">{{ message.text }}</p>
+                    </div>
+                    {% endfor %}
                     {% endif %}
-                </section>
-
-                <!-- Activity pane -->
-                <section data-workspace-pane="activity" class="hidden space-y-4">
-                    <div class="grid gap-2.5 max-h-[min(80vh,48rem)] overflow-y-auto pr-1" data-role="recent-activity-list">
-                        {% if recent_activity_sessions | length == 0 %}
-                        <div class="rounded-[1.2rem] border border-dashed border-line bg-white/75 px-4 py-8 text-sm text-ink/52">{{ i18n.dashboard_recent_activity_empty }}</div>
-                        {% else %}
-                        {% for session in recent_activity_sessions %}
-                        <article class="rounded-[1.05rem] border border-line/80 bg-white/86 px-3.5 py-3" data-otp-scope data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}">
-                            <div class="flex flex-wrap items-start justify-between gap-3">
-                                <div class="min-w-0 flex-1">
-                                    <div class="flex flex-wrap items-center gap-2.5">
-                                        <span class="h-3 w-3 rounded-full {% if session.status.kind == 'connected' %}bg-sage shadow-[0_0_0_7px_rgba(145,167,146,0.16)]{% elif session.status.kind == 'connecting' %}bg-butter shadow-[0_0_0_7px_rgba(231,213,174,0.28)]{% else %}bg-peach shadow-[0_0_0_7px_rgba(216,167,155,0.22)]{% endif %}"></span>
-                                        <p class="truncate text-[0.95rem] font-semibold text-ink">{{ session.key }}</p>
-                                        {% if session.phone != session.masked_phone %}
-                                        <button
-                                            type="button"
-                                            data-phone="{{ session.phone }}"
-                                            data-masked-phone="{{ session.masked_phone }}"
-                                            data-revealed="false"
-                                            title="{{ i18n.session_phone_reveal_label }}"
-                                            aria-label="{{ i18n.session_phone_reveal_label }}"
-                                            class="inline-flex rounded-full border border-line/75 bg-white/90 px-2.5 py-1 font-mono text-[0.68rem] text-ink/58 transition hover:border-sage hover:bg-[#faf6ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35"
-                                            onclick="toggleMaskedPhone(this)"
-                                        >
-                                            <span data-role="phone-value">{{ session.masked_phone }}</span>
-                                        </button>
-                                        {% else %}
-                                        <span class="inline-flex rounded-full border border-line/75 bg-white/82 px-2.5 py-1 font-mono text-[0.68rem] text-ink/52">{{ session.masked_phone }}</span>
-                                        {% endif %}
-                                    </div>
-                                    <p class="clamp-1 mt-1.5 text-[0.82rem] leading-6 text-ink/62">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
-                                </div>
-                                <div class="flex items-center gap-2 self-start">
-                                    <span class="rounded-full border px-2.5 py-1 text-[0.68rem] {% if session.status.kind == 'connected' %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == 'connecting' %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
-                                        {% if session.status.kind == 'connected' %}{{ i18n.status_connected }}{% elif session.status.kind == 'connecting' %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
-                                    </span>
-                                    <button type="button" class="rounded-full border border-line bg-latte px-3 py-1.5 text-[0.82rem] text-ink transition hover:border-sage hover:bg-[#e8dccb]" onclick="openSessionModalBySessionKey('{{ session.id }}')">{{ i18n.open_details }}</button>
-                                </div>
-                            </div>
-                            <div class="mt-2.5 flex flex-wrap items-end justify-between gap-2.5">
-                                <div class="grid gap-1">
-                                    <button
-                                        type="button"
-                                        data-role="recent-activity-code"
-                                        data-code="{{ session.latest_code | default(value="") }}"
-                                        data-copied="{{ i18n.copied }}"
-                                        title="{{ i18n.copy }}"
-                                        aria-label="{{ i18n.copy }}"
-                                        class="rounded-full border border-sage/35 bg-[#eef4ee] px-2.5 py-1.5 font-mono text-[0.95rem] font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e7f1e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage/35 disabled:cursor-default disabled:opacity-75"
-                                        onclick="copyWorkspaceCode(this)"
-                                        {% if not session.latest_code %}disabled{% endif %}
-                                    >{{ session.latest_code | default(value=i18n.otp_placeholder) }}</button>
-                                    <p data-role="otp-visibility-label" class="min-h-[1rem] text-[0.64rem] font-medium text-ink/42"></p>
-                                </div>
-                                <p class="text-[0.7rem] text-ink/52">{{ i18n.latest_update_label }}: <span class="font-mono">{{ session.latest_message_at | default(value='-') }}</span></p>
-                            </div>
-                        </article>
-                        {% endfor %}
-                        {% endif %}
-                    </div>
-                </section>
-            </div>
-        </section>
-
-        {% for session in sessions %}
-        <div id="session-modal-{{ loop.index }}" data-session-modal data-session-key="{{ session.id }}" class="hidden fixed inset-0 z-50">
-            <div class="absolute inset-0 bg-[rgba(79,67,59,0.12)] sm:bg-[linear-gradient(90deg,rgba(79,67,59,0.02)_0%,rgba(79,67,59,0.04)_56%,rgba(79,67,59,0.08)_76%,rgba(79,67,59,0.12)_100%)]" data-modal-close="session-modal-{{ loop.index }}"></div>
-
-            <div class="pointer-events-none relative flex min-h-[100dvh] items-stretch justify-center sm:min-h-screen sm:items-center sm:justify-end sm:px-3 sm:py-3 lg:px-4 lg:py-4">
-                <section class="modal-panel modal-mobile-safe pointer-events-auto relative flex h-[100dvh] w-full flex-col overflow-hidden overscroll-contain rounded-none border-0 px-4 pb-4 pt-3 sm:max-h-[calc(100vh-2rem)] sm:h-auto sm:w-[28rem] sm:rounded-[1.55rem] sm:border sm:border-line/80 sm:p-4">
-                    <div class="shrink-0 border-b border-line pb-3.5 sm:pb-4">
-                        <div class="mx-auto mb-3 h-1.5 w-14 rounded-full bg-line/90 sm:hidden"></div>
-                        <div class="flex items-start justify-between gap-3">
-                            <div class="min-w-0 flex-1">
-                                <p class="text-[0.68rem] uppercase tracking-[0.24em] text-ink/45 sm:text-xs">{{ i18n.session_details }}</p>
-                                <h2 data-role="session-name" class="mt-1.5 break-words font-display text-[1.35rem] font-semibold leading-tight text-ink sm:mt-2 sm:text-[1.95rem]">{{ session.key }}</h2>
-                            </div>
-                            <button type="button" class="shrink-0 rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 transition hover:border-sage hover:text-ink" data-modal-close="session-modal-{{ loop.index }}">
-                                {{ i18n.close }}
-                            </button>
-                        </div>
-
-                        <div class="mt-3 flex flex-col gap-2 sm:mt-3.5 sm:flex-row sm:flex-wrap sm:items-center">
-                            <p data-role="session-phone" class="inline-flex max-w-full break-all rounded-full border border-line bg-white px-3 py-1.5 font-mono text-[0.74rem] text-ink/60 sm:text-[0.78rem]">{{ session.phone }}</p>
-                            <span data-role="status-badge" class="inline-flex w-fit rounded-full border px-3 py-1.5 text-xs sm:text-sm {% if session.status.kind == "connected" %}border-sage/45 bg-[#eef4ee] text-sageDeep{% elif session.status.kind == "connecting" %}border-butter/60 bg-[#f7f0e4] text-ink/75{% else %}border-peach/45 bg-[#f8ece8] text-[#a66c60]{% endif %}">
-                                {% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="mt-3.5 shrink-0 sm:mt-4">
-                        <div class="tab-strip grid grid-cols-3 gap-2 rounded-[1.15rem] bg-white/72 p-1 sm:flex sm:overflow-x-auto sm:rounded-none sm:bg-transparent sm:p-0 sm:pb-1">
-                            <button type="button" data-session-pane-tab data-session-pane-target="overview" class="flex min-w-0 items-center justify-center rounded-[0.95rem] border bg-white px-2.5 py-2 text-sm font-medium text-ink/74 transition hover:border-sage sm:whitespace-nowrap sm:rounded-full sm:px-4 sm:py-2">{{ i18n.session_modal_overview_tab }}</button>
-                            <button type="button" data-session-pane-tab data-session-pane-target="tools" class="flex min-w-0 items-center justify-center rounded-[0.95rem] border bg-white px-2.5 py-2 text-sm font-medium text-ink/74 transition hover:border-sage sm:whitespace-nowrap sm:rounded-full sm:px-4 sm:py-2">{{ i18n.session_modal_tools_tab }}</button>
-                            <button type="button" data-session-pane-tab data-session-pane-target="messages" class="flex min-w-0 items-center justify-center rounded-[0.95rem] border bg-white px-2.5 py-2 text-sm font-medium text-ink/74 transition hover:border-sage sm:whitespace-nowrap sm:rounded-full sm:px-4 sm:py-2">{{ i18n.session_modal_messages_tab }}</button>
-                        </div>
-                    </div>
-
-                    <p data-role="session-error" class="mt-3.5 shrink-0 rounded-[1rem] border border-peach/35 bg-[#fbefec] px-3.5 py-3 text-sm leading-6 text-[#98675f] sm:mt-4 sm:px-4 {% if not session.status.error %}hidden{% endif %}">
-                        {{ session.status.error | default(value="") }}
-                    </p>
-
-                    <div class="mt-3.5 min-h-0 flex-1 overflow-hidden sm:mt-4">
-                        <section data-session-pane="overview" class="modal-pane-scroll hidden h-full overflow-y-auto pr-0.5 sm:pr-1">
-                            <div class="grid gap-3">
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-3.5 py-3.5 sm:px-4 sm:py-4" data-otp-scope data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.latest_otp }}</p>
-                                    <p data-role="latest-code" class="mt-2.5 break-all font-mono text-[1.7rem] font-semibold tracking-[0.13em] text-ink sm:mt-3 sm:text-[2.2rem] sm:tracking-[0.16em]">
-                                        {{ session.latest_code | default(value=i18n.otp_placeholder) }}
-                                    </p>
-                                    <p data-role="otp-visibility-label" class="mt-2 min-h-[1rem] text-[0.7rem] font-medium text-ink/44"></p>
-                                    <p class="mt-3.5 text-xs uppercase tracking-[0.22em] text-ink/45 sm:mt-4">{{ i18n.latest_update_label }}</p>
-                                    <p data-role="latest-update" class="mt-2 font-mono text-[0.72rem] text-ink/46">{{ session.latest_message_at | default(value="-") }}</p>
-                                    <div class="mt-4 grid grid-cols-2 gap-2.5">
-                                        <button type="button" data-role="copy-code" data-code="{{ session.latest_code | default(value="") }}" data-label="{{ i18n.copy }}" data-copied="{{ i18n.copied }}" data-prompt-label="{{ i18n.copy_fallback }}" class="rounded-[0.95rem] border border-line bg-latte px-4 py-3 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] disabled:cursor-not-allowed disabled:opacity-45" onclick="copyCode(this)" {% if not session.latest_code %}disabled{% endif %}>{{ i18n.copy }}</button>
-                                        <form method="post" action="/platforms/telegram/{{ session.id }}/delete" data-confirm="{{ i18n.delete_confirm }}" onsubmit="return confirm(this.dataset.confirm)">
-                                            <button type="submit" class="w-full rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ i18n.delete_session }}</button>
-                                        </form>
-                                    </div>
-                                </article>
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 px-3.5 py-3.5 sm:px-4 sm:py-4">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.session_note_label }}</p>
-                                    <p data-role="session-note" class="mt-2.5 text-sm leading-6 text-ink/68 sm:mt-3 sm:leading-7">{{ session.note | default(value=i18n.session_note_placeholder) }}</p>
-                                </article>
-                            </div>
-                        </section>
-
-                        <section data-session-pane="tools" class="modal-pane-scroll hidden h-full overflow-y-auto pr-0.5 sm:pr-1">
-                            <div class="grid gap-3">
-                                <article class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.export_session_title }}</p>
-                                    <div class="mt-3 grid grid-cols-2 gap-2.5">
-                                        <a href="/platforms/telegram/{{ session.id }}/export/file" class="rounded-full border border-line bg-latte px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb] sm:px-4 sm:text-sm" download>{{ i18n.export_file }}</a>
-                                        <button type="button" data-label="{{ i18n.export_string }}" data-export-url="/platforms/telegram/{{ session.id }}/export/string" data-target="#session-export-panel-{{ loop.index }}" class="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-medium text-ink transition hover:border-sage hover:bg-[#faf5ed] sm:px-4 sm:text-sm" onclick="fetchSessionString(this)">{{ i18n.export_string }}</button>
-                                    </div>
-                                    <div id="session-export-panel-{{ loop.index }}" data-role="export-string-panel" class="mt-3 hidden rounded-[1rem] border border-line/70 bg-[rgba(252,248,242,0.98)] p-3.5">
-                                        <div class="flex flex-wrap items-center justify-between gap-3">
-                                            <p data-role="export-title" class="text-sm font-medium text-ink">{{ i18n.export_string_ready }}</p>
-                                            <button type="button" data-role="copy-string" data-label="{{ i18n.export_string_copy }}" data-copied="{{ i18n.copied }}" class="rounded-full border border-line bg-white px-3 py-1.5 text-xs text-ink transition hover:border-sage hover:bg-paper disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm" onclick="copyExportString(this)" disabled>{{ i18n.export_string_copy }}</button>
-                                        </div>
-                                        <textarea rows="5" readonly class="mt-3 w-full rounded-[0.95rem] border border-line bg-paper px-3 py-3 font-mono text-sm leading-6 text-ink outline-none sm:rows-6"></textarea>
-                                        <p data-role="export-error" class="mt-3 hidden text-sm leading-6 text-[#98675f]"></p>
-                                    </div>
-                                </article>
-
-                                <div class="grid gap-3">
-                                    <form method="post" action="/platforms/telegram/{{ session.id }}/note" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
-                                        <input type="hidden" name="lang" value="{{ lang }}">
-                                        <label class="block">
-                                            <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.session_note_label }}</span>
-                                            <textarea name="note" rows="3" class="w-full rounded-[0.95rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white">{{ session.note }}</textarea>
-                                        </label>
-                                        <button type="submit" class="mt-3 w-full rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">{{ i18n.save_note_label }}</button>
-                                    </form>
-
-                                    <form method="post" action="/platforms/telegram/{{ session.id }}/rename" class="rounded-[1.2rem] border border-line/80 bg-white/96 p-3.5 sm:p-4">
-                                        <input type="hidden" name="lang" value="{{ lang }}">
-                                        <label class="block">
-                                            <span class="mb-2 block text-xs uppercase tracking-[0.22em] text-ink/45">{{ i18n.rename_session }}</span>
-                                            <input type="text" name="session_name" value="{{ session.key }}" data-role="rename-input" class="w-full rounded-[0.95rem] border border-line bg-paper px-3 py-2.5 text-sm text-ink outline-none transition focus:border-sage focus:bg-white">
-                                        </label>
-                                        <button type="submit" class="mt-3 w-full rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-medium text-ink transition hover:border-sage hover:bg-[#e8dccb]">{{ i18n.rename_submit }}</button>
-                                    </form>
-                                </div>
-
-                            </div>
-                        </section>
-
-                        <section data-session-pane="messages" class="modal-pane-scroll hidden h-full overflow-y-auto pr-0.5 sm:pr-1">
-                            <div class="rounded-[1.2rem] border border-line/80 bg-[rgba(253,248,241,0.99)] p-3.5 sm:p-4">
-                                <div class="flex flex-wrap items-center justify-between gap-2">
-                                    <h3 class="text-sm font-semibold uppercase tracking-[0.25em] text-ink/48">{{ i18n.recent_messages }}</h3>
-                                    <span class="text-xs text-ink/42">{{ i18n.newest_first }}</span>
-                                </div>
-                                <div data-role="recent-messages" class="mt-3 space-y-2">
-                                    {% if session.recent_messages | length == 0 %}
-                                    <div class="rounded-[1rem] border border-dashed border-line bg-white/70 px-4 py-8 text-sm text-ink/50">{{ i18n.no_messages }}</div>
-                                    {% else %}
-                                    {% for message in session.recent_messages %}
-                                    <div class="rounded-[1rem] border border-line/80 bg-white/84 px-3.5 py-3">
-                                        <div class="flex flex-wrap items-center justify-between gap-3">
-                                            {% if message.code %}
-                                            <span class="rounded-full border border-sage/35 bg-[#eef4ee] px-3 py-1 font-mono text-sm font-semibold text-sageDeep">{{ message.code }}</span>
-                                            {% else %}
-                                            <span></span>
-                                            {% endif %}
-                                            <p class="font-mono text-[0.72rem] tracking-[0.08em] text-ink/42">{{ message.received_at }}</p>
-                                        </div>
-                                        <p class="mt-3 break-words whitespace-pre-line text-sm leading-6 text-ink/76">{{ message.text }}</p>
-                                    </div>
-                                    {% endfor %}
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                </section>
-            </div>
+                </div>
+            </section>
         </div>
-        {% endfor %}
-    </main>
-</body>
-</html>
+    </div>
+</div>
+{% endfor %}
+{% endblock overlays %}
+
+{% block scripts %}
+<script>
+    const I18N = {
+        statusConnecting: {{ i18n.status_connecting | json_encode | safe }},
+        statusConnected: {{ i18n.status_connected | json_encode | safe }},
+        statusError: {{ i18n.status_error | json_encode | safe }},
+        noMessages: {{ i18n.no_messages | json_encode | safe }},
+        noNote: {{ i18n.session_note_placeholder | json_encode | safe }},
+        otpPlaceholder: {{ i18n.otp_placeholder | json_encode | safe }},
+        otpHideCountdown: {{ i18n.otp_hide_countdown_label | json_encode | safe }},
+        otpHidden: {{ i18n.otp_hidden_label | json_encode | safe }},
+        latestUpdateLabel: {{ i18n.latest_update_label | json_encode | safe }},
+        openDetails: {{ i18n.open_details | json_encode | safe }},
+        attentionEmpty: {{ i18n.dashboard_attention_empty | json_encode | safe }},
+        recentActivityEmpty: {{ i18n.dashboard_recent_activity_empty | json_encode | safe }},
+        copy: {{ i18n.copy | json_encode | safe }},
+        copied: {{ i18n.copied | json_encode | safe }},
+        copyFallback: {{ i18n.copy_fallback | json_encode | safe }},
+        phoneReveal: {{ i18n.session_phone_reveal_label | json_encode | safe }},
+        phoneHide: {{ i18n.session_phone_hide_label | json_encode | safe }},
+        exportStringLoading: {{ i18n.export_string_loading | json_encode | safe }},
+        exportStringCopy: {{ i18n.export_string_copy | json_encode | safe }},
+        exportStringReady: {{ i18n.export_string_ready | json_encode | safe }},
+        exportStringError: {{ i18n.export_string_error | json_encode | safe }}
+    };
+    const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
+    const TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS = {{ telegram_workspace_incremental_refresh_seconds }} * 1000;
+    const TELEGRAM_WORKSPACE_FULL_REFRESH_MS = {{ telegram_workspace_full_refresh_seconds }} * 1000;
+</script>
+<script src="/static/telegram.js?v=__ASSET_VERSION__" defer></script>
+{% endblock scripts %}

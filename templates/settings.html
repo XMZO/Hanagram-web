@@ -1,900 +1,339 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Hanagram-web contributors -->
-<!DOCTYPE html>
-<html lang="{{ i18n.html_lang }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        display: ["Noto Serif SC", "serif"],
-                        sans: ["Noto Sans SC", "sans-serif"],
-                        mono: ["JetBrains Mono", "monospace"]
-                    },
-                    colors: {
-                        oat: "#f6f1e8",
-                        paper: "#fffaf2",
-                        latte: "#f0e5d6",
-                        line: "#ded3c6",
-                        ink: "#4b4038",
-                        sage: "#8ca38c",
-                        sageDeep: "#6f866f",
-                        peach: "#d9a69a",
-                        mist: "#eef4ee"
-                    }
-                }
-            }
-        };
+{% extends "layout_app.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Copyright (C) 2026 Hanagram-web contributors #}
 
-        const SETTINGS_PANES = [{% if show_workspace_links %}"security", "notifications", "access"{% else %}"security"{% endif %}];
-        const SECURITY_PANES = [{% if show_workspace_links %}"overview", "password", "totp", "passkeys"{% else %}"overview", "password"{% endif %}];
-        const SETTINGS_PANE_STORAGE_KEY = "hanagram.settings.pane";
-        const SECURITY_PANE_STORAGE_KEY = "hanagram.settings.security-pane";
-        const LOCAL_SEGMENTS = {
-            notifications: {
-                panes: ["settings", "reference"],
-                storageKey: "hanagram.settings.notifications-pane"
-            },
-            access: {
-                panes: ["idle", "sessions"],
-                storageKey: "hanagram.settings.access-pane"
-            }
-        };
+{% block title %}{{ title }} · {{ i18n.page_title }}{% endblock title %}
+{% block page_id %}settings{% endblock page_id %}
+{% block canonical %}/settings{% endblock canonical %}
+{% block topbar_title %}{{ title }}{% endblock topbar_title %}
 
-        function readStoredPane(key) {
-            try {
-                return window.sessionStorage.getItem(key) || "";
-            } catch (_error) {
-                return "";
-            }
-        }
+{% block content %}
+<header class="page-head">
+    <div class="page-head__main">
+        <span class="platform-mark platform-mark--accent"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg></span>
+        <div class="page-head__text">
+            <p class="eyebrow">{{ current_username }}</p>
+            <h1 class="page-head__title">{{ title }}</h1>
+            <p class="page-head__desc">{{ description }}</p>
+        </div>
+    </div>
+</header>
 
-        function writeStoredPane(key, value) {
-            try {
-                window.sessionStorage.setItem(key, value);
-            } catch (_error) {
-                // Ignore storage failures and keep the page interactive.
-            }
-        }
+{% include "_alerts.html" %}
 
-        function setPillState(element, active) {
-            if (!element) { return; }
-            element.classList.toggle("bg-sage", active);
-            element.classList.toggle("text-white", active);
-            element.classList.toggle("border-sage", active);
-            element.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-            element.classList.toggle("bg-white", !active);
-            element.classList.toggle("text-ink/74", !active);
-            element.classList.toggle("border-line", !active);
-        }
+{% if recovery_notice %}
+<section class="card card--warning card--pad stack mb-4" style="margin-bottom:18px">
+    <div class="cluster cluster--between" style="align-items:flex-start">
+        <div class="cluster cluster--nowrap" style="align-items:flex-start">
+            <span class="card-icon card-icon--warning"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span>
+            <div>
+                <p class="eyebrow" style="color:var(--warning-text)">{{ recovery_refresh_title }}</p>
+                <h2 class="card__title mt-1">{{ recovery_label }}</h2>
+                <p class="text-sm mt-1" style="color:var(--text-2)">{{ recovery_refresh_message }}</p>
+            </div>
+        </div>
+        <div class="btn-row">
+            <button type="button" class="btn btn--sm" data-copy="{% for code in recovery_notice.codes %}{{ code }}{% if not loop.last %} {% endif %}{% endfor %}"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</button>
+            <form method="post" action="{{ recovery_ack_action }}">
+                <button type="submit" class="btn btn--primary btn--sm"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>{{ recovery_ack_label }}</button>
+            </form>
+        </div>
+    </div>
+    <div class="recovery-grid recovery-grid--wide">
+        {% for code in recovery_notice.codes %}<span class="recovery-code">{{ code }}</span>{% endfor %}
+    </div>
+</section>
+{% endif %}
 
-        function activateSettingsPane(rawHash) {
-            const requested = String(rawHash || window.location.hash || "").replace(/^#/, "");
-            const stored = readStoredPane(SETTINGS_PANE_STORAGE_KEY);
-            const activePane = SETTINGS_PANES.includes(requested)
-                ? requested
-                : (SETTINGS_PANES.includes(stored) ? stored : "security");
+<div class="workspace" data-panels id="settings-panels" data-restricted="{% if show_workspace_links %}false{% else %}true{% endif %}">
+    <nav class="secnav" aria-label="{{ title }}">
+        <div class="secnav__group">
+            <p class="secnav__label">{{ settings_nav_security }}</p>
+            <a class="secnav__item" href="#overview" data-panel-link="overview"><svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg>{{ i18n.settings_security_tab_overview_label }}</a>
+            <a class="secnav__item" href="#password" data-panel-link="password"><svg class="icon" aria-hidden="true"><use href="#i-lock"></use></svg>{{ i18n.settings_security_tab_password_label }}</a>
+            {% if show_workspace_links %}
+            <a class="secnav__item" href="#totp" data-panel-link="totp"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg>{{ i18n.settings_security_tab_totp_label }}</a>
+            <a class="secnav__item" href="#passkeys" data-panel-link="passkeys"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg>{{ i18n.settings_security_tab_passkeys_label }}<span class="count">{{ passkey_count }}</span></a>
+            {% endif %}
+        </div>
+        {% if show_workspace_links %}
+        <span class="secnav__sep" aria-hidden="true"></span>
+        <div class="secnav__group">
+            <p class="secnav__label">{{ settings_nav_notifications }}</p>
+            <a class="secnav__item" href="#notifications" data-panel-link="notifications"><svg class="icon" aria-hidden="true"><use href="#i-bell"></use></svg>{{ i18n.bot_settings_title }}</a>
+        </div>
+        <span class="secnav__sep" aria-hidden="true"></span>
+        <div class="secnav__group">
+            <p class="secnav__label">{{ i18n.ui_group_access }}</p>
+            <a class="secnav__item" href="#idle" data-panel-link="idle"><svg class="icon" aria-hidden="true"><use href="#i-hourglass"></use></svg>{{ i18n.ui_settings_nav_idle }}</a>
+            <a class="secnav__item" href="#sessions" data-panel-link="sessions"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg>{{ i18n.ui_settings_nav_sessions }}<span class="count">{{ active_session_count }}</span></a>
+        </div>
+        {% endif %}
+    </nav>
 
-            writeStoredPane(SETTINGS_PANE_STORAGE_KEY, activePane);
-
-            document.querySelectorAll("[data-settings-pane]").forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.settingsPane !== activePane);
-            });
-
-            document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
-                setPillState(tab, tab.dataset.settingsTab === activePane);
-            });
-        }
-
-        function activateSecurityPane(rawPane) {
-            const requested = String(rawPane || "").replace(/^#/, "");
-            const stored = readStoredPane(SECURITY_PANE_STORAGE_KEY);
-            const activePane = SECURITY_PANES.includes(requested)
-                ? requested
-                : (SECURITY_PANES.includes(stored) ? stored : SECURITY_PANES[0]);
-
-            writeStoredPane(SECURITY_PANE_STORAGE_KEY, activePane);
-
-            document.querySelectorAll("[data-security-pane]").forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.securityPane !== activePane);
-            });
-
-            document.querySelectorAll("[data-security-tab]").forEach((tab) => {
-                setPillState(tab, tab.dataset.securityTab === activePane);
-            });
-        }
-
-        function activateLocalSegment(group, rawPane) {
-            const config = LOCAL_SEGMENTS[group];
-            if (!config) { return ""; }
-
-            const requested = String(rawPane || "").replace(/^#/, "");
-            const stored = readStoredPane(config.storageKey);
-            const activePane = config.panes.includes(requested)
-                ? requested
-                : (config.panes.includes(stored) ? stored : config.panes[0]);
-
-            writeStoredPane(config.storageKey, activePane);
-
-            document.querySelectorAll(`[data-settings-segment-panel="${group}"]`).forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.settingsSegmentId !== activePane);
-            });
-
-            document.querySelectorAll(`[data-settings-segment-tab="${group}"]`).forEach((tab) => {
-                setPillState(tab, tab.dataset.settingsSegmentTarget === activePane);
-            });
-
-            return activePane;
-        }
-
-        function attachLocalSegment(group) {
-            const config = LOCAL_SEGMENTS[group];
-            if (!config) { return; }
-            const tabs = Array.from(document.querySelectorAll(`[data-settings-segment-tab="${group}"]`));
-            if (tabs.length === 0) { return; }
-
-            tabs.forEach((tab) => {
-                tab.addEventListener("click", () => {
-                    activateLocalSegment(group, tab.dataset.settingsSegmentTarget || "");
-                });
-            });
-
-            activateLocalSegment(group, "");
-        }
-
-        function rememberNearestPane(form) {
-            const settingsPane = form.dataset.preserveSettingsPane
-                || form.closest("[data-settings-pane]")?.dataset.settingsPane;
-            const securityPane = form.dataset.preserveSecurityTab
-                || form.closest("[data-security-pane]")?.dataset.securityPane;
-            const localSegmentPanel = form.closest("[data-settings-segment-panel]");
-
-            if (settingsPane) {
-                writeStoredPane(SETTINGS_PANE_STORAGE_KEY, settingsPane);
-            }
-            if (securityPane) {
-                writeStoredPane(SECURITY_PANE_STORAGE_KEY, securityPane);
-            }
-            if (localSegmentPanel) {
-                const group = localSegmentPanel.dataset.settingsSegmentPanel;
-                const id = localSegmentPanel.dataset.settingsSegmentId;
-                const config = LOCAL_SEGMENTS[group];
-                if (config && id) {
-                    writeStoredPane(config.storageKey, id);
-                }
-            }
-        }
-
-        function redirectToSettingsTarget(target) {
-            const destination = new URL(target, window.location.href);
-            const current = new URL(window.location.href);
-
-            if (
-                destination.pathname === current.pathname
-                && destination.search === current.search
-                && destination.hash === current.hash
-            ) {
-                window.location.reload();
-                return;
-            }
-
-            window.location.assign(destination.toString());
-        }
-
-        function base64UrlToBuffer(value) {
-            const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
-            const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
-            const binary = window.atob(padded);
-            const bytes = new Uint8Array(binary.length);
-            for (let index = 0; index < binary.length; index += 1) {
-                bytes[index] = binary.charCodeAt(index);
-            }
-            return bytes.buffer;
-        }
-
-        function bufferToBase64Url(buffer) {
-            const bytes = new Uint8Array(buffer);
-            let binary = "";
-            bytes.forEach((value) => {
-                binary += String.fromCharCode(value);
-            });
-            return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-        }
-
-        function mapPublicKeyCreationOptions(options) {
-            const publicKey = { ...options };
-            publicKey.challenge = base64UrlToBuffer(publicKey.challenge);
-            publicKey.user = { ...publicKey.user, id: base64UrlToBuffer(publicKey.user.id) };
-            if (Array.isArray(publicKey.excludeCredentials)) {
-                publicKey.excludeCredentials = publicKey.excludeCredentials.map((credential) => ({
-                    ...credential,
-                    id: base64UrlToBuffer(credential.id)
-                }));
-            }
-            return publicKey;
-        }
-
-        function serializeRegistrationCredential(credential) {
-            const response = credential.response;
-            const attestationObject = response.attestationObject;
-            const clientDataJSON = response.clientDataJSON;
-            const authenticatorData = typeof response.getAuthenticatorData === "function"
-                ? response.getAuthenticatorData()
-                : null;
-            const publicKey = typeof response.getPublicKey === "function"
-                ? response.getPublicKey()
-                : null;
-            const publicKeyAlgorithm = typeof response.getPublicKeyAlgorithm === "function"
-                ? response.getPublicKeyAlgorithm()
-                : null;
-
-            if (!attestationObject || !clientDataJSON || !authenticatorData || !publicKey || typeof publicKeyAlgorithm !== "number") {
-                throw new Error("incomplete-passkey-registration-response");
-            }
-
-            return {
-                id: credential.id,
-                rawId: bufferToBase64Url(credential.rawId),
-                type: credential.type,
-                authenticatorAttachment: credential.authenticatorAttachment || null,
-                response: {
-                    attestationObject: bufferToBase64Url(attestationObject),
-                    clientDataJSON: bufferToBase64Url(clientDataJSON),
-                    authenticatorData: bufferToBase64Url(authenticatorData),
-                    publicKey: bufferToBase64Url(publicKey),
-                    publicKeyAlgorithm,
-                    transports: typeof response.getTransports === "function" ? response.getTransports() : []
-                },
-                clientExtensionResults: credential.getClientExtensionResults()
-            };
-        }
-
-        function describePasskeyCreateError(error, button) {
-            if (!(error instanceof Error)) {
-                return button?.dataset.failed || "";
-            }
-            if (error.message === "incomplete-passkey-registration-response") {
-                return button?.dataset.incompleteResponse || error.message;
-            }
-            if (error.name === "NotAllowedError") {
-                return button?.dataset.notAllowed || error.message || "";
-            }
-            return error.message || button?.dataset.failed || "";
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
-            activateSettingsPane();
-            activateSecurityPane();
-            attachLocalSegment("notifications");
-            attachLocalSegment("access");
-
-            document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
-                tab.addEventListener("click", () => {
-                    writeStoredPane(SETTINGS_PANE_STORAGE_KEY, tab.dataset.settingsTab || "security");
-                });
-            });
-
-            document.querySelectorAll("[data-security-tab]").forEach((tab) => {
-                tab.addEventListener("click", () => {
-                    activateSecurityPane(tab.dataset.securityTab);
-                });
-            });
-
-            document.querySelectorAll("[data-security-target]").forEach((trigger) => {
-                trigger.addEventListener("click", () => {
-                    activateSecurityPane(trigger.dataset.securityTarget);
-                });
-            });
-
-            document.querySelectorAll("form").forEach((form) => {
-                const settingsPane = form.dataset.preserveSettingsPane
-                    || form.closest("[data-settings-pane]")?.dataset.settingsPane;
-                const securityPane = form.dataset.preserveSecurityTab
-                    || form.closest("[data-security-pane]")?.dataset.securityPane;
-
-                if (!settingsPane && !securityPane) { return; }
-                form.addEventListener("submit", () => rememberNearestPane(form));
-            });
-
-            const passkeyForm = document.querySelector("[data-passkey-register-form]");
-            const passkeyFeedback = document.getElementById("passkey-feedback");
-            const passkeyButton = passkeyForm?.querySelector("[data-passkey-register-button]");
-            const passkeyName = passkeyForm?.querySelector('input[name="passkey_label"]');
-            const langInput = passkeyForm?.querySelector('input[name="lang"]');
-
-            function setPasskeyFeedback(message, isError) {
-                if (!passkeyFeedback) { return; }
-                if (!message) {
-                    passkeyFeedback.classList.add("hidden");
-                    passkeyFeedback.textContent = "";
-                    return;
-                }
-                passkeyFeedback.classList.remove("hidden");
-                passkeyFeedback.textContent = message;
-                passkeyFeedback.classList.toggle("border-peach/35", Boolean(isError));
-                passkeyFeedback.classList.toggle("bg-[#fbefec]", Boolean(isError));
-                passkeyFeedback.classList.toggle("text-[#98675f]", Boolean(isError));
-                passkeyFeedback.classList.toggle("border-sage/35", !isError);
-                passkeyFeedback.classList.toggle("bg-[#eef4ee]", !isError);
-                passkeyFeedback.classList.toggle("text-sageDeep", !isError);
-            }
-
-            passkeyForm?.addEventListener("submit", async (event) => {
-                event.preventDefault();
-                rememberNearestPane(passkeyForm);
-                if (!window.PublicKeyCredential || !navigator.credentials?.create) {
-                    setPasskeyFeedback(passkeyButton?.dataset.unsupported || "", true);
-                    return;
-                }
-                if (!passkeyName?.value.trim()) {
-                    setPasskeyFeedback(passkeyButton?.dataset.missingLabel || "", true);
-                    passkeyName?.focus();
-                    return;
-                }
-
-                setPasskeyFeedback(passkeyButton?.dataset.starting || "", false);
-                if (passkeyButton) { passkeyButton.disabled = true; }
-
-                try {
-                    const optionsResponse = await fetch(passkeyForm.dataset.optionsAction, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        body: JSON.stringify({
-                            label: passkeyName.value,
-                            lang: langInput?.value || null
-                        })
-                    });
-                    const optionsPayload = await optionsResponse.json().catch(() => ({}));
-                    if (!optionsResponse.ok) {
-                        throw new Error(optionsPayload.error || passkeyButton?.dataset.failed || "");
-                    }
-
-                    setPasskeyFeedback(passkeyButton?.dataset.awaiting || "", false);
-                    const credential = await navigator.credentials.create({
-                        publicKey: mapPublicKeyCreationOptions(optionsPayload.options.publicKey)
-                    });
-                    if (!credential) {
-                        throw new Error(passkeyButton?.dataset.failed || "");
-                    }
-
-                    const finishResponse = await fetch(passkeyForm.dataset.finishAction, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        body: JSON.stringify({
-                            registration_id: optionsPayload.registration_id,
-                            credential: serializeRegistrationCredential(credential),
-                            lang: langInput?.value || null
-                        })
-                    });
-                    const finishPayload = await finishResponse.json().catch(() => ({}));
-                    if (!finishResponse.ok) {
-                        throw new Error(finishPayload.error || passkeyButton?.dataset.failed || "");
-                    }
-
-                    writeStoredPane(SETTINGS_PANE_STORAGE_KEY, "security");
-                    writeStoredPane(SECURITY_PANE_STORAGE_KEY, "passkeys");
-                    setPasskeyFeedback("", false);
-                    redirectToSettingsTarget(finishPayload.redirect_to || "/settings#security");
-                } catch (error) {
-                    setPasskeyFeedback(describePasskeyCreateError(error, passkeyButton), true);
-                } finally {
-                    if (passkeyButton) { passkeyButton.disabled = false; }
-                }
-            });
-        });
-        window.addEventListener("hashchange", () => activateSettingsPane());
-    </script>
-    <style>
-        :root { color-scheme: light; }
-        body {
-            background:
-                radial-gradient(circle at 10% 14%, rgba(140, 163, 140, 0.12), transparent 24%),
-                radial-gradient(circle at 84% 18%, rgba(217, 166, 154, 0.12), transparent 20%),
-                linear-gradient(180deg, #fbf7f0 0%, #f6f1e8 46%, #f2ece2 100%);
-        }
-        .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
-        .section-card { border: 1px solid rgba(222, 211, 198, 0.92); background: rgba(255, 250, 242, 0.95); }
-        .tab-strip {
-            scrollbar-width: none;
-        }
-        .tab-strip::-webkit-scrollbar {
-            display: none;
-        }
-        .compact-scroll {
-            scrollbar-gutter: stable;
-        }
-        details summary::-webkit-details-marker {
-            display: none;
-        }
-        details[open] .details-chevron {
-            transform: rotate(180deg);
-        }
-    </style>
-</head>
-<body class="min-h-screen font-sans text-ink antialiased">
-    <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-        <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex flex-wrap items-center gap-2.5">
-                    <span class="inline-flex items-center rounded-full border border-sage/35 bg-mist px-3 py-1.5 text-sm text-sageDeep">
-                        {{ current_username }}
-                    </span>
-                    <h1 class="font-display text-lg font-semibold tracking-tight text-ink">{{ title }}</h1>
-                </div>
-                <div class="flex flex-wrap items-center gap-1.5">
-                    {% if show_workspace_links %}
-                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ dashboard_label }}</a>
-                    {% if show_admin %}
-                    <a href="{{ admin_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ admin_label }}</a>
-                    {% endif %}
-                    {% endif %}
+    <div class="workspace__body" data-panels-anchor>
+        {# ---------------- Overview ---------------- #}
+        <section class="panel" data-panel="overview">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ security_title }}</h2>
+                    <p class="panel__desc">{{ security_description }}</p>
                 </div>
             </div>
-        </header>
-
-        <div class="mt-3 flex flex-wrap items-center gap-2 text-[0.78rem]">
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ totp_label }} · <span class="ml-1 font-semibold">{{ totp_status }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ recovery_label }} · <span class="ml-1 font-semibold">{{ recovery_remaining }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ passkeys_label }} · <span class="ml-1 font-semibold">{{ passkey_count }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ idle_summary_label }} · <span class="ml-1 font-semibold">{{ idle_effective_timeout }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ sessions_title }} · <span class="ml-1 font-semibold">{{ active_session_count }}</span></span>
-        </div>
-
-        {% if transport_warning %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
-            <p class="font-semibold">{{ transport_warning.title }}</p>
-            <p class="mt-2">{{ transport_warning.message }}</p>
+            <div class="grid grid--2">
+                <a class="card card--pad card--link stack stack--sm" href="#{% if show_workspace_links %}totp{% else %}overview{% endif %}" data-panel-link="{% if show_workspace_links %}totp{% else %}overview{% endif %}">
+                    <div class="cluster cluster--between"><span class="card-icon card-icon--accent"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg></span><svg class="icon icon--sm row__chev" aria-hidden="true"><use href="#i-chevron-right"></use></svg></div>
+                    <p class="tile__label">{{ totp_label }}</p>
+                    <p class="tile__value tile__value--lg">{{ totp_status }}</p>
+                    <p class="tile__hint">{{ totp_hint }}</p>
+                </a>
+                <a class="card card--pad card--link stack stack--sm" href="#{% if show_workspace_links %}totp{% else %}overview{% endif %}" data-panel-link="{% if show_workspace_links %}totp{% else %}overview{% endif %}">
+                    <div class="cluster cluster--between"><span class="card-icon card-icon--warning"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><svg class="icon icon--sm row__chev" aria-hidden="true"><use href="#i-chevron-right"></use></svg></div>
+                    <p class="tile__label">{{ recovery_label }}</p>
+                    <p class="tile__value tile__value--lg">{{ recovery_remaining }}</p>
+                    <p class="tile__hint">{{ recovery_hint }}</p>
+                </a>
+                <a class="card card--pad card--link stack stack--sm" href="#{% if show_workspace_links %}passkeys{% else %}overview{% endif %}" data-panel-link="{% if show_workspace_links %}passkeys{% else %}overview{% endif %}">
+                    <div class="cluster cluster--between"><span class="card-icon card-icon--success"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg></span><svg class="icon icon--sm row__chev" aria-hidden="true"><use href="#i-chevron-right"></use></svg></div>
+                    <p class="tile__label">{{ passkeys_label }}</p>
+                    <p class="tile__value tile__value--lg">{{ passkey_count }}</p>
+                    <p class="tile__hint">{{ passkeys_hint }}</p>
+                </a>
+                <a class="card card--pad card--link stack stack--sm" href="#{% if show_workspace_links %}idle{% else %}overview{% endif %}" data-panel-link="{% if show_workspace_links %}idle{% else %}overview{% endif %}">
+                    <div class="cluster cluster--between"><span class="card-icon card-icon--steam"><svg class="icon" aria-hidden="true"><use href="#i-hourglass"></use></svg></span><svg class="icon icon--sm row__chev" aria-hidden="true"><use href="#i-chevron-right"></use></svg></div>
+                    <p class="tile__label">{{ idle_summary_label }}</p>
+                    <p class="tile__value tile__value--lg">{{ idle_effective_timeout }}</p>
+                    <p class="tile__hint">{{ idle_timeout_hint }}</p>
+                </a>
+            </div>
         </section>
-        {% endif %}
 
-        {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 whitespace-pre-line {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-            {{ banner.message }}
+        {# ---------------- Password ---------------- #}
+        <section class="panel" data-panel="password">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ password_title }}</h2>
+                    <p class="panel__desc">{{ password_description }}</p>
+                </div>
+            </div>
+            <form method="post" action="{{ password_action }}" class="card" style="max-width:640px">
+                <input type="hidden" name="lang" value="{{ lang }}">
+                <div class="card__body form">
+                    <label class="field"><span class="field__label">{{ current_password_label }}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>
+                    <div class="form-row form-row--2">
+                        <label class="field"><span class="field__label">{{ new_password_label }}</span><input class="input" type="password" name="new_password" autocomplete="new-password" required></label>
+                        <label class="field"><span class="field__label">{{ confirm_password_label }}</span><input class="input" type="password" name="confirm_password" autocomplete="new-password" required></label>
+                    </div>
+                </div>
+                <div class="card__foot"><button type="submit" class="btn btn--primary"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>{{ change_password_label }}</button></div>
+            </form>
         </section>
-        {% endif %}
 
-        <section class="mt-4 paper-shadow section-card rounded-[1.75rem] p-4 sm:p-5">
-            <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                <a href="#security" data-settings-tab="security" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                    {{ settings_nav_security }}
-                </a>
-                {% if show_workspace_links %}
-                <a href="#notifications" data-settings-tab="notifications" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                    {{ settings_nav_notifications }}
-                </a>
-                <a href="#access" data-settings-tab="access" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                    {{ settings_nav_access }}
-                </a>
+        {% if show_workspace_links %}
+        {# ---------------- TOTP ---------------- #}
+        <section class="panel" data-panel="totp">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ i18n.settings_security_tab_totp_label }}</h2>
+                    <p class="panel__desc">{{ totp_hint }}</p>
+                </div>
+                <div class="panel__tools"><a href="{{ totp_setup_href }}" class="btn btn--primary"><svg class="icon" aria-hidden="true"><use href="#i-qr"></use></svg>{{ totp_setup_label }}</a></div>
+            </div>
+            <div class="grid grid--2">
+                <div class="card card--pad stack">
+                    <div class="cluster cluster--between">
+                        <div class="cluster"><span class="card-icon card-icon--accent"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg></span><p class="card__title">{{ totp_label }}</p></div>
+                        <span class="badge badge--accent badge--lg">{{ totp_status }}</span>
+                    </div>
+                    <p class="text-sm muted">{{ totp_hint }}</p>
+                    <div class="callout">{{ passkeys_hint }}</div>
+                </div>
+                <div class="card card--pad stack">
+                    <div class="cluster cluster--between">
+                        <div class="cluster"><span class="card-icon card-icon--warning"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><p class="card__title">{{ recovery_label }}</p></div>
+                        <span class="badge badge--warning badge--lg">{{ recovery_remaining }}</span>
+                    </div>
+                    <p class="text-sm muted">{{ recovery_hint }}</p>
+                    <div class="callout">{{ i18n.login_recovery_notice_hint }}</div>
+                </div>
+            </div>
+        </section>
+
+        {# ---------------- Passkeys ---------------- #}
+        <section class="panel" data-panel="passkeys">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ passkeys_title }}</h2>
+                    <p class="panel__desc">{{ passkeys_description }}</p>
+                </div>
+            </div>
+            <div class="stack">
+                <form class="card card--pad stack" data-passkey-register-form data-options-action="{{ passkey_register_options_action }}" data-finish-action="{{ passkey_register_finish_action }}">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="field">
+                        <span class="field__label">{{ passkey_name_label }}</span>
+                        <span class="input-combo input-combo--stack">
+                            <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="input" autocomplete="off">
+                            <button
+                                type="submit"
+                                class="btn btn--primary"
+                                data-passkey-register-button
+                                data-starting="{{ i18n.login_passkey_start_message }}"
+                                data-awaiting="{{ i18n.login_passkey_finish_message }}"
+                                data-failed="{{ i18n.passkey_registration_failed_message }}"
+                                data-not-allowed="{{ i18n.passkey_registration_not_allowed_message }}"
+                                data-incomplete-response="{{ i18n.passkey_registration_incomplete_response_message }}"
+                                data-unsupported="{{ passkey_unavailable_message }}"
+                                data-missing-label="{{ i18n.passkey_label_required_message }}"
+                                {% if not passkey_supported %}disabled{% endif %}
+                            ><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg><span>{{ passkey_add_label }}</span></button>
+                        </span>
+                        <span class="field__hint">{% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}</span>
+                    </label>
+                    <div id="passkey-feedback" hidden></div>
+                    <details class="disclosure">
+                        <summary><svg class="icon icon--sm" aria-hidden="true"><use href="#i-info"></use></svg><span class="grow">{{ passkey_provider_notes_title }}</span><svg class="icon icon--sm icon--chev" aria-hidden="true"><use href="#i-chevron-down"></use></svg></summary>
+                        <div class="disclosure__body"><p>{{ passkey_google_hint }}</p><p class="mt-2">{{ passkey_bitwarden_hint }}</p></div>
+                    </details>
+                </form>
+
+                {% if passkeys | length == 0 %}
+                <div class="empty empty--compact">
+                    <span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg></span>
+                    <p class="empty__desc">{{ passkey_empty_label }}</p>
+                </div>
+                {% else %}
+                <div class="list list--card">
+                    {% for passkey in passkeys %}
+                    <div class="row row--stack-sm">
+                        <span class="card-icon card-icon--success"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"></use></svg></span>
+                        <div class="row__main">
+                            <p class="row__title"><span>{{ passkey.label }}</span></p>
+                            <p class="row__meta"><span>{{ passkey_created_label }} · <span class="mono">{{ passkey.created_at }}</span></span><span>{{ passkey_last_used_label }} · <span class="mono">{{ passkey.last_used_at }}</span></span></p>
+                        </div>
+                        <form method="post" action="/settings/security/passkeys/{{ passkey.id }}/delete" data-confirm="{{ passkey_delete_confirm_message }}" class="row__aside">
+                            <input type="hidden" name="lang" value="{{ lang }}">
+                            <button type="submit" class="btn btn--sm btn--danger-soft"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>{{ passkey_delete_label }}</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
                 {% endif %}
             </div>
+        </section>
 
-            <div class="mt-4">
-                <section data-settings-pane="security" class="space-y-4">
-                    <h2 class="font-display text-xl font-semibold">{{ security_title }}</h2>
-
-                    {% if recovery_notice %}
-                    <article class="rounded-[1.45rem] border border-[#e8d3ad] bg-[#fff7e6] p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-[#866434]">{{ recovery_refresh_title }}</p>
-                                <h3 class="mt-2 text-lg font-semibold text-ink sm:text-xl">{{ recovery_label }}</h3>
-                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/72">{{ recovery_refresh_message }}</p>
-                            </div>
-                            <form method="post" action="{{ recovery_ack_action }}" data-preserve-settings-pane="security" data-preserve-security-tab="overview">
-                                <button type="submit" class="rounded-full border border-[#ddc48f] bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-[#fffaf0]">{{ recovery_ack_label }}</button>
-                            </form>
-                        </div>
-                        <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                            {% for code in recovery_notice.codes %}
-                            <div class="rounded-[1rem] border border-[#ead7ae] bg-white px-4 py-3 font-mono text-sm font-semibold tracking-[0.12em] text-ink">{{ code }}</div>
+        {# ---------------- Notifications ---------------- #}
+        <section class="panel" data-panel="notifications">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ notifications_section_title }}</h2>
+                    <p class="panel__desc">{{ notifications_section_description }}</p>
+                </div>
+                <div class="panel__tools"><a href="{{ notifications_href }}" class="btn btn--sm"><svg class="icon" aria-hidden="true"><use href="#i-external"></use></svg>{{ notifications_manage_fullpage_label }}</a></div>
+            </div>
+            <form method="post" action="{{ bot_settings_action }}" class="card">
+                <input type="hidden" name="lang" value="{{ lang }}">
+                <input type="hidden" name="return_to" value="settings">
+                <div class="card__body stack stack--lg">
+                    <div class="grid grid--2 grid--tight">
+                        <div class="tile"><p class="tile__label">{{ notification_status_label }}</p><p class="tile__value strong">{{ notification_status_value }}</p></div>
+                        <div class="tile"><p class="tile__label">{{ notification_destination_label }}</p><p class="tile__value mono text-sm">{{ notification_destination_value }}</p></div>
+                    </div>
+                    <label class="switch-row">
+                        <span><span class="switch-row__title">{{ i18n.bot_enabled_label }}</span><span class="switch-row__hint">{{ i18n.bot_enabled_hint }}</span></span>
+                        <span class="switch"><input type="checkbox" name="enabled" value="1" {% if bot_settings.enabled %}checked{% endif %}><span class="switch__track"></span></span>
+                    </label>
+                    <div class="form-row form-row--2">
+                        <label class="field"><span class="field__label">{{ i18n.bot_token_label }}</span><input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="input input--mono" autocomplete="off"></label>
+                        <label class="field"><span class="field__label">{{ i18n.bot_chat_id_label }}</span><input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="input input--mono" autocomplete="off"></label>
+                    </div>
+                    <label class="field">
+                        <span class="field__label">{{ i18n.bot_template_label }}</span>
+                        <textarea name="template" rows="8" class="textarea textarea--mono" data-template-input>{{ bot_settings.template }}</textarea>
+                    </label>
+                    <div class="stack stack--sm">
+                        <p class="field__label">{{ i18n.bot_placeholders_title }}</p>
+                        <div class="placeholder-chips">
+                            {% for placeholder in bot_placeholders %}
+                            <button type="button" class="chip chip--mono" data-insert-placeholder="{{ placeholder.key }}" title="{{ placeholder.description }}">{{ placeholder.key }}</button>
                             {% endfor %}
                         </div>
-                    </article>
-                    {% endif %}
-
-                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-security-tab="overview" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                            {{ i18n.settings_security_tab_overview_label }}
-                        </button>
-                        <button type="button" data-security-tab="password" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                            {{ i18n.settings_security_tab_password_label }}
-                        </button>
-                        {% if show_workspace_links %}
-                        <button type="button" data-security-tab="totp" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                            {{ i18n.settings_security_tab_totp_label }}
-                        </button>
-                        <button type="button" data-security-tab="passkeys" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">
-                            {{ i18n.settings_security_tab_passkeys_label }}
-                        </button>
-                        {% endif %}
+                        <div class="tile"><p class="tile__label">{{ notification_template_preview_label }}</p><p class="tile__value text-sm">{{ notification_template_preview }}</p></div>
                     </div>
+                </div>
+                <div class="card__foot"><button type="submit" class="btn btn--primary"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>{{ i18n.bot_save }}</button></div>
+            </form>
+        </section>
 
-                    <section data-security-pane="overview">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ totp_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ totp_status }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ totp_hint }}</p>
-                                </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ recovery_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ recovery_remaining }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ recovery_hint }}</p>
-                                </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ passkey_count }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ passkeys_hint }}</p>
-                                </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_summary_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
-                                </div>
-                            </div>
-                        </article>
-                    </section>
-
-                    <section data-security-pane="password" class="hidden">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <h3 class="text-lg font-semibold sm:text-xl">{{ password_title }}</h3>
-                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ password_description }}</p>
-                            <form method="post" action="{{ password_action }}" class="mt-3 grid gap-3">
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <input type="password" name="current_password" placeholder="{{ current_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                <div class="grid gap-3 sm:grid-cols-2">
-                                    <input type="password" name="new_password" placeholder="{{ new_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                    <input type="password" name="confirm_password" placeholder="{{ confirm_password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-3.5 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                </div>
-                                <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ change_password_label }}</button>
-                            </form>
-                        </article>
-                    </section>
-
-                    {% if show_workspace_links %}
-                    <section data-security-pane="totp" class="hidden">
-                        <div class="grid gap-3 xl:grid-cols-[minmax(18rem,0.92fr),minmax(0,1.08fr)]">
-                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <h3 class="text-lg font-semibold sm:text-xl">{{ totp_label }}</h3>
-                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ totp_status }}</span>
-                                </div>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ totp_hint }}</p>
-                                <div class="mt-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ passkeys_label }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ passkeys_hint }}</p>
-                                </div>
-                                <a href="{{ totp_setup_href }}" class="mt-3 inline-flex rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ totp_setup_label }}</a>
-                            </article>
-
-                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <h3 class="text-lg font-semibold sm:text-xl">{{ recovery_label }}</h3>
-                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recovery_remaining }}</span>
-                                </div>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ recovery_hint }}</p>
-                                <div class="mt-3 rounded-[1rem] border border-[#ead7ae] bg-[#fffaf0] px-3.5 py-3.5 text-sm leading-6 text-ink/70">
-                                    {{ i18n.login_recovery_notice_hint }}
-                                </div>
-                            </article>
-                        </div>
-                    </section>
-
-                    <section data-security-pane="passkeys" class="hidden">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center justify-between gap-3">
-                                <h3 class="text-lg font-semibold sm:text-xl">{{ passkeys_title }}</h3>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ passkey_count }}</span>
-                            </div>
-
-                            <div id="passkey-feedback" class="mt-3 hidden rounded-[1rem] border px-4 py-3 text-sm"></div>
-
-                            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(18rem,0.82fr),minmax(0,1.18fr)]">
-                                <div class="grid gap-3">
-                                    <form
-                                        data-passkey-register-form
-                                        data-options-action="{{ passkey_register_options_action }}"
-                                        data-finish-action="{{ passkey_register_finish_action }}"
-                                        class="grid gap-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5"
-                                    >
-                                        <input type="hidden" name="lang" value="{{ lang }}">
-                                        <label class="block">
-                                            <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ passkey_name_label }}</span>
-                                            <div class="flex flex-col gap-3 sm:flex-row">
-                                                <input type="text" name="passkey_label" placeholder="{{ passkey_name_placeholder }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 outline-none transition focus:border-sage">
-                                                <button
-                                                    type="submit"
-                                                    data-passkey-register-button
-                                                    data-starting="{{ i18n.login_passkey_start_message }}"
-                                                    data-awaiting="{{ i18n.login_passkey_finish_message }}"
-                                                    data-failed="{{ i18n.passkey_registration_failed_message }}"
-                                                    data-not-allowed="{{ i18n.passkey_registration_not_allowed_message }}"
-                                                    data-incomplete-response="{{ i18n.passkey_registration_incomplete_response_message }}"
-                                                    data-unsupported="{{ passkey_unavailable_message }}"
-                                                    data-missing-label="{{ i18n.passkey_label_required_message }}"
-                                                    {% if not passkey_supported %}disabled{% endif %}
-                                                    class="shrink-0 rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition enabled:hover:bg-sageDeep disabled:cursor-not-allowed disabled:opacity-55"
-                                                >
-                                                    {{ passkey_add_label }}
-                                                </button>
-                                            </div>
-                                        </label>
-                                        <p class="text-sm leading-6 text-ink/62">
-                                            {% if passkey_supported %}{{ passkeys_hint }}{% else %}{{ passkey_unavailable_message }}{% endif %}
-                                        </p>
-                                    </form>
-
-                                    <details class="rounded-[1rem] border border-line bg-paper">
-                                        <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink">
-                                            <span>{{ passkey_provider_notes_title }}</span>
-                                            <span class="details-chevron text-ink/55 transition">&#9662;</span>
-                                        </summary>
-                                        <div class="border-t border-line px-4 py-4 text-sm leading-7 text-ink/62">
-                                            <p>{{ passkey_google_hint }}</p>
-                                            <p class="mt-2">{{ passkey_bitwarden_hint }}</p>
-                                        </div>
-                                    </details>
-                                </div>
-
-                                <div class="rounded-[1rem] border border-line bg-paper p-3">
-                                    {% if passkeys | length == 0 %}
-                                    <div class="rounded-[0.95rem] border border-dashed border-line bg-white px-4 py-8 text-sm leading-7 text-ink/60">
-                                        {{ passkey_empty_label }}
-                                    </div>
-                                    {% else %}
-                                    <div class="compact-scroll max-h-[20rem] overflow-y-auto rounded-[0.95rem] border border-line bg-white">
-                                        <div class="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.2fr),minmax(8rem,0.8fr),minmax(8rem,0.8fr),auto] gap-3 border-b border-line bg-[#fbf7f0] px-4 py-3 text-xs uppercase tracking-[0.18em] text-ink/45 sm:grid">
-                                            <p>{{ passkey_name_label }}</p>
-                                            <p>{{ passkey_created_label }}</p>
-                                            <p>{{ passkey_last_used_label }}</p>
-                                            <p class="text-right">{{ passkey_delete_label }}</p>
-                                        </div>
-                                        <div class="divide-y divide-line/70">
-                                            {% for passkey in passkeys %}
-                                            <div class="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1.2fr),minmax(8rem,0.8fr),minmax(8rem,0.8fr),auto] sm:items-center">
-                                                <div class="min-w-0">
-                                                    <p class="truncate text-sm font-semibold text-ink">{{ passkey.label }}</p>
-                                                    <div class="mt-2 grid gap-1 text-xs leading-6 text-ink/58 sm:hidden">
-                                                        <p><span class="font-medium text-ink/68">{{ passkey_created_label }}</span> {{ passkey.created_at }}</p>
-                                                        <p><span class="font-medium text-ink/68">{{ passkey_last_used_label }}</span> {{ passkey.last_used_at }}</p>
-                                                    </div>
-                                                </div>
-                                                <p class="hidden text-sm leading-6 text-ink/68 sm:block">{{ passkey.created_at }}</p>
-                                                <p class="hidden text-sm leading-6 text-ink/68 sm:block">{{ passkey.last_used_at }}</p>
-                                                <form method="post" action="/settings/security/passkeys/{{ passkey.id }}/delete" data-confirm="{{ passkey_delete_confirm_message }}" onsubmit="return confirm(this.dataset.confirm)" class="sm:justify-self-end">
-                                                    <input type="hidden" name="lang" value="{{ lang }}">
-                                                    <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-3 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] sm:w-auto">{{ passkey_delete_label }}</button>
-                                                </form>
-                                            </div>
-                                            {% endfor %}
-                                        </div>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </article>
-                    </section>
-                    {% endif %}
-                </section>
-
-                {% if show_workspace_links %}
-                <section data-settings-pane="notifications" class="hidden space-y-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <h2 class="font-display text-xl font-semibold">{{ notifications_section_title }}</h2>
-                        <a href="{{ notifications_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm transition hover:border-sage">{{ notifications_manage_fullpage_label }}</a>
-                    </div>
-
-                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-settings-segment-tab="notifications" data-settings-segment-target="settings" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ notifications_section_title }}</button>
-                        <button type="button" data-settings-segment-tab="notifications" data-settings-segment-target="reference" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ i18n.bot_placeholders_title }}</button>
-                    </div>
-
-                    <section data-settings-segment-panel="notifications" data-settings-segment-id="settings" class="hidden">
-                        <form method="post" action="{{ bot_settings_action }}" class="grid gap-3 rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <input type="hidden" name="lang" value="{{ lang }}">
-                            <input type="hidden" name="return_to" value="settings">
-                            <div class="grid gap-3 sm:grid-cols-3">
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_status_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ notification_status_value }}</p>
-                                </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5 sm:col-span-2">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_destination_label }}</p>
-                                    <p class="mt-2 break-all font-mono text-sm leading-6 text-ink/72">{{ notification_destination_value }}</p>
-                                </div>
-                            </div>
-
-                            <div class="grid gap-3 xl:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
-                                <div class="grid gap-3">
-                                    <label class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                        <span class="flex items-center justify-between gap-4">
-                                            <span>
-                                                <span class="block text-sm font-medium">{{ i18n.bot_enabled_label }}</span>
-                                                <span class="mt-1 block text-sm leading-6 text-ink/62">{{ i18n.bot_enabled_hint }}</span>
-                                            </span>
-                                            <span class="relative inline-flex items-center">
-                                                <input type="checkbox" name="enabled" value="1" class="peer sr-only" {% if bot_settings.enabled %}checked{% endif %}>
-                                                <span class="h-7 w-12 rounded-full bg-line transition peer-checked:bg-sage"></span>
-                                                <span class="pointer-events-none absolute left-1 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
-                                            </span>
-                                        </span>
-                                    </label>
-
-                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_token_label }}</span>
-                                        <input type="text" name="bot_token" value="{{ bot_settings.bot_token }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">
-                                    </label>
-
-                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_chat_id_label }}</span>
-                                        <input type="text" name="chat_id" value="{{ bot_settings.chat_id }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">
-                                    </label>
-                                </div>
-
-                                <div class="grid gap-3">
-                                    <label class="block rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                        <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ i18n.bot_template_label }}</span>
-                                        <textarea name="template" rows="8" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-sage">{{ bot_settings.template }}</textarea>
-                                    </label>
-                                    <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                        <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_template_preview_label }}</p>
-                                        <p class="mt-2 text-sm leading-6 text-ink/68">{{ notification_template_preview }}</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="flex justify-end">
-                                <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ i18n.bot_save }}</button>
-                            </div>
-                        </form>
-                    </section>
-
-                    <section data-settings-segment-panel="notifications" data-settings-segment-id="reference" class="hidden">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ notification_template_preview_label }}</p>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ notification_template_preview }}</p>
-                            </div>
-                            <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                {% for placeholder in bot_placeholders %}
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3">
-                                    <p class="font-mono text-sm font-semibold">{{ placeholder.key }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/68">{{ placeholder.description }}</p>
-                                </div>
-                                {% endfor %}
-                            </div>
-                        </article>
-                    </section>
-                </section>
-                {% endif %}
-
-                {% if show_workspace_links %}
-                <section data-settings-pane="access" class="hidden space-y-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <h2 class="font-display text-xl font-semibold">{{ sessions_title }}</h2>
-                        {% if has_other_sessions %}
-                        <form method="post" action="{{ revoke_all_action }}">
-                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-3.5 py-1.5 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">{{ revoke_all_label }}</button>
-                        </form>
-                        {% endif %}
-                    </div>
-
-                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-settings-segment-tab="access" data-settings-segment-target="idle" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ idle_form_title }}</button>
-                        <button type="button" data-settings-segment-tab="access" data-settings-segment-target="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ sessions_title }}</button>
-                    </div>
-
-                    <section data-settings-segment-panel="access" data-settings-segment-id="idle" class="hidden">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-3">
-                                <h3 class="text-lg font-semibold sm:text-xl">{{ idle_form_title }}</h3>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ idle_effective_timeout }}</span>
-                            </div>
-                            <p class="mt-2 text-sm leading-6 text-ink/68">{{ access_auto_logout_description }}</p>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ idle_timeout }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">{{ idle_timeout_hint }}</p>
-                                </div>
-                                <div class="rounded-[1rem] border border-line bg-paper px-3.5 py-3.5">
-                                    <p class="text-xs uppercase tracking-[0.2em] text-ink/42">{{ idle_effective_label }}</p>
-                                    <p class="mt-2 text-base font-semibold">{{ idle_effective_timeout }}</p>
-                                    <p class="mt-2 text-sm leading-6 text-ink/62">
-                                        {% if has_other_sessions %}
-                                        {{ access_other_sessions_hint }}
-                                        {% else %}
-                                        {{ access_current_only_hint }}
-                                        {% endif %}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <form method="post" action="{{ idle_form_action }}" class="mt-3 grid gap-3 rounded-[1rem] border border-line bg-paper px-3.5 py-3.5 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
-                                <input type="hidden" name="lang" value="{{ lang }}">
-                                <label class="block">
-                                    <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ idle_input_label }}</span>
-                                    <input type="number" min="0" name="idle_timeout_minutes" value="{{ idle_timeout_field_value }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 outline-none transition focus:border-sage focus:bg-white">
-                                </label>
-                                <button type="submit" class="rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ idle_submit_label }}</button>
-                            </form>
-                        </article>
-                    </section>
-
-                    <section data-settings-segment-panel="access" data-settings-segment-id="sessions" class="hidden">
-                        <article class="rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-3">
-                                <h3 class="text-lg font-semibold sm:text-xl">{{ sessions_title }}</h3>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ active_session_count }}</span>
-                            </div>
-                            <p class="mt-2 text-sm leading-6 text-ink/68">
-                                {% if has_other_sessions %}
-                                {{ access_other_sessions_hint }}
-                                {% else %}
-                                {{ access_current_only_hint }}
-                                {% endif %}
-                            </p>
-
-                            <div class="compact-scroll mt-3 grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
-                                {% if sessions | length == 0 %}
-                                <div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm leading-7 text-ink/60">
-                                    {{ session_empty_label }}
-                                </div>
-                                {% else %}
-                                {% for session in sessions %}
-                                <article class="rounded-[1rem] border {% if session.is_current %}border-sage/35 bg-mist{% else %}border-line bg-paper/95{% endif %} px-3.5 py-3">
-                                    <div class="grid gap-3 lg:grid-cols-[minmax(0,1.24fr),minmax(0,0.98fr),auto] lg:items-center">
-                                        <div class="min-w-0">
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <p class="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-ink/52">{{ session_device_label }}</p>
-                                                {% if session.is_current %}
-                                                <span class="rounded-full border border-sage/35 bg-white px-2.5 py-1 text-xs font-medium text-sageDeep">{{ current_session_label }}</span>
-                                                {% endif %}
-                                            </div>
-                                            <p class="mt-2 break-words text-sm leading-6 text-ink/70">{{ session.user_agent | default(value=unknown_user_agent_label) }}</p>
-                                        </div>
-
-                                        <div class="grid gap-1.5 text-[0.78rem] leading-5 text-ink/62">
-                                            <p><span class="font-medium text-ink/74">{{ session_ip_label }}</span> {{ session.ip_address | default(value='-') }}</p>
-                                            <p><span class="font-medium text-ink/74">{{ session_issued_label }}</span> {{ session.issued_at }}</p>
-                                            <p><span class="font-medium text-ink/74">{{ session_expires_label }}</span> {{ session.expires_at }}</p>
-                                        </div>
-
-                                        <div class="flex items-start lg:justify-end">
-                                            {% if not session.is_current %}
-                                            <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke" class="w-full lg:w-auto">
-                                                <input type="hidden" name="session_id" value="{{ session.id }}">
-                                                <button type="submit" class="w-full rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-medium text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1] lg:w-auto">{{ revoke_label }}</button>
-                                            </form>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                </article>
-                                {% endfor %}
-                                {% endif %}
-                            </div>
-                        </article>
-                    </section>
-                </section>
-                {% endif %}
+        {# ---------------- Idle timeout ---------------- #}
+        <section class="panel" data-panel="idle">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ idle_form_title }}</h2>
+                    <p class="panel__desc">{{ access_auto_logout_description }}</p>
+                </div>
+            </div>
+            <div class="stack" style="max-width:720px">
+                <div class="grid grid--2 grid--tight">
+                    <div class="tile"><p class="tile__label">{{ idle_label }}</p><p class="tile__value tile__value--lg">{{ idle_timeout }}</p><p class="tile__hint">{{ idle_timeout_hint }}</p></div>
+                    <div class="tile"><p class="tile__label">{{ idle_effective_label }}</p><p class="tile__value tile__value--lg">{{ idle_effective_timeout }}</p><p class="tile__hint">{% if has_other_sessions %}{{ access_other_sessions_hint }}{% else %}{{ access_current_only_hint }}{% endif %}</p></div>
+                </div>
+                <form method="post" action="{{ idle_form_action }}" class="card card--pad">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <label class="field">
+                        <span class="field__label">{{ idle_input_label }}</span>
+                        <span class="input-combo">
+                            <input type="number" min="0" name="idle_timeout_minutes" value="{{ idle_timeout_field_value }}" class="input" inputmode="numeric">
+                            <button type="submit" class="btn btn--primary">{{ idle_submit_label }}</button>
+                        </span>
+                    </label>
+                </form>
             </div>
         </section>
-    </main>
-</body>
-</html>
+
+        {# ---------------- Sessions ---------------- #}
+        <section class="panel" data-panel="sessions">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ sessions_title }}</h2>
+                    <p class="panel__desc">{% if has_other_sessions %}{{ access_other_sessions_hint }}{% else %}{{ access_current_only_hint }}{% endif %}</p>
+                </div>
+                {% if has_other_sessions %}
+                <div class="panel__tools">
+                    <form method="post" action="{{ revoke_all_action }}">
+                        <button type="submit" class="btn btn--sm btn--danger-soft"><svg class="icon" aria-hidden="true"><use href="#i-logout"></use></svg>{{ revoke_all_label }}</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+            {% if sessions | length == 0 %}
+            <div class="empty empty--compact"><p class="empty__desc">{{ session_empty_label }}</p></div>
+            {% else %}
+            <div class="list list--card">
+                {% for session in sessions %}
+                <div class="row row--top row--stack-sm{% if session.is_current %} is-selected{% endif %}">
+                    <span class="card-icon{% if session.is_current %} card-icon--accent{% endif %}"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
+                    <div class="row__main">
+                        <p class="row__title"><span>{{ session_device_label }}</span>{% if session.is_current %}<span class="badge badge--accent">{{ current_session_label }}</span>{% endif %}</p>
+                        <p class="text-sm break mt-1" style="color:var(--text-2)">{{ session.user_agent | default(value=unknown_user_agent_label) }}</p>
+                        <p class="row__meta"><span>{{ session_ip_label }} · <span class="mono">{{ session.ip_address | default(value='-') }}</span></span><span>{{ session_issued_label }} · <span class="mono">{{ session.issued_at }}</span></span><span>{{ session_expires_label }} · <span class="mono">{{ session.expires_at }}</span></span></p>
+                    </div>
+                    {% if not session.is_current %}
+                    <form method="post" action="/admin/users/{{ current_user_id }}/sessions/revoke" class="row__aside">
+                        <input type="hidden" name="session_id" value="{{ session.id }}">
+                        <button type="submit" class="btn btn--sm btn--danger-soft">{{ revoke_label }}</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+    </div>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+<script src="/static/settings.js?v=__ASSET_VERSION__" defer></script>
+{% endblock scripts %}

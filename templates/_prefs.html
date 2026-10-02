@@ -1,0 +1,17 @@
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Theme + language pickers, shared by the user menu and the preferences menu. #}
+<div class="menu__section">
+    <p class="menu__label">{{ i18n.ui_theme_label }}</p>
+    <div class="seg seg--block seg--sm" role="group" aria-label="{{ i18n.ui_theme_label }}">
+        <button type="button" class="seg__btn" data-theme-choice="system" title="{{ i18n.ui_theme_system }}"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg><span>{{ i18n.ui_theme_system }}</span></button>
+        <button type="button" class="seg__btn" data-theme-choice="light" title="{{ i18n.ui_theme_light }}"><svg class="icon" aria-hidden="true"><use href="#i-sun"></use></svg><span>{{ i18n.ui_theme_light }}</span></button>
+        <button type="button" class="seg__btn" data-theme-choice="dark" title="{{ i18n.ui_theme_dark }}"><svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg><span>{{ i18n.ui_theme_dark }}</span></button>
+    </div>
+</div>
+<div class="menu__section">
+    <p class="menu__label">{{ i18n.language_switch }}</p>
+    <div class="seg seg--block seg--sm" role="group" aria-label="{{ i18n.language_switch }}">
+        <a class="seg__btn{% if lang == "zh-CN" %} is-active{% endif %}" href="/language/zh-CN" hreflang="zh-CN" data-lang-link>中文</a>
+        <a class="seg__btn{% if lang == "en" %} is-active{% endif %}" href="/language/en" hreflang="en" data-lang-link>English</a>
+    </div>
+</div>

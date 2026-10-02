@@ -1,939 +1,380 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Hanagram-web contributors -->
-<!DOCTYPE html>
-<html lang="{{ i18n.html_lang }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = { theme: { extend: {
-            fontFamily: { display: ["Noto Serif SC", "serif"], sans: ["Noto Sans SC", "sans-serif"], mono: ["JetBrains Mono", "monospace"] },
-            colors: { oat: "#f6f1e8", paper: "#fffaf2", latte: "#f0e5d6", line: "#ded3c6", ink: "#4b4038", sage: "#8ca38c", sageDeep: "#6f866f", peach: "#d9a69a", mist: "#eef4ee" }
-        }}};
+{% extends "layout_app.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Copyright (C) 2026 Hanagram-web contributors #}
 
-        const ADMIN_PANES = ["users", "policy", "audit"];
+{% block title %}{{ title }} · {{ i18n.page_title }}{% endblock title %}
+{% block page_id %}admin{% endblock page_id %}
+{% block canonical %}/admin{% endblock canonical %}
+{% block topbar_title %}{{ title }}{% endblock topbar_title %}
+{% block topbar_actions %}
+<button type="button" class="btn btn--soft btn--icon" data-sheet-open="create-user-sheet" aria-label="{{ create_user_title }}" title="{{ create_user_title }}"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"></use></svg></button>
+{% endblock topbar_actions %}
 
-        function activateAdminPane(rawHash) {
-            const requested = String(rawHash || window.location.hash || "#users").replace(/^#/, "");
-            const activePane = ADMIN_PANES.includes(requested) ? requested : "users";
-
-            document.querySelectorAll("[data-admin-pane]").forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.adminPane !== activePane);
-            });
-
-            document.querySelectorAll("[data-admin-tab]").forEach((tab) => {
-                const active = tab.dataset.adminTab === activePane;
-                tab.classList.toggle("bg-sage", active);
-                tab.classList.toggle("text-white", active);
-                tab.classList.toggle("border-sage", active);
-                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-                tab.classList.toggle("bg-white", !active);
-                tab.classList.toggle("text-ink/74", !active);
-                tab.classList.toggle("border-line", !active);
-            });
-        }
-
-        function decorateAdminMetadata() {
-            const formatter = new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit"
-            });
-
-            document.querySelectorAll("[data-admin-unix-time]").forEach((element) => {
-                const unix = Number(element.dataset.adminUnixTime);
-                if (!Number.isFinite(unix) || unix <= 0) { return; }
-                const rendered = formatter.format(new Date(unix * 1000));
-                element.textContent = rendered;
-                element.title = `${rendered} (${unix})`;
-            });
-        }
-
-        function setAdminCount(selector, value) {
-            document.querySelectorAll(selector).forEach((element) => {
-                element.textContent = String(value);
-            });
-        }
-
-        function activateAdminSegment(group, rawTarget) {
-            const tabs = Array.from(document.querySelectorAll(`[data-admin-segment-tab="${group}"]`));
-            const panels = Array.from(document.querySelectorAll(`[data-admin-segment-panel="${group}"]`));
-            if (tabs.length === 0 || panels.length === 0) {
-                return "";
-            }
-
-            const fallbackTarget = tabs[0]?.dataset.adminSegmentTarget || "";
-            const activeTarget = tabs.some((tab) => tab.dataset.adminSegmentTarget === rawTarget)
-                ? rawTarget
-                : fallbackTarget;
-
-            tabs.forEach((tab) => {
-                const active = tab.dataset.adminSegmentTarget === activeTarget;
-                tab.classList.toggle("bg-sage", active);
-                tab.classList.toggle("text-white", active);
-                tab.classList.toggle("border-sage", active);
-                tab.classList.toggle("shadow-[0_10px_24px_rgba(140,163,140,0.18)]", active);
-                tab.classList.toggle("bg-white", !active);
-                tab.classList.toggle("text-ink/74", !active);
-                tab.classList.toggle("border-line", !active);
-                tab.setAttribute("aria-selected", active ? "true" : "false");
-            });
-
-            panels.forEach((panel) => {
-                panel.classList.toggle("hidden", panel.dataset.adminSegmentId !== activeTarget);
-            });
-
-            return activeTarget;
-        }
-
-        function attachAdminSegment(group) {
-            const tabs = Array.from(document.querySelectorAll(`[data-admin-segment-tab="${group}"]`));
-            if (tabs.length === 0) {
-                return;
-            }
-
-            let currentTarget = tabs[0]?.dataset.adminSegmentTarget || "";
-            tabs.forEach((tab) => {
-                tab.addEventListener("click", () => {
-                    currentTarget = tab.dataset.adminSegmentTarget || "";
-                    currentTarget = activateAdminSegment(group, currentTarget);
-                });
-            });
-
-            activateAdminSegment(group, currentTarget);
-        }
-
-        function attachAdminCollectionFilter({
-            formSelector,
-            inputSelector,
-            clearSelector,
-            itemSelector,
-            emptySelector,
-            countSelector
-        }) {
-            const form = document.querySelector(formSelector);
-            const input = document.querySelector(inputSelector);
-            const clearButton = document.querySelector(clearSelector);
-            const emptyState = document.querySelector(emptySelector);
-            const items = Array.from(document.querySelectorAll(itemSelector));
-
-            if (!input || items.length === 0) {
-                return;
-            }
-
-            const render = () => {
-                const needle = input.value.trim().toLowerCase();
-                let visible = 0;
-
-                items.forEach((item) => {
-                    const haystack = (item.dataset.adminSearchText || item.textContent || "").toLowerCase();
-                    const matched = needle === "" || haystack.includes(needle);
-                    item.classList.toggle("hidden", !matched);
-                    if (matched) {
-                        visible += 1;
-                    }
-                });
-
-                if (emptyState) {
-                    emptyState.classList.toggle("hidden", visible !== 0);
-                }
-                setAdminCount(countSelector, visible);
-            };
-
-            if (form) {
-                form.addEventListener("submit", (event) => {
-                    event.preventDefault();
-                    render();
-                });
-            }
-            input.addEventListener("input", render);
-            clearButton?.addEventListener("click", () => {
-                input.value = "";
-                render();
-                input.focus();
-            });
-            render();
-        }
-
-        function readAdminJsonScript(id) {
-            const node = document.getElementById(id);
-            if (!node) { return null; }
-            try {
-                return JSON.parse(node.textContent || "null");
-            } catch (error) {
-                console.error(`Failed to parse ${id}`, error);
-                return null;
-            }
-        }
-
-        function escapeAdminHtml(value) {
-            return String(value ?? "")
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#39;");
-        }
-
-        function formatAdminUnixTimeValue(unix) {
-            const value = Number(unix);
-            if (!Number.isFinite(value) || value <= 0) {
-                return "-";
-            }
-            return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit"
-            }).format(new Date(value * 1000));
-        }
-
-        function buildAdminCompactUserBadges(user, config) {
-            const badges = [
-                `<span class="rounded-full border border-line bg-paper px-2 py-0.5 font-medium">${escapeAdminHtml(user.role === "admin" ? config.role_admin_label : config.role_user_label)}</span>`
-            ];
-            if (user.locked) {
-                badges.push(`<span class="rounded-full border border-peach/35 bg-[#fbefec] px-2 py-0.5 font-medium text-[#98675f]">${escapeAdminHtml(config.locked_badge_label)}</span>`);
-            }
-            if (user.banned) {
-                badges.push(`<span class="rounded-full border border-peach/35 bg-[#fbefec] px-2 py-0.5 font-medium text-[#98675f]">${escapeAdminHtml(config.banned_badge_label)}</span>`);
-            }
-            return badges.join("");
-        }
-
-        function buildAdminUsersListMarkup(items, selectedUserId, config) {
-            if (!Array.isArray(items) || items.length === 0) {
-                return `<div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">${escapeAdminHtml(config.no_matches_label)}</div>`;
-            }
-
-            return items.map((user) => {
-                const active = user.id === selectedUserId;
-                const activeClasses = active
-                    ? "border-sage bg-mist shadow-[0_12px_26px_rgba(140,163,140,0.16)] text-ink"
-                    : "border-line bg-white/92 text-ink/76 hover:border-sage hover:bg-mist/70";
-                return `
-                    <button
-                        type="button"
-                        data-admin-user-pick="${escapeAdminHtml(user.id)}"
-                        class="w-full rounded-[1rem] border px-3 py-3 text-left transition ${activeClasses}"
-                    >
-                        <div class="flex items-start justify-between gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <p class="truncate text-sm font-semibold text-ink">${escapeAdminHtml(user.username)}</p>
-                                    ${buildAdminCompactUserBadges(user, config)}
-                                </div>
-                                <div class="mt-2 flex flex-wrap gap-2 text-[0.68rem] text-ink/56">
-                                    <span class="rounded-full border border-line bg-paper px-2.5 py-1">${escapeAdminHtml(config.user_last_ip_label)} ${escapeAdminHtml(user.last_login_ip || "-")}</span>
-                                    <span class="rounded-full border border-line bg-paper px-2.5 py-1">${escapeAdminHtml(user.last_auth_method || "-")}</span>
-                                </div>
-                            </div>
-                            <div class="shrink-0 text-right">
-                                <div class="rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-semibold text-ink/68">${escapeAdminHtml(config.user_active_sessions_label)} ${user.active_sessions}</div>
-                                <div class="mt-2 rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-semibold text-ink/68">${escapeAdminHtml(config.user_passkeys_label)} ${user.passkey_count}</div>
-                            </div>
-                        </div>
-                    </button>
-                `;
-            }).join("");
-        }
-
-        function buildAdminUserDetailMarkup(user, config) {
-            if (!user) {
-                return `<div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-10 text-sm text-ink/55">${escapeAdminHtml(config.select_user_label)}</div>`;
-            }
-
-            const lastAuthMarkup = user.last_auth_at_unix
-                ? `
-                    <div class="mt-2 flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
-                        <span>${escapeAdminHtml(user.last_auth_method || "-")}</span>
-                        <span class="rounded-full border px-3 py-1 text-xs font-semibold ${user.last_auth_success ? "border-sage/35 bg-[#eef4ee] text-sageDeep" : "border-peach/35 bg-[#fbefec] text-[#98675f]"}">
-                            ${escapeAdminHtml(user.last_auth_success ? config.audit_success_label : config.audit_failure_label)}
-                        </span>
-                    </div>
-                    <p class="mt-2 text-sm text-ink/62">${escapeAdminHtml(formatAdminUnixTimeValue(user.last_auth_at_unix))}</p>
-                `
-                : `<p class="mt-2 text-sm font-medium text-ink/62">-</p>`;
-
-            const banMarkup = user.banned
-                ? `
-                    <div class="mt-3 rounded-[0.95rem] border border-peach/35 bg-[#fbefec] px-4 py-3 text-sm text-[#98675f]">
-                        <div class="flex flex-wrap gap-2">
-                            ${user.ban_remaining_label ? `<span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">${escapeAdminHtml(config.ban_remaining_label)} ${escapeAdminHtml(user.ban_remaining_label)}</span>` : `<span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">${escapeAdminHtml(config.ban_permanent_label)}</span>`}
-                            ${user.ban_until_label ? `<span class="rounded-full border border-peach/35 bg-white px-3 py-1 text-xs font-semibold">${escapeAdminHtml(config.ban_until_label)} ${escapeAdminHtml(user.ban_until_label)}</span>` : ""}
-                        </div>
-                        ${user.ban_reason ? `<p class="mt-3 break-words">${escapeAdminHtml(config.ban_reason_label)} ${escapeAdminHtml(user.ban_reason)}</p>` : ""}
-                    </div>
-                `
-                : "";
-
-            const actionMarkup = user.is_admin ? "" : `
-                <div class="grid gap-3 xl:w-[22rem]">
-                    <div class="flex flex-wrap gap-2 xl:justify-end">
-                        <form method="post" action="/admin/users/${encodeURIComponent(user.id)}/unlock?lang=${encodeURIComponent(config.lang)}"><button type="submit" class="rounded-full border border-line bg-latte px-4 py-2 text-sm transition hover:border-sage hover:bg-[#e8dccb]">${escapeAdminHtml(config.unlock_label)}</button></form>
-                        <form method="post" action="/admin/users/${encodeURIComponent(user.id)}/sessions/revoke?lang=${encodeURIComponent(config.lang)}"><button type="submit" class="rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-sage">${escapeAdminHtml(config.revoke_sessions_label)}</button></form>
-                        <form method="post" action="/admin/users/${encodeURIComponent(user.id)}/reset?lang=${encodeURIComponent(config.lang)}"><button type="submit" class="rounded-full border border-[#ddc48f]/60 bg-[#f7f0e4] px-4 py-2 text-sm text-ink/78 transition hover:border-[#ddc48f] hover:bg-[#f3ead6]">${escapeAdminHtml(config.reset_label)}</button></form>
-                        <form method="post" data-confirm="${escapeAdminHtml(config.delete_confirm_message)}" action="/admin/users/${encodeURIComponent(user.id)}/delete?lang=${encodeURIComponent(config.lang)}"><button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">${escapeAdminHtml(config.delete_label)}</button></form>
-                    </div>
-
-                    <form method="post" action="/admin/users/${encodeURIComponent(user.id)}/ban" class="grid gap-3 rounded-[1rem] border border-line/80 bg-white/85 p-3">
-                        <input type="hidden" name="lang" value="${escapeAdminHtml(config.lang)}">
-                        <div class="grid gap-3 sm:grid-cols-[minmax(0,0.8fr),minmax(0,1fr)]">
-                            <label class="block">
-                                <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">${escapeAdminHtml(config.ban_duration_value_label)}</span>
-                                <input type="number" min="1" name="duration_value" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
-                            </label>
-                            <label class="block">
-                                <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">${escapeAdminHtml(config.ban_duration_unit_label)}</span>
-                                <select name="duration_unit" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
-                                    ${config.ban_duration_options.map((option) => `<option value="${escapeAdminHtml(option.value)}">${escapeAdminHtml(option.label)}</option>`).join("")}
-                                </select>
-                            </label>
-                        </div>
-                        <label class="block">
-                            <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">${escapeAdminHtml(config.ban_reason_label)}</span>
-                            <input type="text" name="reason" value="${escapeAdminHtml(user.ban_reason || "")}" placeholder="${escapeAdminHtml(config.ban_reason_placeholder)}" class="w-full rounded-[0.9rem] border border-line bg-paper px-3 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
-                        </label>
-                        <div class="flex flex-wrap gap-2">
-                            <button type="submit" class="rounded-full border border-peach/35 bg-[#fbefec] px-4 py-2 text-sm font-semibold text-[#98675f] transition hover:border-peach hover:bg-[#f8e6e1]">${escapeAdminHtml(config.ban_label)}</button>
-                            ${user.banned ? `<button type="submit" formaction="/admin/users/${encodeURIComponent(user.id)}/unban" class="rounded-full border border-sage/35 bg-mist px-4 py-2 text-sm font-semibold text-sageDeep transition hover:border-sage hover:bg-[#e6f0e6]">${escapeAdminHtml(config.unban_label)}</button>` : ""}
-                        </div>
-                    </form>
-                </div>
-            `;
-
-            return `
-                <section class="rounded-[1.1rem] border border-line bg-paper px-4 py-4">
-                    <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                        <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <p class="truncate text-lg font-semibold text-ink">${escapeAdminHtml(user.username)}</p>
-                                <span class="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium">${escapeAdminHtml(user.role === "admin" ? config.role_admin_label : config.role_user_label)}</span>
-                                <span class="rounded-full border px-3 py-1 text-xs font-medium ${user.totp_enabled ? "border-sage/35 bg-mist text-sageDeep" : "border-line bg-white text-ink/72"}">${escapeAdminHtml(user.totp_enabled ? config.totp_enabled_badge_label : config.totp_missing_badge_label)}</span>
-                                <span class="rounded-full border px-3 py-1 text-xs font-medium ${!user.password_ready ? "border-peach/35 bg-[#fbefec] text-[#98675f]" : user.password_reset_required ? "border-[#ddc48f]/60 bg-[#f7f0e4] text-ink/78" : "border-line bg-white text-ink/72"}">${escapeAdminHtml(!user.password_ready ? config.password_missing_badge_label : user.password_reset_required ? config.password_reset_badge_label : config.password_ready_badge_label)}</span>
-                                ${user.locked ? `<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">${escapeAdminHtml(config.locked_badge_label)}</span>` : ""}
-                                ${user.banned ? `<span class="rounded-full border border-peach/35 bg-[#fbefec] px-3 py-1 text-xs font-medium text-[#98675f]">${escapeAdminHtml(config.banned_badge_label)}</span>` : ""}
-                            </div>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">${escapeAdminHtml(config.user_active_sessions_label)}</p><p class="mt-2 text-sm font-medium">${user.active_sessions}</p></div>
-                                <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">${escapeAdminHtml(config.user_recovery_codes_label)}</p><p class="mt-2 text-sm font-medium">${user.recovery_codes_remaining}</p></div>
-                                <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">${escapeAdminHtml(config.user_passkeys_label)}</p><p class="mt-2 text-sm font-medium">${user.passkey_count}</p></div>
-                                <div class="rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3"><p class="text-xs uppercase tracking-[0.18em] text-ink/42">${escapeAdminHtml(config.user_last_ip_label)}</p><p class="mt-2 break-all text-sm font-medium">${escapeAdminHtml(user.last_login_ip || "-")}</p></div>
-                            </div>
-                            <div class="mt-3 rounded-[0.95rem] border border-line/70 bg-white/80 px-4 py-3">
-                                <p class="text-xs uppercase tracking-[0.18em] text-ink/42">${escapeAdminHtml(config.user_last_auth_label)}</p>
-                                ${lastAuthMarkup}
-                            </div>
-                            ${banMarkup}
-                        </div>
-                        ${actionMarkup}
-                    </div>
-                </section>
-            `;
-        }
-
-        function attachAdminUserWorkspace() {
-            const config = readAdminJsonScript("admin-users-config");
-            const form = document.querySelector("[data-admin-users-filter-form]");
-            const input = document.querySelector("[data-admin-user-search]");
-            const clearButton = document.querySelector("[data-admin-user-clear]");
-            const listContainer = document.querySelector("[data-admin-user-results]");
-            const detailContainer = document.querySelector("[data-admin-user-detail]");
-            const pager = document.querySelector("[data-admin-users-pagination]");
-            const pageStates = Array.from(document.querySelectorAll("[data-admin-users-page-state]"));
-
-            if (!config || !input || !listContainer || !detailContainer || !pager || pageStates.length === 0) {
-                return;
-            }
-
-            const state = {
-                search: "",
-                page: 1,
-                selectedUserId: "",
-                payload: null,
-                controller: null,
-                debounceTimer: null
-            };
-
-            function renderLoading() {
-                listContainer.innerHTML = `<div class="rounded-[1rem] border border-line bg-paper px-4 py-8 text-sm text-ink/55">${escapeAdminHtml(config.loading_label)}</div>`;
-                detailContainer.innerHTML = `<div class="rounded-[1rem] border border-line bg-paper px-4 py-10 text-sm text-ink/55">${escapeAdminHtml(config.loading_label)}</div>`;
-            }
-
-            function renderWorkspace() {
-                const payload = state.payload;
-                if (!payload) {
-                    renderLoading();
-                    return;
-                }
-
-                setAdminCount("[data-admin-users-filter-count]", payload.filtered_total);
-                pageStates.forEach((element) => {
-                    element.textContent = `${config.page_label} ${payload.page} / ${payload.page_count}`;
-                });
-
-                const currentUser = Array.isArray(payload.items)
-                    ? payload.items.find((item) => item.id === state.selectedUserId) || payload.items[0] || null
-                    : null;
-                state.selectedUserId = currentUser?.id || "";
-
-                listContainer.innerHTML = buildAdminUsersListMarkup(payload.items, state.selectedUserId, config);
-                detailContainer.innerHTML = buildAdminUserDetailMarkup(currentUser, config);
-
-                const previousButton = pager.querySelector("[data-admin-users-prev]");
-                const nextButton = pager.querySelector("[data-admin-users-next]");
-                if (previousButton) {
-                    previousButton.disabled = payload.page <= 1;
-                }
-                if (nextButton) {
-                    nextButton.disabled = payload.page >= payload.page_count;
-                }
-            }
-
-            async function loadUsersPage() {
-                state.controller?.abort();
-                const controller = new AbortController();
-                state.controller = controller;
-                renderLoading();
-
-                const params = new URLSearchParams({
-                    lang: config.lang,
-                    page: String(state.page)
-                });
-                if (state.search.trim()) {
-                    params.set("search", state.search.trim());
-                }
-
-                try {
-                    const response = await fetch(`${config.list_endpoint}?${params.toString()}`, {
-                        headers: { Accept: "application/json" },
-                        signal: controller.signal
-                    });
-                    if (!response.ok) {
-                        throw new Error(`Failed loading users: ${response.status}`);
-                    }
-                    const payload = await response.json();
-                    if (controller.signal.aborted) {
-                        return;
-                    }
-                    state.payload = payload;
-                    state.page = payload.page || 1;
-                    if (!payload.items.some((item) => item.id === state.selectedUserId)) {
-                        state.selectedUserId = payload.items[0]?.id || "";
-                    }
-                    renderWorkspace();
-                } catch (error) {
-                    if (controller.signal.aborted) {
-                        return;
-                    }
-                    console.error(error);
-                    listContainer.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">${escapeAdminHtml(config.no_matches_label)}</div>`;
-                    detailContainer.innerHTML = `<div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-10 text-sm text-ink/55">${escapeAdminHtml(config.select_user_label)}</div>`;
-                }
-            }
-
-            function queueUsersRefresh() {
-                window.clearTimeout(state.debounceTimer);
-                state.debounceTimer = window.setTimeout(() => {
-                    loadUsersPage();
-                }, 180);
-            }
-
-            form?.addEventListener("submit", (event) => {
-                event.preventDefault();
-                state.search = input.value;
-                state.page = 1;
-                loadUsersPage();
-            });
-
-            input.addEventListener("input", () => {
-                state.search = input.value;
-                state.page = 1;
-                queueUsersRefresh();
-            });
-
-            clearButton?.addEventListener("click", () => {
-                input.value = "";
-                state.search = "";
-                state.page = 1;
-                loadUsersPage();
-                input.focus();
-            });
-
-            listContainer.addEventListener("click", (event) => {
-                const button = event.target.closest("[data-admin-user-pick]");
-                if (!button) {
-                    return;
-                }
-                state.selectedUserId = button.dataset.adminUserPick || "";
-                renderWorkspace();
-            });
-
-            pager.addEventListener("click", (event) => {
-                const action = event.target.closest("[data-admin-users-page-action]")?.dataset.adminUsersPageAction;
-                if (!action || !state.payload) {
-                    return;
-                }
-                if (action === "previous" && state.payload.page > 1) {
-                    state.page = state.payload.page - 1;
-                    loadUsersPage();
-                }
-                if (action === "next" && state.payload.page < state.payload.page_count) {
-                    state.page = state.payload.page + 1;
-                    loadUsersPage();
-                }
-            });
-
-            detailContainer.addEventListener("submit", (event) => {
-                const formElement = event.target.closest("form[data-confirm]");
-                if (formElement && !window.confirm(formElement.dataset.confirm || "")) {
-                    event.preventDefault();
-                }
-            });
-
-            loadUsersPage();
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
-            activateAdminPane();
-            decorateAdminMetadata();
-            attachAdminSegment("policy");
-            attachAdminSegment("audit");
-            attachAdminSegment("policy-bot");
-            attachAdminUserWorkspace();
-            attachAdminCollectionFilter({
-                formSelector: "[data-admin-audit-filter-form]",
-                inputSelector: "[data-admin-audit-search]",
-                clearSelector: "[data-admin-audit-clear]",
-                itemSelector: "[data-admin-audit-row]",
-                emptySelector: "[data-admin-audit-empty]",
-                countSelector: "[data-admin-audit-filter-count]"
-            });
-        });
-        window.addEventListener("hashchange", () => activateAdminPane());
-    </script>
-    <style>
-        body {
-            background:
-                radial-gradient(circle at 10% 12%, rgba(140, 163, 140, .13), transparent 25%),
-                radial-gradient(circle at 84% 18%, rgba(217, 166, 154, .11), transparent 21%),
-                linear-gradient(180deg, #fbf7f0 0%, #f6f1e8 44%, #f1ebe0 100%);
-        }
-        .paper-shadow { box-shadow: 0 24px 60px rgba(113, 94, 76, 0.08); }
-        .section-card { border: 1px solid rgba(222, 211, 198, 0.92); background: rgba(255, 250, 242, 0.95); }
-        .tab-strip { scrollbar-width: none; }
-        .tab-strip::-webkit-scrollbar { display: none; }
-        details summary::-webkit-details-marker { display: none; }
-        details[open] .details-chevron { transform: rotate(180deg); }
-        .compact-scroll { scrollbar-gutter: stable; }
-    </style>
-</head>
-<body class="min-h-screen font-sans text-ink antialiased">
-    <main class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-        <header class="paper-shadow sticky top-2 z-40 rounded-[1.25rem] border border-line/80 bg-paper/98 px-4 py-3 backdrop-blur-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex flex-wrap items-center gap-2.5">
-                    <span class="inline-flex items-center rounded-full border border-sage/35 bg-mist px-3 py-1.5 text-sm text-sageDeep">
-                        {{ current_admin_username }}
-                    </span>
-                    <h1 class="font-display text-lg font-semibold tracking-tight text-ink">{{ title }}</h1>
-                </div>
-                <div class="flex flex-wrap items-center gap-1.5">
-                    <a href="{{ dashboard_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ dashboard_label }}</a>
-                    <a href="{{ settings_href }}" class="rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-ink/75 transition hover:border-sage hover:text-ink">{{ settings_label }}</a>
-                </div>
-            </div>
-        </header>
-
-        <div class="mt-3 flex flex-wrap items-center gap-2 text-[0.78rem]">
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_users_label }} · <span class="ml-1 font-semibold">{{ total_users }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-peach/30 bg-[#fbefec] px-2.5 py-1 text-[#98675f]">{{ overview_locked_label }} · <span class="ml-1 font-semibold">{{ locked_users_count }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-sage/30 bg-mist px-2.5 py-1 text-sageDeep">{{ overview_web_sessions_label }} · <span class="ml-1 font-semibold">{{ total_active_auth_sessions }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_mfa_label }} · <span class="ml-1 font-semibold">{{ mfa_enabled_users }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ overview_audit_rows_label }} · <span class="ml-1 font-semibold">{{ audit_log_count }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ registration_label }} · <span class="ml-1 font-semibold">{{ current_registration_label }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ totp_policy_label }} · <span class="ml-1 font-semibold">{{ current_totp_policy_label }}</span></span>
-            <span class="inline-flex items-center rounded-full border border-line bg-white/88 px-2.5 py-1">{{ password_policy_label }} · <span class="ml-1 font-semibold">{{ current_password_policy_label }}</span></span>
+{% block content %}
+<header class="page-head">
+    <div class="page-head__main">
+        <span class="platform-mark platform-mark--accent"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg></span>
+        <div class="page-head__text">
+            <p class="eyebrow">{{ current_admin_username }}</p>
+            <h1 class="page-head__title">{{ title }}</h1>
+            <p class="page-head__desc">{{ description }}</p>
         </div>
+    </div>
+    <div class="page-head__actions hide-lt-lg">
+        <button type="button" class="btn btn--primary" data-sheet-open="create-user-sheet"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"></use></svg>{{ create_user_title }}</button>
+    </div>
+</header>
 
-        {% if transport_warning %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
-            <p class="font-semibold">{{ transport_warning.title }}</p>
-            <p class="mt-2">{{ transport_warning.message }}</p>
-        </section>
-        {% endif %}
+<div class="stats">
+    <a class="stat" href="#users" data-panel-jump="users">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-users"></use></svg>{{ overview_users_label }}</span>
+        <span class="stat__value">{{ total_users }}</span>
+    </a>
+    <a class="stat{% if locked_users_count > 0 %} stat--danger{% endif %}" href="#users" data-panel-jump="users">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-lock"></use></svg>{{ overview_locked_label }}</span>
+        <span class="stat__value">{{ locked_users_count }}</span>
+    </a>
+    <a class="stat stat--success" href="#sessions" data-panel-jump="sessions">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-monitor"></use></svg>{{ overview_web_sessions_label }}</span>
+        <span class="stat__value">{{ total_active_auth_sessions }}</span>
+    </a>
+    <a class="stat stat--accent" href="#security" data-panel-jump="security">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-shield-check"></use></svg>{{ overview_mfa_label }}</span>
+        <span class="stat__value">{{ mfa_enabled_users }}</span>
+    </a>
+    <a class="stat" href="#audit" data-panel-jump="audit">
+        <span class="stat__label"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-list"></use></svg>{{ overview_audit_rows_label }}</span>
+        <span class="stat__value">{{ audit_log_count }}</span>
+    </a>
+</div>
 
-        {% if banner %}
-        <section class="paper-shadow mt-4 rounded-[1.4rem] border px-4 py-4 text-sm leading-7 whitespace-pre-line {% if banner.kind == 'success' %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">{{ banner.message }}</section>
-        {% endif %}
+{% include "_alerts.html" %}
 
-        <section class="mt-4 paper-shadow section-card rounded-[1.75rem] p-4 sm:p-5">
-            <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                <a href="#users" data-admin-tab="users" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ admin_nav_users }}</a>
-                <a href="#policy" data-admin-tab="policy" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ admin_nav_policy }}</a>
-                <a href="#audit" data-admin-tab="audit" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ admin_nav_audit }}</a>
+<div class="workspace" data-panels id="admin-panels">
+    <nav class="secnav" aria-label="{{ admin_sections_title }}">
+        <div class="secnav__group">
+            <p class="secnav__label">{{ admin_nav_users }}</p>
+            <a class="secnav__item" href="#users" data-panel-link="users"><svg class="icon" aria-hidden="true"><use href="#i-users"></use></svg>{{ users_title }}<span class="count">{{ total_users }}</span></a>
+            <a class="secnav__item" href="#recent" data-panel-link="recent"><svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>{{ i18n.ui_admin_nav_recent }}</a>
+        </div>
+        <span class="secnav__sep" aria-hidden="true"></span>
+        <div class="secnav__group">
+            <p class="secnav__label">{{ admin_nav_policy }}</p>
+            <a class="secnav__item" href="#registration" data-panel-link="registration"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"></use></svg>{{ i18n.ui_admin_nav_registration }}</a>
+            <a class="secnav__item" href="#security" data-panel-link="security"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg>{{ i18n.ui_admin_nav_security }}</a>
+            <a class="secnav__item" href="#sessions" data-panel-link="sessions"><svg class="icon" aria-hidden="true"><use href="#i-hourglass"></use></svg>{{ i18n.ui_admin_nav_sessions }}</a>
+            <a class="secnav__item" href="#system" data-panel-link="system"><svg class="icon" aria-hidden="true"><use href="#i-server"></use></svg>{{ i18n.ui_admin_nav_system }}</a>
+        </div>
+        <span class="secnav__sep" aria-hidden="true"></span>
+        <div class="secnav__group">
+            <p class="secnav__label">{{ admin_nav_audit }}</p>
+            <a class="secnav__item" href="#audit" data-panel-link="audit"><svg class="icon" aria-hidden="true"><use href="#i-list"></use></svg>{{ audit_title }}<span class="count">{{ audit_log_count }}</span></a>
+            <a class="secnav__item" href="#rollups" data-panel-link="rollups"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>{{ rollup_title }}</a>
+        </div>
+    </nav>
+
+    <div class="workspace__body" data-panels-anchor>
+        {# ---------------- Users ---------------- #}
+        <section class="panel" data-panel="users">
+            <script id="admin-users-config" type="application/json">{{ admin_users_config_json | safe }}</script>
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ users_title }}</h2>
+                    <p class="panel__desc">{{ users_description }}</p>
+                </div>
+                <div class="panel__tools">
+                    <span class="badge badge--accent badge--lg">{{ users_filtered_label }} · <span data-admin-users-filter-count>{{ users_filtered_count }}</span></span>
+                </div>
             </div>
-
-            <div class="mt-4">
-                <section data-admin-pane="users" class="space-y-4">
-                    <h2 class="font-display text-xl font-semibold">{{ users_title }}</h2>
-
-                    <div class="grid gap-4">
-                        <details class="rounded-[1.35rem] border border-line bg-white/92">
-                            <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-ink">{{ create_user_title }} / {{ recent_auth_title }}</summary>
-                            <div class="grid gap-4 border-t border-line/80 p-4 lg:grid-cols-2">
-                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-4">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <h3 class="text-lg font-semibold">{{ create_user_title }}</h3>
-                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-ink/55">{{ total_users }}</span>
-                                </div>
-                                <form method="post" action="/admin/users/create" class="mt-4 grid gap-3">
-                                    <input type="hidden" name="lang" value="{{ lang }}">
-                                    <input type="text" name="username" placeholder="{{ username_label }}" class="rounded-[0.95rem] border border-line bg-paper px-4 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
-                                    <input type="password" name="password" placeholder="{{ password_label }}" class="rounded-[0.95rem] border border-line bg-paper px-4 py-2.5 text-sm outline-none transition focus:border-sage focus:bg-white">
-                                    <button type="submit" class="rounded-[0.95rem] bg-sage px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sageDeep">{{ create_user_label }}</button>
-                                </form>
-                            </article>
-
-                            <article class="rounded-[1.35rem] border border-line bg-white/92 p-4">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <div>
-                                        <h3 class="text-lg font-semibold">{{ recent_auth_title }}</h3>
-                                        <p class="mt-1 text-sm leading-6 text-ink/62">{{ recent_auth_description }}</p>
-                                    </div>
-                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ recent_auth_activity | length }}</span>
-                                </div>
-
-                                {% if recent_auth_activity | length == 0 %}
-                                <div class="mt-4 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-6 text-sm text-ink/55">{{ recent_auth_empty_label }}</div>
-                                {% else %}
-                                <div class="mt-4 max-h-[19rem] divide-y divide-line/70 overflow-y-auto rounded-[1rem] border border-line bg-paper">
-                                    {% for item in recent_auth_activity %}
-                                    <div class="px-4 py-3">
-                                        <div class="flex items-start justify-between gap-3">
-                                            <div class="min-w-0">
-                                                <div class="flex flex-wrap items-center gap-2">
-                                                    <p class="truncate text-sm font-semibold text-ink">{{ item.username }}</p>
-                                                    <span class="rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.16em] {% if item.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                                        {% if item.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
-                                                    </span>
-                                                </div>
-                                                <p class="mt-1 text-sm leading-6 text-ink/68">{{ item.method_label }}</p>
-                                                <div class="mt-2 flex flex-wrap gap-2 text-xs text-ink/52">
-                                                    <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ user_last_ip_label }} {{ item.ip_address | default(value='-') }}</span>
-                                                    {% if item.reason %}
-                                                    <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ audit_reason_label }} {{ item.reason }}</span>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            <p class="shrink-0 text-xs text-ink/48"><span data-admin-unix-time="{{ item.created_at_unix }}">{{ item.created_at_unix }}</span></p>
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                                {% endif %}
-                            </article>
-                            </div>
-                        </details>
-
-                        <script id="admin-users-config" type="application/json">{{ admin_users_config_json | safe }}</script>
-                        <article class="rounded-[1.45rem] border border-line bg-white/90 p-4">
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <div class="flex flex-wrap items-center gap-3">
-                                    <h3 class="text-lg font-semibold sm:text-xl">{{ users_title }}</h3>
-                                    <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ total_users }}</span>
-                                    <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ users_filtered_label }} · <span data-admin-users-filter-count>{{ users_filtered_count }}</span></span>
-                                    <span class="rounded-full border border-line bg-white px-3 py-1 text-sm" data-admin-users-page-state>{{ users_page_label }} 1 / 1</span>
-                                </div>
-                            </div>
-
-                            <form data-admin-users-filter-form class="mt-4 grid gap-3 rounded-[1rem] border border-line bg-paper px-4 py-4 sm:grid-cols-[minmax(0,1fr),auto] sm:items-end">
-                                <label class="block">
-                                    <span class="mb-2 block text-sm font-medium">{{ users_search_label }}</span>
-                                    <input type="text" data-admin-user-search placeholder="{{ users_search_placeholder }}" class="w-full rounded-[1rem] border border-line bg-white px-4 py-3 outline-none transition focus:border-sage">
-                                </label>
-                                <button type="button" data-admin-user-clear class="rounded-[1rem] border border-line bg-latte px-4 py-3 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</button>
-                            </form>
-
-                            <div class="mt-4 grid gap-4 xl:grid-cols-[18rem,minmax(0,1fr)]">
-                                <div>
-                                    <div data-admin-user-results class="grid max-h-[68vh] gap-2 overflow-y-auto pr-1">
-                                        <div class="rounded-[1rem] border border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ users_loading_label }}</div>
-                                    </div>
-                                    <div data-admin-users-pagination class="mt-3 flex items-center justify-between gap-3 rounded-[1rem] border border-line bg-paper px-3 py-3">
-                                        <button type="button" data-admin-users-page-action="previous" data-admin-users-prev class="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold transition hover:border-sage disabled:cursor-not-allowed disabled:opacity-45">{{ pagination_previous_label }}</button>
-                                        <span class="text-sm text-ink/65" data-admin-users-page-state>{{ users_page_label }} 1 / 1</span>
-                                        <button type="button" data-admin-users-page-action="next" data-admin-users-next class="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold transition hover:border-sage disabled:cursor-not-allowed disabled:opacity-45">{{ pagination_next_label }}</button>
-                                    </div>
-                                </div>
-
-                                <div data-admin-user-detail class="min-h-[18rem]">
-                                    <div class="rounded-[1rem] border border-dashed border-line bg-paper px-4 py-10 text-sm text-ink/55">{{ users_select_label }}</div>
-                                </div>
-                            </div>
-                        </article>
+            <form class="toolbar" data-admin-users-filter-form role="search">
+                <label class="input-group grow">
+                    <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+                    <input type="search" class="input" data-admin-user-search data-hotkey-search placeholder="{{ users_search_placeholder }}" aria-label="{{ users_search_label }}" autocomplete="off">
+                </label>
+                <button type="button" class="btn" data-admin-user-clear>{{ audit_search_clear_label }}</button>
+            </form>
+            <div class="master-detail">
+                <div class="master-detail__list">
+                    <div class="list list--card list--scroll" data-admin-user-results>
+                        <div class="card__body"><div class="skeleton skeleton-row"></div></div>
                     </div>
-                </section>
-                <section data-admin-pane="policy" class="hidden space-y-4">
-                    <h2 class="font-display text-xl font-semibold">{{ policy_title }}</h2>
-
-                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="connectivity" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ registration_label }}</button>
-                        <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="security" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ totp_policy_label }} / {{ password_policy_label }}</button>
-                        <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="sessions" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ session_ttl_label }} / {{ lockout_threshold_label }}</button>
-                        <button type="button" data-admin-segment-tab="policy" data-admin-segment-target="system" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ argon_memory_label }} / {{ audit_title }}</button>
+                    <div class="pager" data-admin-users-pagination>
+                        <button type="button" class="btn btn--sm" data-admin-users-page-action="previous" data-admin-users-prev><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"></use></svg>{{ pagination_previous_label }}</button>
+                        <span class="text-sm muted" data-admin-users-page-state>{{ users_page_label }} 1 / 1</span>
+                        <button type="button" class="btn btn--sm" data-admin-users-page-action="next" data-admin-users-next>{{ pagination_next_label }}<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button>
                     </div>
-
-                    <section class="rounded-[1.35rem] border border-sage/20 bg-mist/80 p-3.5 sm:p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-sageDeep/75">{{ i18n.settings_nav_notifications }}</p>
-                                <h3 class="mt-2 text-lg font-semibold text-ink">{{ notifications_notice_title }}</h3>
-                                <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/68">{{ notifications_notice_description }}</p>
-                            </div>
-                            <a href="{{ notifications_href }}" class="inline-flex shrink-0 items-center justify-center rounded-full border border-sage/30 bg-white px-4 py-2 text-sm font-medium text-sageDeep transition hover:border-sage hover:bg-mist/70">{{ notifications_notice_action }}</a>
-                        </div>
-                    </section>
-
-                    <form method="post" action="/admin/settings" class="space-y-4">
-                        <input type="hidden" name="lang" value="{{ lang }}">
-
-                        <section data-admin-segment-panel="policy" data-admin-segment-id="connectivity" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ registration_label }} · {{ current_registration_label }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ session_ttl_label }} · {{ system_settings.session_absolute_ttl_hours }}</span>
-                            </div>
-                            <div class="mt-3">
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ registration_label }}</p>
-                                    <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,0.9fr),minmax(0,1.1fr)]">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ registration_label }}</span><select name="registration_policy" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">{% for option in registration_options %}<option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3"><input type="checkbox" name="public_registration_open" value="1" class="mt-1 h-4 w-4" {% if public_registration_open %}checked{% endif %}><span class="text-sm leading-6 text-ink/74">{{ public_registration_label }}</span></label>
-                                    </div>
-                                </article>
-                            </div>
-                            <div class="mt-3 flex justify-end">
-                                <button type="submit" class="rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ save_policy_label }}</button>
-                            </div>
-                        </section>
-
-                        <section data-admin-segment-panel="policy" data-admin-segment-id="security" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ totp_policy_label }} · {{ current_totp_policy_label }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ password_policy_label }} · {{ current_password_policy_label }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ password_min_length_label }} · {{ system_settings.password_strength_rules.min_length }}</span>
-                            </div>
-                            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,0.95fr),minmax(0,1.05fr)]">
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <div class="grid gap-3">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ totp_policy_label }}</span><select name="totp_policy" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">{% for option in totp_policy_options %}<option value="{{ option.value }}" {% if option.value == current_totp_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ password_policy_label }}</span><select name="password_strength_policy" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">{% for option in password_policy_options %}<option value="{{ option.value }}" {% if option.value == current_password_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ password_min_length_label }}</span><input type="number" min="1" name="password_min_length" value="{{ system_settings.password_strength_rules.min_length }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                    </div>
-                                </article>
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ password_policy_label }}</p>
-                                    <div class="mt-3 grid gap-2.5 sm:grid-cols-2">
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3"><input type="checkbox" name="password_require_uppercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_uppercase %}checked{% endif %}><span class="text-sm leading-6 text-ink/74">{{ password_require_uppercase_label }}</span></label>
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3"><input type="checkbox" name="password_require_lowercase" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_lowercase %}checked{% endif %}><span class="text-sm leading-6 text-ink/74">{{ password_require_lowercase_label }}</span></label>
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3"><input type="checkbox" name="password_require_number" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_number %}checked{% endif %}><span class="text-sm leading-6 text-ink/74">{{ password_require_number_label }}</span></label>
-                                        <label class="flex items-start gap-3 rounded-[0.95rem] border border-line bg-white px-3 py-3"><input type="checkbox" name="password_require_symbol" value="1" class="mt-1 h-4 w-4" {% if system_settings.password_strength_rules.require_symbol %}checked{% endif %}><span class="text-sm leading-6 text-ink/74">{{ password_require_symbol_label }}</span></label>
-                                    </div>
-                                </article>
-                            </div>
-                            <div class="mt-3 flex justify-end">
-                                <button type="submit" class="rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ save_policy_label }}</button>
-                            </div>
-                        </section>
-
-                        <section data-admin-segment-panel="policy" data-admin-segment-id="sessions" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ session_ttl_label }} · {{ system_settings.session_absolute_ttl_hours }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ lockout_threshold_label }} · {{ system_settings.lockout_policy.threshold }}</span>
-                                {% if system_max_idle_timeout_minutes %}<span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ system_idle_limit_label }} · {{ system_max_idle_timeout_minutes }}</span>{% endif %}
-                            </div>
-                            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,0.92fr),minmax(0,1.08fr)]">
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <div class="grid gap-3">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ session_ttl_label }}</span><input type="number" min="1" name="session_absolute_ttl_hours" value="{{ system_settings.session_absolute_ttl_hours }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ system_idle_limit_label }}</span><input type="number" min="1" name="max_idle_timeout_minutes" value="{{ system_max_idle_timeout_minutes }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"><span class="mt-2 block text-xs leading-6 text-ink/55">{{ system_idle_limit_hint }}</span></label>
-                                    </div>
-                                </article>
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <p class="text-xs uppercase tracking-[0.22em] text-ink/45">{{ lockout_threshold_label }}</p>
-                                    <div class="mt-3 grid gap-3 sm:grid-cols-3">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ lockout_threshold_label }}</span><input type="number" min="1" name="lockout_threshold" value="{{ system_settings.lockout_policy.threshold }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ lockout_base_label }}</span><input type="number" min="1" name="lockout_base_delay_seconds" value="{{ system_settings.lockout_policy.base_delay_seconds }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ lockout_max_label }}</span><input type="number" min="1" name="lockout_max_delay_seconds" value="{{ system_settings.lockout_policy.max_delay_seconds }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                    </div>
-                                </article>
-                            </div>
-                            <div class="mt-3 flex justify-end">
-                                <button type="submit" class="rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ save_policy_label }}</button>
-                            </div>
-                        </section>
-
-                        <section data-admin-segment-panel="policy" data-admin-segment-id="system" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ argon_memory_label }} · {{ argon_memory_mib }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ argon_iterations_label }} · {{ argon_iterations }}</span>
-                                <span class="rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink/72">{{ audit_limit_label }} · {{ system_settings.audit_detail_limit }}</span>
-                            </div>
-                            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr),minmax(0,0.9fr)]">
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <div class="grid gap-3 sm:grid-cols-3">
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ argon_memory_label }}</span><input type="number" min="64" name="argon_memory_mib" value="{{ argon_memory_mib }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ argon_iterations_label }}</span><input type="number" min="3" name="argon_iterations" value="{{ argon_iterations }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                        <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ argon_lanes_label }}</span><input type="number" min="2" name="argon_lanes" value="{{ argon_lanes }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                    </div>
-                                </article>
-                                <article class="rounded-[1.1rem] border border-line bg-paper/90 p-3.5">
-                                    <label class="block"><span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ audit_limit_label }}</span><input type="number" min="1" name="audit_detail_limit" value="{{ system_settings.audit_detail_limit }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage"></label>
-                                    <p class="mt-3 text-xs leading-6 text-ink/55">{{ argon_raise_only_hint }}</p>
-                                </article>
-                            </div>
-                            <div class="mt-3 flex justify-end">
-                                <button type="submit" class="rounded-full border border-line bg-latte px-5 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ save_policy_label }}</button>
-                            </div>
-                        </section>
-                    </form>
-                </section>
-                <section data-admin-pane="audit" class="hidden space-y-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <h2 class="font-display text-xl font-semibold">{{ audit_title }}</h2>
-                        <div class="flex flex-wrap gap-2">
-                            <span class="rounded-full border border-line bg-white px-3 py-1 text-sm">{{ overview_audit_rows_label }} · {{ audit_log_count }}</span>
-                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm">{{ audit_filtered_label }} · <span data-admin-audit-filter-count>{{ audit_filtered_count }}</span></span>
-                            <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ rollup_title }} · {{ audit_rollups | length }}</span>
-                        </div>
-                    </div>
-
-                    <div class="tab-strip flex gap-2 overflow-x-auto pb-1">
-                        <button type="button" data-admin-segment-tab="audit" data-admin-segment-target="logs" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ audit_title }}</button>
-                        <button type="button" data-admin-segment-tab="audit" data-admin-segment-target="rollups" class="whitespace-nowrap rounded-full border bg-white px-4 py-2 text-sm font-medium text-ink/74 transition hover:border-sage">{{ rollup_title }}</button>
-                    </div>
-
-                    <section data-admin-segment-panel="audit" data-admin-segment-id="logs" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ audit_title }}</p>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ audit_description }}</p>
-                            </div>
-                            <span class="rounded-full border border-line bg-paper px-3 py-1 text-sm" data-admin-audit-filter-count>{{ audit_filtered_count }}</span>
-                        </div>
-
-                        <form data-admin-audit-filter-form class="mt-3 grid gap-3 rounded-[1rem] border border-line bg-paper/90 px-3.5 py-3 sm:grid-cols-[minmax(0,1fr),auto,auto] sm:items-end">
-                            <label class="block">
-                                <span class="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-ink/45">{{ audit_search_label }}</span>
-                                <input type="text" data-admin-audit-search value="{{ audit_search_value }}" placeholder="{{ audit_search_placeholder }}" class="w-full rounded-[0.95rem] border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sage">
-                            </label>
-                            <button type="submit" class="rounded-[0.95rem] border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:border-sage hover:bg-paper">{{ audit_search_submit_label }}</button>
-                            <button type="button" data-admin-audit-clear class="rounded-[0.95rem] border border-line bg-latte px-4 py-2.5 text-center text-sm font-semibold transition hover:border-sage hover:bg-[#e8dccb]">{{ audit_search_clear_label }}</button>
-                        </form>
-
-                        {% if audit_logs | length == 0 %}
-                        <div class="mt-3 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ audit_empty_label }}</div>
-                        {% else %}
-                        <div data-admin-audit-empty class="mt-3 hidden rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ audit_no_matches_label }}</div>
-                        <div class="compact-scroll mt-3 space-y-2 max-h-[68vh] overflow-y-auto pr-1">
-                            {% for log in audit_logs %}
-                            <details data-admin-audit-row class="rounded-[1rem] border border-line bg-paper/95">
-                                <summary class="cursor-pointer px-3.5 py-3">
-                                    <div class="grid gap-3 lg:grid-cols-[minmax(0,1.45fr),minmax(0,0.88fr),minmax(0,0.92fr),auto] lg:items-center">
-                                        <div class="min-w-0">
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <p class="break-all text-sm font-semibold text-ink">{{ log.action_label }}</p>
-                                                <span class="rounded-full border px-2.5 py-1 text-[0.66rem] font-semibold uppercase tracking-[0.16em] {% if log.success %}border-sage/35 bg-[#eef4ee] text-sageDeep{% else %}border-peach/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-                                                    {% if log.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}
-                                                </span>
-                                                {% if log.login_method %}
-                                                <span class="rounded-full border border-line bg-white px-2.5 py-1 text-[0.66rem] font-semibold uppercase tracking-[0.16em] text-ink/72">{{ audit_method_label }} {{ log.login_method }}</span>
-                                                {% endif %}
-                                                {% if log.passkey_label %}
-                                                <span class="rounded-full border border-line bg-white px-2.5 py-1 text-[0.66rem] font-semibold uppercase tracking-[0.16em] text-ink/72">{{ user_passkeys_label }} {{ log.passkey_label }}</span>
-                                                {% endif %}
-                                            </div>
-                                            <div class="mt-2 flex flex-wrap gap-1.5 text-[0.72rem] text-ink/56">
-                                                <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ audit_actor_label }} {% if log.actor_username %}{{ log.actor_username }}{% elif log.actor_user_id %}{{ log.actor_user_id }}{% else %}-{% endif %}</span>
-                                                <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ audit_subject_label }} {% if log.subject_username %}{{ log.subject_username }}{% elif log.subject_user_id %}{{ log.subject_user_id }}{% else %}-{% endif %}</span>
-                                                <span class="rounded-full border border-line bg-white px-2.5 py-1">{{ audit_username_label }} {% if log.username %}{{ log.username }}{% else %}-{% endif %}</span>
-                                            </div>
-                                        </div>
-                                        <div class="grid gap-1.5 text-[0.72rem] leading-5 text-ink/58">
-                                            <p class="break-all">{{ user_last_ip_label }} · {{ log.ip_address | default(value="-") }}</p>
-                                            {% if log.reason %}
-                                            <p class="break-all">{{ audit_reason_label }} · {{ log.reason }}</p>
-                                            {% endif %}
-                                        </div>
-                                        <div class="grid gap-1.5 text-[0.72rem] leading-5 text-ink/58">
-                                            {% if log.user_agent %}
-                                            <p class="truncate">{{ log.user_agent }}</p>
-                                            {% endif %}
-                                            {% if log.passkey_label %}
-                                            <p class="break-all">{{ user_passkeys_label }} · {{ log.passkey_label }}</p>
-                                            {% endif %}
-                                        </div>
-                                        <div class="flex items-center justify-between gap-2 lg:justify-end">
-                                            <p class="shrink-0 text-[0.72rem] text-ink/52">{{ audit_time_label }} <span data-admin-unix-time="{{ log.created_at_unix }}">{{ log.created_at_unix }}</span></p>
-                                            <span class="details-chevron text-sm text-ink/40 transition">⌄</span>
-                                        </div>
-                                    </div>
-                                </summary>
-                                <div class="border-t border-line/80 px-3.5 py-3">
-                                    <div class="grid gap-3 lg:grid-cols-[minmax(0,0.92fr),minmax(0,1.08fr)]">
-                                        <div class="rounded-[0.95rem] border border-line bg-white px-3.5 py-3">
-                                            <p class="text-[0.68rem] uppercase tracking-[0.18em] text-ink/45">{{ audit_user_agent_label }}</p>
-                                            <p class="mt-2 break-words text-sm leading-6 text-ink/68">{% if log.user_agent %}{{ log.user_agent }}{% else %}-{% endif %}</p>
-                                        </div>
-                                        <div class="rounded-[0.95rem] border border-line bg-white px-3.5 py-3">
-                                            <p class="text-[0.68rem] uppercase tracking-[0.18em] text-ink/45">{{ audit_details_label }}</p>
-                                            <pre class="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-[0.85rem] bg-paper px-3 py-2.5 font-mono text-xs leading-6 text-ink/72">{{ log.details_pretty }}</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                            </details>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                    </section>
-
-                    <section data-admin-segment-panel="audit" data-admin-segment-id="rollups" class="hidden rounded-[1.35rem] border border-line bg-white/92 p-3.5 sm:p-4">
-                        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                            <div>
-                                <p class="text-xs uppercase tracking-[0.24em] text-ink/45">{{ rollup_title }}</p>
-                                <p class="mt-2 text-sm leading-6 text-ink/68">{{ rollup_description }}</p>
-                            </div>
-                            <span class="rounded-full border border-sage/30 bg-mist px-3 py-1 text-sm text-sageDeep">{{ audit_rollups | length }}</span>
-                        </div>
-
-                        {% if audit_rollups | length == 0 %}
-                        <div class="mt-3 rounded-[1rem] border border-dashed border-line bg-paper px-4 py-8 text-sm text-ink/55">{{ rollup_empty_label }}</div>
-                        {% else %}
-                        <div class="compact-scroll mt-3 grid max-h-[68vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
-                            {% for rollup in audit_rollups %}
-                            <article class="rounded-[1rem] border border-line bg-paper/95 px-3.5 py-3">
-                                <div class="flex items-start justify-between gap-3">
-                                    <p class="break-all text-sm font-semibold text-ink">{{ rollup.action_type }}</p>
-                                    <span class="rounded-full border border-sage/35 bg-[#eef4ee] px-2.5 py-1 text-xs font-semibold text-sageDeep">{{ rollup.total_count }}</span>
-                                </div>
-                                <p class="mt-3 text-[0.72rem] text-ink/55">{{ audit_updated_label }} <span data-admin-unix-time="{{ rollup.updated_at_unix }}">{{ rollup.updated_at_unix }}</span></p>
-                            </article>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                    </section>
-                </section>
+                </div>
+                <div class="master-detail__detail" data-admin-user-detail>
+                    <div class="empty"><span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg></span><p class="empty__desc">{{ users_select_label }}</p></div>
+                </div>
             </div>
         </section>
-    </main>
-</body>
-</html>
+
+        {# ---------------- Recent sign-ins ---------------- #}
+        <section class="panel" data-panel="recent">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ recent_auth_title }}</h2>
+                    <p class="panel__desc">{{ recent_auth_description }}</p>
+                </div>
+                <div class="panel__tools"><span class="badge badge--outline badge--lg">{{ recent_auth_activity | length }}</span></div>
+            </div>
+            {% if recent_auth_activity | length == 0 %}
+            <div class="empty empty--compact"><p class="empty__desc">{{ recent_auth_empty_label }}</p></div>
+            {% else %}
+            <div class="list list--card">
+                {% for item in recent_auth_activity %}
+                <div class="row row--top">
+                    <span class="avatar avatar--sm avatar--round{% if not item.success %} avatar--danger{% endif %}">{{ item.username | truncate(length=1, end="") | upper }}</span>
+                    <div class="row__main">
+                        <p class="row__title"><span>{{ item.username }}</span><span class="badge {% if item.success %}badge--success{% else %}badge--danger{% endif %}">{% if item.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}</span></p>
+                        <p class="row__meta"><span>{{ item.method_label }}</span><span>{{ user_last_ip_label }} · <span class="mono">{{ item.ip_address | default(value='-') }}</span></span>{% if item.reason %}<span>{{ audit_reason_label }} · {{ item.reason }}</span>{% endif %}</p>
+                    </div>
+                    <span class="row__aside text-xs muted mono" data-unix="{{ item.created_at_unix }}">{{ item.created_at_unix }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+
+        {# ---------------- Policy (single form) ---------------- #}
+        <form method="post" action="/admin/settings" id="admin-policy-form">
+            <input type="hidden" name="lang" value="{{ lang }}">
+
+            <section class="panel" data-panel="registration">
+                <div class="panel__head">
+                    <div>
+                        <h2 class="panel__title">{{ i18n.ui_admin_nav_registration }}</h2>
+                        <p class="panel__desc">{{ policy_description }}</p>
+                    </div>
+                    <div class="panel__tools"><span class="badge badge--accent badge--lg">{{ current_registration_label }}</span></div>
+                </div>
+                <div class="card">
+                    <div class="card__body form">
+                        <label class="field">
+                            <span class="field__label">{{ registration_label }}</span>
+                            <select name="registration_policy" class="select">{% for option in registration_options %}<option value="{{ option.value }}" {% if option.value == current_registration_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
+                        </label>
+                        <label class="switch-row">
+                            <span><span class="switch-row__title">{{ public_registration_label }}</span></span>
+                            <span class="switch"><input type="checkbox" name="public_registration_open" value="1" {% if public_registration_open %}checked{% endif %}><span class="switch__track"></span></span>
+                        </label>
+                    </div>
+                    <div class="card__foot"><button type="submit" class="btn btn--primary">{{ save_policy_label }}</button></div>
+                </div>
+                <div class="callout cluster cluster--between mt-4">
+                    <div class="cluster cluster--nowrap grow" style="align-items:flex-start">
+                        <span class="card-icon card-icon--warning"><svg class="icon" aria-hidden="true"><use href="#i-bell"></use></svg></span>
+                        <div class="grow"><p class="strong">{{ notifications_notice_title }}</p><p class="text-sm muted mt-1">{{ notifications_notice_description }}</p></div>
+                    </div>
+                    <a href="{{ notifications_href }}" class="btn btn--sm">{{ notifications_notice_action }}<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></a>
+                </div>
+            </section>
+
+            <section class="panel" data-panel="security">
+                <div class="panel__head">
+                    <div>
+                        <h2 class="panel__title">{{ i18n.ui_admin_nav_security }}</h2>
+                        <p class="panel__desc">{{ totp_policy_label }} · {{ current_totp_policy_label }} — {{ password_policy_label }} · {{ current_password_policy_label }}</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card__body form">
+                        <div class="form-row form-row--3">
+                            <label class="field"><span class="field__label">{{ totp_policy_label }}</span><select name="totp_policy" class="select">{% for option in totp_policy_options %}<option value="{{ option.value }}" {% if option.value == current_totp_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                            <label class="field"><span class="field__label">{{ password_policy_label }}</span><select name="password_strength_policy" class="select">{% for option in password_policy_options %}<option value="{{ option.value }}" {% if option.value == current_password_policy %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                            <label class="field"><span class="field__label">{{ password_min_length_label }}</span><input type="number" min="1" name="password_min_length" value="{{ system_settings.password_strength_rules.min_length }}" class="input"></label>
+                        </div>
+                        <div class="grid grid--2 grid--tight">
+                            <label class="check"><input type="checkbox" name="password_require_uppercase" value="1" {% if system_settings.password_strength_rules.require_uppercase %}checked{% endif %}><span>{{ password_require_uppercase_label }}</span></label>
+                            <label class="check"><input type="checkbox" name="password_require_lowercase" value="1" {% if system_settings.password_strength_rules.require_lowercase %}checked{% endif %}><span>{{ password_require_lowercase_label }}</span></label>
+                            <label class="check"><input type="checkbox" name="password_require_number" value="1" {% if system_settings.password_strength_rules.require_number %}checked{% endif %}><span>{{ password_require_number_label }}</span></label>
+                            <label class="check"><input type="checkbox" name="password_require_symbol" value="1" {% if system_settings.password_strength_rules.require_symbol %}checked{% endif %}><span>{{ password_require_symbol_label }}</span></label>
+                        </div>
+                    </div>
+                    <div class="card__foot"><button type="submit" class="btn btn--primary">{{ save_policy_label }}</button></div>
+                </div>
+            </section>
+
+            <section class="panel" data-panel="sessions">
+                <div class="panel__head">
+                    <div>
+                        <h2 class="panel__title">{{ i18n.ui_admin_nav_sessions }}</h2>
+                        <p class="panel__desc">{{ system_idle_limit_hint }}</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card__body form">
+                        <div class="form-row form-row--2">
+                            <label class="field"><span class="field__label">{{ session_ttl_label }}</span><input type="number" min="1" name="session_absolute_ttl_hours" value="{{ system_settings.session_absolute_ttl_hours }}" class="input"></label>
+                            <label class="field"><span class="field__label">{{ system_idle_limit_label }}</span><input type="number" min="1" name="max_idle_timeout_minutes" value="{{ system_max_idle_timeout_minutes }}" class="input"></label>
+                        </div>
+                        <div class="form-row form-row--3">
+                            <label class="field"><span class="field__label">{{ lockout_threshold_label }}</span><input type="number" min="1" name="lockout_threshold" value="{{ system_settings.lockout_policy.threshold }}" class="input"></label>
+                            <label class="field"><span class="field__label">{{ lockout_base_label }}</span><input type="number" min="1" name="lockout_base_delay_seconds" value="{{ system_settings.lockout_policy.base_delay_seconds }}" class="input"></label>
+                            <label class="field"><span class="field__label">{{ lockout_max_label }}</span><input type="number" min="1" name="lockout_max_delay_seconds" value="{{ system_settings.lockout_policy.max_delay_seconds }}" class="input"></label>
+                        </div>
+                    </div>
+                    <div class="card__foot"><button type="submit" class="btn btn--primary">{{ save_policy_label }}</button></div>
+                </div>
+            </section>
+
+            <section class="panel" data-panel="system">
+                <div class="panel__head">
+                    <div>
+                        <h2 class="panel__title">{{ i18n.ui_admin_nav_system }}</h2>
+                        <p class="panel__desc">{{ argon_raise_only_hint }}</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card__body form">
+                        <div class="form-row form-row--3">
+                            <label class="field"><span class="field__label">{{ argon_memory_label }}</span><input type="number" min="64" name="argon_memory_mib" value="{{ argon_memory_mib }}" class="input"></label>
+                            <label class="field"><span class="field__label">{{ argon_iterations_label }}</span><input type="number" min="3" name="argon_iterations" value="{{ argon_iterations }}" class="input"></label>
+                            <label class="field"><span class="field__label">{{ argon_lanes_label }}</span><input type="number" min="2" name="argon_lanes" value="{{ argon_lanes }}" class="input"></label>
+                        </div>
+                        <label class="field" style="max-width:320px"><span class="field__label">{{ audit_limit_label }}</span><input type="number" min="1" name="audit_detail_limit" value="{{ system_settings.audit_detail_limit }}" class="input"></label>
+                    </div>
+                    <div class="card__foot"><button type="submit" class="btn btn--primary">{{ save_policy_label }}</button></div>
+                </div>
+            </section>
+        </form>
+
+        {# ---------------- Audit logs ---------------- #}
+        <section class="panel" data-panel="audit" data-filter-scope>
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ audit_title }}</h2>
+                    <p class="panel__desc">{{ audit_description }}</p>
+                </div>
+                <div class="panel__tools"><span class="badge badge--outline badge--lg">{{ audit_filtered_label }} · <span data-filter-count>{{ audit_filtered_count }}</span></span></div>
+            </div>
+            {% if audit_logs | length == 0 %}
+            <div class="empty empty--compact"><span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-list"></use></svg></span><p class="empty__desc">{{ audit_empty_label }}</p></div>
+            {% else %}
+            <div class="toolbar">
+                <label class="input-group grow">
+                    <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+                    <input type="search" class="input" data-admin-audit-search data-filter-input="[data-admin-audit-row]" value="{{ audit_search_value }}" placeholder="{{ audit_search_placeholder }}" aria-label="{{ audit_search_label }}" autocomplete="off">
+                </label>
+                <button type="button" class="btn" data-admin-audit-clear>{{ audit_search_clear_label }}</button>
+            </div>
+            <div class="list list--card">
+                {% for log in audit_logs %}
+                <button type="button" class="row row--interactive row--top" data-admin-audit-row data-audit-detail="audit-detail-{{ loop.index0 }}" data-filter-text="{{ log.action_label }} {{ log.actor_username | default(value='') }} {{ log.subject_username | default(value='') }} {{ log.username | default(value='') }} {{ log.ip_address | default(value='') }} {{ log.reason | default(value='') }} {{ log.login_method | default(value='') }}">
+                    <span class="dot {% if log.success %}dot--success{% else %}dot--danger{% endif %}" style="margin-top:7px"></span>
+                    <span class="row__main">
+                        <span class="row__title"><span>{{ log.action_label }}</span>{% if not log.success %}<span class="badge badge--danger">{{ audit_failure_label }}</span>{% endif %}{% if log.login_method %}<span class="badge">{{ log.login_method }}</span>{% endif %}</span>
+                        <span class="row__meta">
+                            <span>{{ audit_actor_label }} · {% if log.actor_username %}{{ log.actor_username }}{% elif log.actor_user_id %}{{ log.actor_user_id }}{% else %}-{% endif %}</span>
+                            <span>{{ audit_subject_label }} · {% if log.subject_username %}{{ log.subject_username }}{% elif log.subject_user_id %}{{ log.subject_user_id }}{% else %}-{% endif %}</span>
+                            <span class="mono">{{ log.ip_address | default(value="-") }}</span>
+                        </span>
+                    </span>
+                    <span class="row__aside text-xs muted mono" data-unix="{{ log.created_at_unix }}">{{ log.created_at_unix }}</span>
+                </button>
+                <template id="audit-detail-{{ loop.index0 }}">
+                    <div class="stack">
+                        <div class="cluster">
+                            <span class="badge {% if log.success %}badge--success{% else %}badge--danger{% endif %} badge--lg">{% if log.success %}{{ audit_success_label }}{% else %}{{ audit_failure_label }}{% endif %}</span>
+                            {% if log.login_method %}<span class="badge badge--lg">{{ audit_method_label }} · {{ log.login_method }}</span>{% endif %}
+                            {% if log.passkey_label %}<span class="badge badge--lg">{{ user_passkeys_label }} · {{ log.passkey_label }}</span>{% endif %}
+                        </div>
+                        <div class="grid grid--tight" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+                            <div class="tile"><p class="tile__label">{{ audit_time_label }}</p><p class="tile__value mono text-sm" data-unix="{{ log.created_at_unix }}">{{ log.created_at_unix }}</p></div>
+                            <div class="tile"><p class="tile__label">{{ user_last_ip_label }}</p><p class="tile__value mono text-sm">{{ log.ip_address | default(value="-") }}</p></div>
+                            <div class="tile"><p class="tile__label">{{ audit_actor_label }}</p><p class="tile__value text-sm">{% if log.actor_username %}{{ log.actor_username }}{% elif log.actor_user_id %}{{ log.actor_user_id }}{% else %}-{% endif %}</p></div>
+                            <div class="tile"><p class="tile__label">{{ audit_subject_label }}</p><p class="tile__value text-sm">{% if log.subject_username %}{{ log.subject_username }}{% elif log.subject_user_id %}{{ log.subject_user_id }}{% else %}-{% endif %}</p></div>
+                            <div class="tile"><p class="tile__label">{{ audit_username_label }}</p><p class="tile__value text-sm">{% if log.username %}{{ log.username }}{% else %}-{% endif %}</p></div>
+                            <div class="tile"><p class="tile__label">{{ audit_reason_label }}</p><p class="tile__value text-sm">{% if log.reason %}{{ log.reason }}{% else %}-{% endif %}</p></div>
+                        </div>
+                        <div class="tile"><p class="tile__label">{{ audit_user_agent_label }}</p><p class="tile__value text-sm">{% if log.user_agent %}{{ log.user_agent }}{% else %}-{% endif %}</p></div>
+                        <div><p class="field__label mb-4" style="margin-bottom:6px">{{ audit_details_label }}</p><pre class="codeblock">{{ log.details_pretty }}</pre></div>
+                    </div>
+                </template>
+                {% endfor %}
+            </div>
+            <div data-admin-audit-empty data-filter-empty class="empty empty--compact mt-3" hidden>
+                <span class="empty__icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
+                <p class="empty__desc">{{ audit_no_matches_label }}</p>
+            </div>
+            {% endif %}
+        </section>
+
+        {# ---------------- Rollups ---------------- #}
+        <section class="panel" data-panel="rollups">
+            <div class="panel__head">
+                <div>
+                    <h2 class="panel__title">{{ rollup_title }}</h2>
+                    <p class="panel__desc">{{ rollup_description }}</p>
+                </div>
+                <div class="panel__tools"><span class="badge badge--outline badge--lg">{{ audit_rollups | length }}</span></div>
+            </div>
+            {% if audit_rollups | length == 0 %}
+            <div class="empty empty--compact"><p class="empty__desc">{{ rollup_empty_label }}</p></div>
+            {% else %}
+            <div class="grid grid--3">
+                {% for rollup in audit_rollups %}
+                <div class="tile" style="background:var(--surface);box-shadow:var(--shadow-xs)">
+                    <div class="cluster cluster--between cluster--nowrap"><p class="tile__value strong break">{{ rollup.action_type }}</p><span class="count count--accent">{{ rollup.total_count }}</span></div>
+                    <p class="tile__hint">{{ audit_updated_label }} · <span class="mono" data-unix="{{ rollup.updated_at_unix }}">{{ rollup.updated_at_unix }}</span></p>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+    </div>
+</div>
+{% endblock content %}
+
+{% block overlays %}
+<div id="create-user-sheet" class="sheet sheet--center" data-state="closed" aria-hidden="true" inert role="dialog" aria-modal="true" aria-labelledby="create-user-title">
+    <div class="sheet__backdrop" data-sheet-close></div>
+    <form class="sheet__panel" method="post" action="/admin/users/create" tabindex="-1">
+        <div class="sheet__grab"></div>
+        <header class="sheet__head">
+            <span class="card-icon card-icon--accent"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"></use></svg></span>
+            <div class="sheet__heading"><h2 class="sheet__title" id="create-user-title">{{ create_user_title }}</h2></div>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </header>
+        <div class="sheet__body form">
+            <input type="hidden" name="lang" value="{{ lang }}">
+            <label class="field"><span class="field__label">{{ username_label }}</span><input type="text" name="username" class="input" autocomplete="off" autocapitalize="none" required autofocus></label>
+            <label class="field"><span class="field__label">{{ password_label }}</span><input type="password" name="password" class="input" autocomplete="new-password" required></label>
+        </div>
+        <div class="sheet__foot">
+            <button type="button" class="btn" data-sheet-close>{{ i18n.cancel }}</button>
+            <button type="submit" class="btn btn--primary">{{ create_user_label }}</button>
+        </div>
+    </form>
+</div>
+
+<div id="admin-user-sheet" class="sheet" data-state="closed" aria-hidden="true" inert role="dialog" aria-modal="true" aria-label="{{ users_title }}">
+    <div class="sheet__backdrop" data-sheet-close></div>
+    <div class="sheet__panel" tabindex="-1">
+        <div class="sheet__grab"></div>
+        <header class="sheet__head">
+            <div class="sheet__heading"><p class="sheet__eyebrow">{{ users_title }}</p></div>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </header>
+        <div class="sheet__body" data-admin-user-detail-sheet></div>
+    </div>
+</div>
+
+<div id="audit-detail-sheet" class="sheet" data-state="closed" aria-hidden="true" inert role="dialog" aria-modal="true" aria-labelledby="audit-detail-title">
+    <div class="sheet__backdrop" data-sheet-close></div>
+    <div class="sheet__panel" tabindex="-1">
+        <div class="sheet__grab"></div>
+        <header class="sheet__head">
+            <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-list"></use></svg></span>
+            <div class="sheet__heading"><p class="sheet__eyebrow">{{ audit_title }}</p><h2 class="sheet__title" id="audit-detail-title"></h2></div>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </header>
+        <div class="sheet__body" data-audit-detail-body></div>
+    </div>
+</div>
+{% endblock overlays %}
+
+{% block scripts %}
+<script src="/static/admin.js?v=__ASSET_VERSION__" defer></script>
+{% endblock scripts %}

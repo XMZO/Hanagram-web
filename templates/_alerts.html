@@ -1,0 +1,22 @@
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Page banner + plain-HTTP transport warning. #}
+<div class="alerts">
+    {% if banner is defined %}{% if banner %}
+    <div class="alert {% if banner.kind == "success" %}alert--success{% else %}alert--danger{% endif %}" role="status">
+        <svg class="icon" aria-hidden="true"><use href="#i-{% if banner.kind == "success" %}check-circle{% else %}alert{% endif %}"></use></svg>
+        <div class="alert__body pre-line">{{ banner.message }}</div>
+        <button type="button" class="btn btn--ghost btn--icon btn--xs alert__close" data-dismiss aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+    </div>
+    {% endif %}{% endif %}
+    {% if transport_warning is defined %}{% if transport_warning %}
+    <div class="alert alert--warning alert--clamp" data-dismiss-key="transport">
+        <svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg>
+        <div class="alert__body">
+            <p class="alert__title">{{ transport_warning.title }}</p>
+            <p class="alert__text">{{ transport_warning.message }}</p>
+        </div>
+        <button type="button" class="btn btn--ghost btn--icon btn--xs alert__close" data-dismiss aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+    </div>
+    <script>try{if(sessionStorage.getItem("hg.dismiss.transport")){document.currentScript.previousElementSibling.remove();}}catch(e){}</script>
+    {% endif %}{% endif %}
+</div>

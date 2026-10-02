@@ -126,7 +126,18 @@ pub(crate) const TELEGRAM_WEBK_APP_VERSION: &str = "6.1.4 K";
 pub(crate) const TELEGRAM_WEBK_SYSTEM_LANG_CODE: &str = "en-US";
 pub(crate) const TELEGRAM_WEBK_LANG_CODE: &str = "en";
 pub(crate) const TELEGRAM_WEBK_LANG_PACK: &str = "webk";
-pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 12] = [
+pub(crate) const EMBEDDED_TEMPLATES: [(&str, &str); 17] = [
+    ("base.html", include_str!("../../templates/base.html")),
+    (
+        "layout_app.html",
+        include_str!("../../templates/layout_app.html"),
+    ),
+    (
+        "layout_focus.html",
+        include_str!("../../templates/layout_focus.html"),
+    ),
+    ("_alerts.html", include_str!("../../templates/_alerts.html")),
+    ("_prefs.html", include_str!("../../templates/_prefs.html")),
     ("admin.html", include_str!("../../templates/admin.html")),
     (
         "dashboard_home.html",
@@ -1940,6 +1951,89 @@ mod tests {
         assert!(rendered.contains(translations.steam_codes_title));
         assert!(rendered.contains("2F9J5"));
         assert!(rendered.contains("copySteamCode(this)"));
+    }
+
+    fn flow_page_context(language: Language) -> Context {
+        let translations = language.translations();
+        let mut context = Context::new();
+        context.insert("lang", &language.code());
+        context.insert("i18n", translations);
+        context.insert(
+            "languages",
+            &language_options(language, TELEGRAM_SETUP_PATH),
+        );
+        context.insert("banner", &Option::<PageBanner>::None);
+        context.insert("dashboard_href", TELEGRAM_WORKSPACE_PATH);
+        context.insert("setup_href", TELEGRAM_SETUP_PATH);
+        context.insert(
+            "transport_warning",
+            &Option::<TransportSecurityWarning>::None,
+        );
+        context
+    }
+
+    #[test]
+    fn phone_login_template_renders_code_and_password_steps() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+        let language = Language::ZhCn;
+        let translations = language.translations();
+
+        for awaiting_password in [false, true] {
+            let mut context = flow_page_context(language);
+            context.insert(
+                "flow",
+                &serde_json::json!({
+                    "session_name": "会话 🚀",
+                    "phone": "+86 138 0000 0000",
+                    "submit_action": "/platforms/telegram/login/phone/demo",
+                    "cancel_action": "/platforms/telegram/login/phone/demo/cancel",
+                    "awaiting_password": awaiting_password,
+                    "password_hint": "hint",
+                }),
+            );
+            let rendered = tera
+                .render("phone_login.html", &context)
+                .expect("phone login template should render");
+            assert!(rendered.contains(translations.phone_title));
+            assert!(rendered.contains("会话 🚀"));
+            assert!(rendered.contains("+86 138 0000 0000"));
+            let expected_field = if awaiting_password {
+                "name=\"password\""
+            } else {
+                "name=\"code\""
+            };
+            assert!(rendered.contains(expected_field));
+        }
+    }
+
+    #[test]
+    fn qr_login_template_renders_qr_flow() {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(EMBEDDED_TEMPLATES)
+            .expect("embedded templates should load");
+        let language = Language::En;
+        let translations = language.translations();
+        let mut context = flow_page_context(language);
+        context.insert(
+            "flow",
+            &serde_json::json!({
+                "session_name": "Work",
+                "qr_link": "tg://login?token=abc",
+                "qr_svg": "<svg data-test-qr></svg>",
+                "expires_at": "2026-03-14 09:00:30 UTC",
+                "cancel_action": "/platforms/telegram/login/qr/demo/cancel",
+            }),
+        );
+        context.insert("auto_refresh_seconds", &5_u64);
+
+        let rendered = tera
+            .render("qr_login.html", &context)
+            .expect("qr login template should render");
+        assert!(rendered.contains(translations.qr_title));
+        assert!(rendered.contains("<svg data-test-qr></svg>"));
+        assert!(rendered.contains("http-equiv=\"refresh\" content=\"5\""));
     }
 
     #[test]

@@ -1,160 +1,113 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Hanagram-web contributors -->
-<!DOCTYPE html>
-<html lang="{{ i18n.html_lang }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="min-h-screen bg-[#f6f1e8] font-sans text-[#4b4038]">
-    <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-        <section class="rounded-[2rem] border border-[#ded3c6] bg-[#fffaf2] p-6 shadow-[0_24px_60px_rgba(122,106,90,0.08)]">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h1 class="font-serif text-4xl font-semibold">{{ title }}</h1>
-                    <p class="mt-4 max-w-3xl text-sm leading-7 text-[#4b4038]/72">{{ description }}</p>
-                </div>
-                <a href="{{ settings_href }}" class="rounded-full border border-[#ded3c6] bg-white px-4 py-2 text-sm">{{ back_label }}</a>
+{% extends "layout_focus.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Copyright (C) 2026 Hanagram-web contributors #}
+
+{% block title %}{{ title }} · {{ i18n.page_title }}{% endblock title %}
+{% block page_id %}totp{% endblock page_id %}
+{% block canonical %}/settings/security/totp/setup{% endblock canonical %}
+{% block back_href %}{{ settings_href }}#totp{% endblock back_href %}
+{% block focus_title %}{{ title }}{% endblock focus_title %}
+
+{% block content %}
+<header class="page-head">
+    <div class="page-head__main">
+        <span class="platform-mark platform-mark--accent"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg></span>
+        <div class="page-head__text">
+            <h1 class="page-head__title">{{ title }}</h1>
+            <p class="page-head__desc">{{ description }}</p>
+        </div>
+    </div>
+    <div class="page-head__actions">
+        <a href="{{ settings_href }}#totp" class="btn"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"></use></svg>{{ back_label }}</a>
+    </div>
+</header>
+
+{% include "_alerts.html" %}
+
+{% if show_current_totp %}
+<section class="grid grid--2 grid--loose">
+    <article class="card card--pad stack">
+        <div class="cluster cluster--between">
+            <h2 class="card__title">{{ current_title }}</h2>
+            <span class="badge badge--accent badge--lg">{{ current_recovery_remaining_label }} {{ current_recovery_remaining }}</span>
+        </div>
+        <p class="text-sm muted">{{ current_description }}</p>
+        {% if current_secret_available %}
+        <div class="qr-box">{{ current_qr_svg | safe }}</div>
+        <div class="field">
+            <span class="field__label">{{ current_secret_label }}</span>
+            <div class="secret"><span class="secret__value" id="current-totp-secret">{{ current_secret }}</span><button type="button" class="btn btn--sm" data-copy-target="#current-totp-secret"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</button></div>
+        </div>
+        {% else %}
+        <div class="alert alert--danger"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg><div class="alert__body">{{ current_secret_unavailable_message }}</div></div>
+        {% endif %}
+    </article>
+
+    <article class="card card--pad stack">
+        <div class="cluster"><span class="card-icon card-icon--warning"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><h2 class="card__title">{{ recovery_title }}</h2></div>
+        <p class="text-sm muted">{{ recovery_description }}</p>
+        <div class="tile">
+            <p class="tile__label">{{ current_recovery_remaining_label }}</p>
+            <p class="tile__value" style="font-size:32px;font-weight:750;letter-spacing:-.03em">{{ current_recovery_remaining }}</p>
+            <p class="tile__hint">{{ current_recovery_hidden_message }}</p>
+        </div>
+        {% if rotation_required %}
+        <div class="alert alert--warning"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg><div class="alert__body">{{ rotation_required_message }}</div></div>
+        {% endif %}
+        {% if show_start_rotation %}
+        <form method="post" action="{{ confirm_action }}">
+            <input type="hidden" name="lang" value="{{ lang }}">
+            <input type="hidden" name="action" value="start_rotation">
+            <button type="submit" class="btn btn--primary btn--block"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>{{ rotation_start_label }}</button>
+        </form>
+        {% endif %}
+    </article>
+</section>
+{% endif %}
+
+{% if show_pending_setup %}
+<section class="grid grid--aside grid--loose{% if show_current_totp %} mt-6{% endif %}">
+    <div class="stack stack--lg">
+        <article class="card card--pad stack">
+            <div class="cluster"><span class="count count--accent">1</span><h2 class="card__title">{{ pending_title }}</h2></div>
+            <p class="text-sm muted">{{ pending_description }}</p>
+            <div class="qr-box">{{ pending_qr_svg | safe }}</div>
+            <div class="field">
+                <span class="field__label">{{ pending_secret_label }}</span>
+                <div class="secret"><span class="secret__value" id="pending-totp-secret">{{ pending_secret }}</span><button type="button" class="btn btn--sm" data-copy-target="#pending-totp-secret"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</button></div>
             </div>
-        </section>
+        </article>
+        <article class="card card--pad stack">
+            <div class="cluster cluster--between">
+                <div class="cluster"><span class="count count--accent">2</span><h2 class="card__title">{{ recovery_title }}</h2></div>
+                <button type="button" class="btn btn--sm" data-copy="{% for code in recovery_codes %}{{ code }}{% if not loop.last %} {% endif %}{% endfor %}"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</button>
+            </div>
+            <p class="text-sm muted">{{ recovery_description }}</p>
+            <div class="recovery-grid">
+                {% for code in recovery_codes %}<span class="recovery-code">{{ code }}</span>{% endfor %}
+            </div>
+        </article>
+    </div>
 
-        {% if transport_warning %}
-        <section class="mt-5 rounded-[1.4rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
-            <p class="font-semibold">{{ transport_warning.title }}</p>
-            <p class="mt-2">{{ transport_warning.message }}</p>
-        </section>
-        {% endif %}
-
-        {% if banner %}
-        <section class="mt-5 rounded-[1.4rem] border px-4 py-3 text-sm leading-7 {% if banner.kind == 'success' %}border-[#8ca38c]/35 bg-[#eef4ee] text-[#6f866f]{% else %}border-[#d9a69a]/35 bg-[#fbefec] text-[#98675f]{% endif %}">
-            {{ banner.message }}
-        </section>
-        {% endif %}
-
-        {% if show_current_totp %}
-        <section class="mt-6 grid gap-5 lg:grid-cols-[0.95fr,1.05fr]">
-            <article class="rounded-[1.8rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                    <h2 class="font-serif text-2xl font-semibold">{{ current_title }}</h2>
-                    <span class="rounded-full border border-[#ded3c6] bg-white px-3 py-1 text-sm">{{ current_recovery_remaining_label }} {{ current_recovery_remaining }}</span>
-                </div>
-                <p class="mt-3 text-sm leading-7 text-[#4b4038]/72">{{ current_description }}</p>
-
-                {% if current_secret_available %}
-                <div class="mt-5 overflow-hidden rounded-[1.5rem] border border-[#ded3c6] bg-white p-4">
-                    {{ current_qr_svg | safe }}
-                </div>
-                <div class="mt-4 rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
-                    <p class="text-xs uppercase tracking-[0.22em] text-[#4b4038]/45">{{ current_secret_label }}</p>
-                    <p class="mt-2 break-all font-mono text-sm">{{ current_secret }}</p>
-                </div>
-                {% else %}
-                <div class="mt-5 rounded-[1.2rem] border border-[#d9a69a]/35 bg-[#fbefec] px-4 py-4 text-sm leading-7 text-[#98675f]">
-                    {{ current_secret_unavailable_message }}
-                </div>
-                {% endif %}
-            </article>
-
-            <article class="rounded-[1.8rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ recovery_title }}</h2>
-                <p class="mt-3 text-sm leading-7 text-[#4b4038]/72">{{ recovery_description }}</p>
-
-                <div class="mt-4 rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-4">
-                    <p class="text-xs uppercase tracking-[0.22em] text-[#4b4038]/45">{{ current_recovery_remaining_label }}</p>
-                    <p class="mt-2 text-2xl font-semibold">{{ current_recovery_remaining }}</p>
-                    <p class="mt-3 text-sm leading-7 text-[#4b4038]/68">{{ current_recovery_hidden_message }}</p>
-                </div>
-
-                {% if rotation_required %}
-                <div class="mt-4 rounded-[1.2rem] border border-[#e8d3ad] bg-[#fff6e6] px-4 py-4 text-sm leading-7 text-[#866434]">
-                    {{ rotation_required_message }}
-                </div>
-                {% endif %}
-
-                {% if show_start_rotation %}
-                <form method="post" action="{{ confirm_action }}" class="mt-5">
-                    <input type="hidden" name="lang" value="{{ lang }}">
-                    <input type="hidden" name="action" value="start_rotation">
-                    <button type="submit" class="rounded-[1rem] bg-[#8ca38c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#6f866f]">
-                        {{ rotation_start_label }}
-                    </button>
-                </form>
-                {% endif %}
-            </article>
-        </section>
-        {% endif %}
-
-        {% if show_pending_setup %}
-        <section class="mt-6 grid gap-5 lg:grid-cols-[0.95fr,1.05fr]">
-            <article class="rounded-[1.8rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ pending_title }}</h2>
-                <p class="mt-3 text-sm leading-7 text-[#4b4038]/72">{{ pending_description }}</p>
-
-                <div class="mt-5 overflow-hidden rounded-[1.5rem] border border-[#ded3c6] bg-white p-4">
-                    {{ pending_qr_svg | safe }}
-                </div>
-                <div class="mt-4 rounded-[1.2rem] border border-[#ded3c6] bg-white px-4 py-3">
-                    <p class="text-xs uppercase tracking-[0.22em] text-[#4b4038]/45">{{ pending_secret_label }}</p>
-                    <p class="mt-2 break-all font-mono text-sm">{{ pending_secret }}</p>
-                </div>
-
-                <div class="mt-5">
-                    <h3 class="text-lg font-semibold">{{ recovery_title }}</h3>
-                    <p class="mt-2 text-sm leading-7 text-[#4b4038]/72">{{ recovery_description }}</p>
-                    <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                        {% for code in recovery_codes %}
-                        <div class="rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 font-mono text-sm">{{ code }}</div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </article>
-
-            <article class="rounded-[1.8rem] border border-[#ded3c6] bg-[#fffaf2] p-5">
-                <h2 class="font-serif text-2xl font-semibold">{{ confirm_submit }}</h2>
-                <p class="mt-3 text-sm leading-7 text-[#4b4038]/72">{{ confirm_label }}</p>
-
-                <form method="post" action="{{ confirm_action }}" class="mt-6 space-y-4">
-                    <input type="hidden" name="lang" value="{{ lang }}">
-                    <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-4 text-sm leading-7 text-[#4b4038]/72">
-                        <input type="checkbox" name="confirm_saved_codes" value="1" required class="mt-1 h-4 w-4 rounded border-[#ded3c6] text-[#8ca38c] focus:ring-[#8ca38c]">
-                        <span>{{ confirm_saved_codes_label }}</span>
-                    </label>
-
-                    {% if pending_is_rotation %}
-                    <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-4 text-sm leading-7 text-[#4b4038]/72">
-                        <input type="checkbox" name="confirm_replace_totp" value="1" required class="mt-1 h-4 w-4 rounded border-[#ded3c6] text-[#8ca38c] focus:ring-[#8ca38c]">
-                        <span>{{ confirm_replace_totp_label }}</span>
-                    </label>
-                    <label class="flex items-start gap-3 rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-4 text-sm leading-7 text-[#4b4038]/72">
-                        <input type="checkbox" name="confirm_replace_recovery" value="1" required class="mt-1 h-4 w-4 rounded border-[#ded3c6] text-[#8ca38c] focus:ring-[#8ca38c]">
-                        <span>{{ confirm_replace_recovery_label }}</span>
-                    </label>
-                    {% endif %}
-
-                    <label class="block">
-                        <span class="mb-2 block text-sm font-medium text-[#4b4038]/70">{{ confirm_label }}</span>
-                        <input type="text" name="code" required class="w-full rounded-[1rem] border border-[#ded3c6] bg-white px-4 py-3 outline-none focus:border-[#8ca38c]">
-                    </label>
-
-                    <div class="flex flex-wrap gap-3">
-                        <button type="submit" class="rounded-[1rem] bg-[#8ca38c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#6f866f]">
-                            {{ confirm_submit }}
-                        </button>
-                        {% if pending_is_rotation %}
-                        <button type="submit" name="action" value="cancel_rotation" formnovalidate class="rounded-[1rem] border border-[#ded3c6] bg-white px-5 py-3 text-sm font-semibold text-[#4b4038] hover:border-[#d9a69a] hover:bg-[#fbefec]">
-                            {{ rotation_cancel_label }}
-                        </button>
-                        {% endif %}
-                    </div>
-                </form>
-            </article>
-        </section>
-        {% endif %}
-    </main>
-</body>
-</html>
+    <article class="card card--pad stack" style="align-self:start">
+        <div class="cluster"><span class="count count--accent">3</span><h2 class="card__title">{{ confirm_submit }}</h2></div>
+        <form method="post" action="{{ confirm_action }}" class="form">
+            <input type="hidden" name="lang" value="{{ lang }}">
+            <label class="check"><input type="checkbox" name="confirm_saved_codes" value="1" required><span>{{ confirm_saved_codes_label }}</span></label>
+            {% if pending_is_rotation %}
+            <label class="check"><input type="checkbox" name="confirm_replace_totp" value="1" required><span>{{ confirm_replace_totp_label }}</span></label>
+            <label class="check"><input type="checkbox" name="confirm_replace_recovery" value="1" required><span>{{ confirm_replace_recovery_label }}</span></label>
+            {% endif %}
+            <label class="field">
+                <span class="field__label">{{ confirm_label }}</span>
+                <input type="text" name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="10" class="input input--code input--lg" autofocus>
+            </label>
+            <button type="submit" class="btn btn--primary btn--lg btn--block"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>{{ confirm_submit }}</button>
+            {% if pending_is_rotation %}
+            <button type="submit" name="action" value="cancel_rotation" formnovalidate class="btn btn--ghost btn--block">{{ rotation_cancel_label }}</button>
+            {% endif %}
+        </form>
+    </article>
+</section>
+{% endif %}
+{% endblock content %}

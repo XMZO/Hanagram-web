@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-or-later #}
+{# Application shell: sidebar (desktop), top bar + tab bar (mobile). #}
+
+{% block body %}
+{% set_global shell_user = "" %}
+{% if current_username is defined %}{% set_global shell_user = current_username %}{% elif current_admin_username is defined %}{% set_global shell_user = current_admin_username %}{% endif %}
+{% set_global shell_admin = false %}
+{% if show_admin is defined %}{% if show_admin %}{% set_global shell_admin = true %}{% endif %}{% endif %}
+{% if current_admin_username is defined %}{% set_global shell_admin = true %}{% endif %}
+{% set_global shell_restricted = false %}
+{% if show_workspace_links is defined %}{% if not show_workspace_links %}{% set_global shell_restricted = true %}{% endif %}{% endif %}
+<div class="app">
+    <aside class="sidebar" aria-label="{{ i18n.nav_dashboard_label }}">
+        <a class="brand sidebar__brand" href="/" aria-label="{{ i18n.hero_title }}">
+            <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
+            <span class="brand__text">
+                <span class="brand__name">Hanagram</span>
+                <span class="brand__tag">Telegram · Steam Guard</span>
+            </span>
+        </a>
+        <div class="sidebar__scroll">
+            <nav class="nav">
+                {% if not shell_restricted %}
+                <a class="nav__item" data-nav="overview" data-label="{{ i18n.ui_nav_overview }}" href="/">
+                    <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg><span class="nav__text">{{ i18n.ui_nav_overview }}</span>
+                </a>
+                <p class="nav__label">{{ i18n.ui_nav_group_platforms }}</p>
+                <a class="nav__item" data-nav="telegram" data-label="Telegram" href="/platforms/telegram">
+                    <svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg><span class="nav__text">Telegram</span>
+                </a>
+                <a class="nav__item" data-nav="steam" data-label="{{ i18n.steam_platform_name }}" href="/platforms/steam">
+                    <svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg><span class="nav__text">{{ i18n.steam_platform_name }}</span>
+                </a>
+                <p class="nav__label">{{ i18n.ui_nav_group_account }}</p>
+                {% endif %}
+                <a class="nav__item" data-nav="settings" data-label="{{ i18n.nav_settings_label }}" href="/settings">
+                    <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg><span class="nav__text">{{ i18n.nav_settings_label }}</span>
+                </a>
+                {% if shell_admin and not shell_restricted %}
+                <a class="nav__item" data-nav="admin" data-label="{{ i18n.nav_admin_label }}" href="/admin">
+                    <svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg><span class="nav__text">{{ i18n.nav_admin_label }}</span>
+                </a>
+                {% endif %}
+            </nav>
+        </div>
+        <div class="sidebar__foot">
+            <button type="button" class="user-chip" data-menu-toggle="user-menu" aria-haspopup="menu" aria-expanded="false" title="{{ shell_user }}">
+                <span class="avatar avatar--round">{{ shell_user | truncate(length=1, end="") | upper }}</span>
+                <span class="user-chip__meta">
+                    <span class="user-chip__name">{{ shell_user }}</span>
+                    <span class="user-chip__role">{% if shell_admin %}{{ i18n.admin_role_admin_label }}{% else %}{{ i18n.ui_signed_in_as }}{% endif %}</span>
+                </span>
+                <svg class="icon icon--sm user-chip__chev muted" aria-hidden="true"><use href="#i-chevrons"></use></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <header class="topbar">
+            <a class="brand" href="/" aria-label="{{ i18n.hero_title }}">
+                <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
+            </a>
+            <div class="topbar__title truncate">{% block topbar_title %}Hanagram{% endblock topbar_title %}</div>
+            <div class="topbar__actions">
+                {% block topbar_actions %}{% endblock topbar_actions %}
+                <button type="button" class="btn btn--ghost btn--icon" data-menu-toggle="user-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false" aria-label="{{ shell_user }}">
+                    <span class="avatar avatar--sm avatar--round">{{ shell_user | truncate(length=1, end="") | upper }}</span>
+                </button>
+            </div>
+        </header>
+
+        <main id="main" class="content">
+            {% block content %}{% endblock content %}
+        </main>
+    </div>
+
+    {% if not shell_restricted %}
+    <nav class="tabbar" aria-label="{{ i18n.nav_dashboard_label }}">
+        <a class="tabbar__item" data-nav="overview" href="/"><svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg><span>{{ i18n.ui_nav_overview }}</span></a>
+        <a class="tabbar__item" data-nav="telegram" href="/platforms/telegram"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg><span>Telegram</span></a>
+        <a class="tabbar__item" data-nav="steam" href="/platforms/steam"><svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg><span>{{ i18n.steam_platform_name }}</span></a>
+        <a class="tabbar__item" data-nav="settings" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg><span>{{ i18n.nav_settings_label }}</span></a>
+        {% if shell_admin %}
+        <a class="tabbar__item" data-nav="admin" href="/admin"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg><span>{{ i18n.nav_admin_label }}</span></a>
+        {% endif %}
+    </nav>
+    {% endif %}
+</div>
+<script>
+    (function () {
+        var page = document.body.getAttribute("data-page");
+        if (!page) { return; }
+        document.querySelectorAll('[data-nav="' + page + '"]').forEach(function (item) { item.classList.add("is-active"); });
+    })();
+</script>
+
+<div class="menu" id="user-menu" data-state="closed" role="menu" aria-label="{{ shell_user }}">
+    <div class="menu__head">
+        <span class="avatar avatar--round">{{ shell_user | truncate(length=1, end="") | upper }}</span>
+        <div class="grow">
+            <p class="strong truncate">{{ shell_user }}</p>
+            <p class="text-xs muted">{% if shell_admin %}{{ i18n.admin_role_admin_label }}{% else %}{{ i18n.ui_signed_in_as }}{% endif %}</p>
+        </div>
+    </div>
+    <div class="menu__sep"></div>
+    {% include "_prefs.html" %}
+    <div class="menu__sep"></div>
+    <a class="menu__item" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>{{ i18n.nav_settings_label }}</a>
+    {% if shell_admin and not shell_restricted %}
+    <a class="menu__item" href="/admin"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg>{{ i18n.nav_admin_label }}</a>
+    {% endif %}
+    <form method="post" action="/logout" data-no-busy>
+        <button type="submit" class="menu__item menu__item--danger"><svg class="icon" aria-hidden="true"><use href="#i-logout"></use></svg>{{ i18n.logout }}</button>
+    </form>
+</div>
+{% endblock body %}

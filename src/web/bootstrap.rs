@@ -3,12 +3,13 @@
 
 use super::shared::*;
 use super::{
-    admin, auth, dashboard, maintenance, middleware as web_middleware, notifications, platforms,
+    admin, assets, auth, dashboard, maintenance, middleware as web_middleware, notifications,
+    platforms,
 };
 
 fn load_embedded_templates() -> Result<Tera> {
     let mut tera = Tera::default();
-    tera.add_raw_templates(EMBEDDED_TEMPLATES)
+    tera.add_raw_templates(assets::versioned_templates())
         .context("failed to initialize embedded templates")?;
     Ok(tera)
 }
@@ -125,6 +126,7 @@ pub(crate) async fn run() -> Result<()> {
     let app = Router::new()
         .merge(protected)
         .merge(auth::public_routes())
+        .merge(assets::routes())
         .route("/health", get(health_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
