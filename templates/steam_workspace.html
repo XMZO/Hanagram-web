@@ -898,10 +898,10 @@
 
 {% block scripts %}
 <script>
-    const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
-    const APPROVALS_API = {{ approvals_api | json_encode | safe }};
-    const CONFIRMATIONS_API = {{ confirmations_api | json_encode | safe }};
-    const I18N = {
+    var SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
+    var APPROVALS_API = {{ approvals_api | json_encode | safe }};
+    var CONFIRMATIONS_API = {{ confirmations_api | json_encode | safe }};
+    var I18N = {
         copy: {{ i18n.copy | json_encode | safe }},
         copied: {{ i18n.copied | json_encode | safe }},
         copyFallback: {{ i18n.copy_fallback | json_encode | safe }},
@@ -1019,24 +1019,24 @@
         ztInvalidConfirmMessage: {{ i18n.steam_zero_trust_invalid_confirm_message | json_encode | safe }},
         ztPasswordRequiredMessage: {{ i18n.steam_zero_trust_password_required_message | json_encode | safe }}
     };
-    const SETUP_BEGIN_API = {{ steam_setup_begin_action | json_encode | safe }};
-    const SETUP_LOGIN_CODE_API = {{ steam_setup_login_code_action | json_encode | safe }};
-    const SETUP_RESUME_API = {{ steam_setup_resume_action | json_encode | safe }};
-    const SETUP_PHONE_BEGIN_API = {{ steam_setup_phone_begin_action | json_encode | safe }};
-    const SETUP_PHONE_VERIFY_API = {{ steam_setup_phone_verify_action | json_encode | safe }};
-    const SETUP_FINALIZE_API = {{ steam_setup_finalize_action | json_encode | safe }};
-    const SETUP_CANCEL_API = {{ steam_setup_cancel_action | json_encode | safe }};
-    const SETUP_TRANSFER_START_API = {{ steam_setup_transfer_start_action | json_encode | safe }};
-    const SETUP_TRANSFER_FINISH_API = {{ steam_setup_transfer_finish_action | json_encode | safe }};
-    const TIME_CHECK_API = {{ steam_time_check_api | json_encode | safe }};
-    const ZERO_TRUST_ACTIVATE_API = {{ zero_trust_activate_api | json_encode | safe }};
-    const ZERO_TRUST_DEACTIVATE_API = {{ zero_trust_deactivate_api | json_encode | safe }};
-    const ZERO_TRUST_SWEEP_API = {{ zero_trust_sweep_api | json_encode | safe }};
-    const LANG = {{ lang | json_encode | safe }};
-    const PREFETCH_CONFIRMATIONS = {{ confirmation_ready_accounts }} > 0;
-    const PREFETCH_APPROVALS = {{ approval_ready_accounts | length }} > 0;
-    const STEAM_APPROVALS_REFRESH_INTERVAL_MS = 20000;
-    const STEAM_CONFIRMATIONS_REFRESH_INTERVAL_MS = 20000;
+    var SETUP_BEGIN_API = {{ steam_setup_begin_action | json_encode | safe }};
+    var SETUP_LOGIN_CODE_API = {{ steam_setup_login_code_action | json_encode | safe }};
+    var SETUP_RESUME_API = {{ steam_setup_resume_action | json_encode | safe }};
+    var SETUP_PHONE_BEGIN_API = {{ steam_setup_phone_begin_action | json_encode | safe }};
+    var SETUP_PHONE_VERIFY_API = {{ steam_setup_phone_verify_action | json_encode | safe }};
+    var SETUP_FINALIZE_API = {{ steam_setup_finalize_action | json_encode | safe }};
+    var SETUP_CANCEL_API = {{ steam_setup_cancel_action | json_encode | safe }};
+    var SETUP_TRANSFER_START_API = {{ steam_setup_transfer_start_action | json_encode | safe }};
+    var SETUP_TRANSFER_FINISH_API = {{ steam_setup_transfer_finish_action | json_encode | safe }};
+    var TIME_CHECK_API = {{ steam_time_check_api | json_encode | safe }};
+    var ZERO_TRUST_ACTIVATE_API = {{ zero_trust_activate_api | json_encode | safe }};
+    var ZERO_TRUST_DEACTIVATE_API = {{ zero_trust_deactivate_api | json_encode | safe }};
+    var ZERO_TRUST_SWEEP_API = {{ zero_trust_sweep_api | json_encode | safe }};
+    var LANG = {{ lang | json_encode | safe }};
+    var PREFETCH_CONFIRMATIONS = {{ confirmation_ready_accounts }} > 0;
+    var PREFETCH_APPROVALS = {{ approval_ready_accounts | length }} > 0;
+    var STEAM_APPROVALS_REFRESH_INTERVAL_MS = 20000;
+    var STEAM_CONFIRMATIONS_REFRESH_INTERVAL_MS = 20000;
 </script>
 <script src="/static/__ASSET_VERSION__/steam.js" defer></script>
 {% endblock scripts %}

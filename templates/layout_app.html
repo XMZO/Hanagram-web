@@ -69,10 +69,6 @@
         });
     })();
 </script>
-{# Prerender top-level pages on hover/press so switching sections is instant; page scripts defer side effects until shown. #}
-<script type="speculationrules">
-{"prerender": [{"where": {"and": [{"selector_matches": ".mast-nav__item, .tabbar__item, .platform-card__actions a, .shortcut"}, {"not": {"selector_matches": "[aria-current='page']"}}]}, "eagerness": "moderate"}]}
-</script>
 
 <div class="menu" id="user-menu" data-state="closed" role="menu" aria-label="{{ shell_user }}">
     <div class="menu__head">

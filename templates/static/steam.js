@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-let steamPanels = null;
-let steamClockOffset = 0;
-let steamCodePeriod = 30;
-let steamSnapshotInFlight = false;
-let steamSnapshotLastAt = 0;
-let steamApprovalsInFlight = false;
-let steamApprovalsLoadedAt = 0;
-let steamConfirmationsInFlight = false;
-let steamConfirmationsLoadedAt = 0;
-let hoveredSteamApprovalDropzone = null;
-let focusedSteamApprovalDropzone = null;
+var steamPanels = null;
+var steamClockOffset = 0;
+var steamCodePeriod = 30;
+var steamSnapshotInFlight = false;
+var steamSnapshotLastAt = 0;
+var steamApprovalsInFlight = false;
+var steamApprovalsLoadedAt = 0;
+var steamConfirmationsInFlight = false;
+var steamConfirmationsLoadedAt = 0;
+var hoveredSteamApprovalDropzone = null;
+var focusedSteamApprovalDropzone = null;
 
-const esc = (value) => UI.escapeHtml(value);
-const serverNow = () => Date.now() / 1000 + steamClockOffset;
-const initialOf = (name) => (Array.from(String(name || "?").trim())[0] || "?").toUpperCase();
+var esc = (value) => UI.escapeHtml(value);
+var serverNow = () => Date.now() / 1000 + steamClockOffset;
+var initialOf = (name) => (Array.from(String(name || "?").trim())[0] || "?").toUpperCase();
 
 async function readJsonResponse(resp, fallbackMessage) {
     const contentType = resp.headers.get("content-type") || "";
@@ -692,9 +692,9 @@ function bindAccountSwitch(select, attribute, onShow) {
 }
 
 /* ---------------- Setup wizard ---------------- */
-const SETUP_STEP_INDEX = { login: 0, loginCode: 0, email: 0, phone: 0, confirm: 1, transfer: 1, revocation: 2, complete: 3 };
-const setupSteps = {};
-const setupPhoneSections = {};
+var SETUP_STEP_INDEX = { login: 0, loginCode: 0, email: 0, phone: 0, confirm: 1, transfer: 1, revocation: 2, complete: 3 };
+var setupSteps = {};
+var setupPhoneSections = {};
 
 function showSetupStep(step) {
     Object.entries(setupSteps).forEach(([name, element]) => { if (element) { element.classList.toggle("is-active", name === step); } });

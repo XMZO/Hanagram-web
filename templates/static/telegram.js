@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hanagram-web contributors
 
-let workspaceSyncInFlight = false;
+var workspaceSyncInFlight = false;
 
 function esc(value) { return UI.escapeHtml(value); }
 function seenStorageKey(sessionKey) { return `hanagram_seen_${sessionKey}`; }

@@ -298,7 +298,7 @@
 
 {% block scripts %}
 <script>
-    const I18N = {
+    var I18N = {
         statusConnecting: {{ i18n.status_connecting | json_encode | safe }},
         statusConnected: {{ i18n.status_connected | json_encode | safe }},
         statusError: {{ i18n.status_error | json_encode | safe }},
@@ -321,9 +321,9 @@
         exportStringReady: {{ i18n.export_string_ready | json_encode | safe }},
         exportStringError: {{ i18n.export_string_error | json_encode | safe }}
     };
-    const SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
-    const TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS = {{ telegram_workspace_incremental_refresh_seconds }} * 1000;
-    const TELEGRAM_WORKSPACE_FULL_REFRESH_MS = {{ telegram_workspace_full_refresh_seconds }} * 1000;
+    var SNAPSHOT_API = {{ snapshot_api | json_encode | safe }};
+    var TELEGRAM_WORKSPACE_INCREMENTAL_REFRESH_MS = {{ telegram_workspace_incremental_refresh_seconds }} * 1000;
+    var TELEGRAM_WORKSPACE_FULL_REFRESH_MS = {{ telegram_workspace_full_refresh_seconds }} * 1000;
 </script>
 <script src="/static/__ASSET_VERSION__/telegram.js" defer></script>
 {% endblock scripts %}

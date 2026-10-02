@@ -25,6 +25,9 @@
     }
   };
 
+  // Same page = same canonical URL; POST results are often rendered at the form's action URL.
+  const pageKey = () => (doc.body && doc.body.dataset.canonical) || window.location.pathname;
+
   function label(key, fallback) {
     const value = doc.body && doc.body.dataset ? doc.body.dataset[key] : "";
     return value || fallback || "";
@@ -423,6 +426,18 @@
   /* ---------------------------------------------------------------- */
   /* Panels (hash-aware tab controller)                               */
   /* ---------------------------------------------------------------- */
+  // Remembered tabs only come back when the reader returns to a page (reload,
+  // back/forward); a fresh visit opens what the link or the server asks for.
+  let tabMemory = (() => {
+    const entry = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    return !!entry && (entry.type === "reload" || entry.type === "back_forward");
+  })();
+
+  function currentTabHash() {
+    const main = $$("[data-panels]").find((element) => element.__panels && !element.closest(".sheet"));
+    return main && main.__panels.current ? `#${main.__panels.current}` : window.location.hash;
+  }
+
   function panels(rootElement, options) {
     const opts = options || {};
     if (!rootElement) { return null; }
@@ -431,6 +446,9 @@
     const ids = ownPanels().map((panel) => panel.dataset.panel);
     const aliases = opts.aliases || {};
     const useHash = opts.hash !== false;
+    // The address bar is left alone (touching it makes browsers flash their
+    // loading state); the open tab is remembered per page for reloads instead.
+    const memoryKey = useHash ? `hg.panel:${pageKey()}:${rootElement.id || "main"}` : null;
     let current = null;
 
     const resolve = (raw) => {
@@ -472,9 +490,8 @@
       });
       ownPanels().forEach((panel) => panel.classList.toggle("is-active", panel.dataset.panel === id));
       if (opts.storageKey) { store.set(opts.storageKey, id, "session"); }
-      if (useHash && aopts.updateHash !== false && window.location.hash !== `#${id}`) {
-        history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
-        doc.dispatchEvent(new CustomEvent("ui:hash"));
+      if (memoryKey) {
+        store.set(memoryKey, JSON.stringify({ id, hash: window.location.hash }), "session");
       }
       const segs = new Set(ownLinks().map((link) => link.closest(".seg")).filter(Boolean));
       segs.forEach((seg) => updateSeg(seg));
@@ -508,7 +525,12 @@
       }
     }, true);
 
-    const initial = (useHash && resolve(window.location.hash))
+    let remembered = null;
+    try { remembered = memoryKey ? JSON.parse(store.get(memoryKey, "session") || "null") : null; } catch (_) { remembered = null; }
+    // Same URL hash as when the tab was picked: the reader reloaded, keep their tab.
+    // A different hash means they followed a deep link, so the link wins.
+    const fromMemory = tabMemory && remembered && remembered.hash === window.location.hash ? resolve(remembered.id) : null;
+    const initial = (useHash && (fromMemory || resolve(window.location.hash)))
       || resolve(opts.initial)
       || (opts.storageKey && resolve(store.get(opts.storageKey, "session")))
       || resolve(opts.defaultId)
@@ -706,7 +728,7 @@
     if (langLink) {
       const url = new URL(langLink.getAttribute("href"), window.location.origin);
       const canonical = (doc.body && doc.body.dataset.canonical) || window.location.pathname;
-      url.searchParams.set("return_to", `${canonical}${window.location.search}${window.location.hash}`);
+      url.searchParams.set("return_to", `${canonical}${window.location.search}${currentTabHash()}`);
       langLink.setAttribute("href", `${url.pathname}${url.search}`);
       return;
     }
@@ -815,8 +837,6 @@
   /* Stay in place across POST → redirect → same page                 */
   /* ---------------------------------------------------------------- */
   const RESTORE_KEY = "hg.restore";
-  // Same page = same canonical URL; POST results are often rendered at the form's action URL.
-  const pageKey = () => (doc.body && doc.body.dataset.canonical) || window.location.pathname;
 
   function readRestore() {
     try {
@@ -876,7 +896,7 @@
     $$(".sheet", scope).forEach(bindSheetDrag);
   }
 
-  ready(() => {
+  function initDocument() {
     initSegs(doc);
     syncThemeControls(currentTheme());
     decorateUnix(doc);
@@ -892,8 +912,291 @@
       }, delay);
     });
     $$(".sheet").forEach(bindSheetDrag);
+  }
+
+  ready(() => {
+    initDocument();
     // After every page script's DOMContentLoaded handler has picked its panel.
-    window.requestAnimationFrame(restorePosition);
+    window.requestAnimationFrame(() => {
+      restorePosition();
+      restoreReloadScroll();
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Soft navigation between the main sections                        */
+  /* ---------------------------------------------------------------- */
+  // Main sections swap in place: the masthead and tab bar stay on screen, the
+  // page content is replaced and its scripts run again. Forms, multi-step
+  // flows, downloads and anything unexpected still navigate normally.
+  const SOFT_PATHS = new Set(["/", "/platforms/telegram", "/platforms/steam", "/settings", "/settings/notifications", "/admin"]);
+  const pageScope = { tracking: false, intervals: new Set(), listeners: [], readyQueue: null };
+  const nativeSetInterval = window.setInterval.bind(window);
+  const nativeClearInterval = window.clearInterval.bind(window);
+
+  // Polling intervals and window/document listeners belong to the page that
+  // registered them and are dropped when it is swapped out.
+  window.setInterval = function (handler, delay, ...args) {
+    const id = nativeSetInterval(handler, delay, ...args);
+    if (pageScope.tracking) { pageScope.intervals.add(id); }
+    return id;
+  };
+  window.clearInterval = function (id) {
+    pageScope.intervals.delete(id);
+    nativeClearInterval(id);
+  };
+  [window, doc].forEach((target) => {
+    const nativeAdd = target.addEventListener;
+    target.addEventListener = function (type, listener, options) {
+      if (pageScope.tracking) {
+        if (pageScope.readyQueue && (type === "DOMContentLoaded" || type === "load")) {
+          pageScope.readyQueue.push(listener);
+          return undefined;
+        }
+        pageScope.listeners.push([target, type, listener, options]);
+      }
+      return nativeAdd.call(this, type, listener, options);
+    };
+  });
+
+  function teardownPage() {
+    pageScope.listeners.forEach(([target, type, listener, options]) => target.removeEventListener(type, listener, options));
+    pageScope.listeners = [];
+    pageScope.intervals.forEach((id) => nativeClearInterval(id));
+    pageScope.intervals.clear();
+    closeMenu();
+    sheetStack.length = 0;
+    scrollLocks = 0;
+    root.classList.remove("is-scroll-locked");
+    if (segObserver) { segObserver.disconnect(); }
+  }
+
+  const SCROLL_KEY = "hg.scroll:";
+  if ("scrollRestoration" in history) { history.scrollRestoration = "manual"; }
+  window.addEventListener("pagehide", () => {
+    store.set(SCROLL_KEY + window.location.pathname + window.location.search, String(Math.round(window.scrollY)), "session");
+  });
+  function restoreReloadScroll() {
+    const entry = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    if (!entry || (entry.type !== "reload" && entry.type !== "back_forward")) { return; }
+    const y = Number(store.get(SCROLL_KEY + window.location.pathname + window.location.search, "session") || 0);
+    if (y > 0) { window.scrollTo({ top: y, behavior: "instant" }); }
+  }
+
+  const pageCacheKey = (url) => `${url.origin}${url.pathname}${url.search}`;
+  const prefetched = new Map();
+
+  function fetchPage(href) {
+    return fetch(href, { headers: { Accept: "text/html" }, credentials: "same-origin", cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, url: response.url, type: response.headers.get("content-type") || "", html: await response.text() }));
+  }
+
+  function prefetchPage(url) {
+    const key = pageCacheKey(url);
+    const hit = prefetched.get(key);
+    if (hit && Date.now() - hit.at < 8000) { return hit.promise; }
+    const promise = fetchPage(url.href);
+    promise.catch(() => prefetched.delete(key));
+    prefetched.set(key, { promise, at: Date.now() });
+    return promise;
+  }
+
+  function softTarget(link) {
+    if (!link || !SOFT_PATHS.has(pageKey()) || typeof DOMParser !== "function") { return null; }
+    if (link.target || link.hasAttribute("download") || link.hasAttribute("data-no-soft")) { return null; }
+    let url;
+    try { url = new URL(link.href, window.location.href); } catch (_) { return null; }
+    if (url.origin !== window.location.origin || !SOFT_PATHS.has(url.pathname)) { return null; }
+    if (url.pathname === window.location.pathname && url.search === window.location.search) { return null; }
+    return url;
+  }
+
+  const stylesheetOf = (source) => {
+    const link = source.querySelector("link[rel='stylesheet'][href^='/static/']");
+    return link ? link.getAttribute("href") : "";
+  };
+  const navSignature = (element) => $$("[data-nav]", element).map((item) => item.getAttribute("href")).join("|");
+
+  function compatiblePage(next) {
+    const body = next.body;
+    if (!body || !body.hasAttribute("data-page") || !SOFT_PATHS.has(body.dataset.canonical || "")) { return false; }
+    if (next.querySelector("meta[http-equiv='refresh' i]")) { return false; }
+    return stylesheetOf(next) === stylesheetOf(doc);
+  }
+
+  // Scripts parsed by DOMParser never run; fresh copies do once inserted.
+  function revive(scope, loads) {
+    $$("script", scope).forEach((old) => {
+      const script = doc.createElement("script");
+      Array.from(old.attributes).forEach((attr) => script.setAttribute(attr.name, attr.value));
+      if (old.src) {
+        script.async = false;
+        loads.push(new Promise((resolve) => {
+          script.addEventListener("load", resolve, { once: true });
+          script.addEventListener("error", resolve, { once: true });
+        }));
+      } else {
+        script.textContent = old.textContent;
+      }
+      old.replaceWith(script);
+    });
+  }
+
+  function swapDocument(next) {
+    const loads = [];
+    const imported = (node) => doc.importNode(node, true);
+    doc.title = next.title;
+    Array.from(doc.body.attributes).forEach((attr) => doc.body.removeAttribute(attr.name));
+    Array.from(next.body.attributes).forEach((attr) => doc.body.setAttribute(attr.name, attr.value));
+
+    const app = $(".app");
+    const nextApp = $(".app", next);
+    const masthead = app && $(".masthead", app);
+    const nextMasthead = nextApp && $(".masthead", nextApp);
+    if (masthead && nextMasthead && navSignature(masthead) === navSignature(nextMasthead) && $("#main", nextApp)) {
+      // Keep the shell element in place so the nav marks can animate between tabs.
+      $$("[data-nav]").forEach((item) => { item.classList.remove("is-active"); item.removeAttribute("aria-current"); });
+      [".masthead__title", ".masthead__page-actions"].forEach((part) => {
+        const current = $(part, masthead);
+        const incoming = $(part, nextMasthead);
+        if (current && incoming) { current.replaceWith(imported(incoming)); }
+      });
+      const tabbar = $(".tabbar", app);
+      const nextTabbar = $(".tabbar", nextApp);
+      if (tabbar && !nextTabbar) { tabbar.remove(); }
+      if (nextTabbar && (!tabbar || navSignature(tabbar) !== navSignature(nextTabbar))) {
+        const fresh = imported(nextTabbar);
+        if (tabbar) { tabbar.replaceWith(fresh); } else { app.appendChild(fresh); }
+      }
+      const main = imported($("#main", nextApp));
+      main.classList.add("is-entering");
+      revive(main, loads);
+      $("#main", app).replaceWith(main);
+
+      const toasts = doc.getElementById("toasts");
+      Array.from(doc.body.childNodes).forEach((node) => { if (node !== app && node !== toasts) { node.remove(); } });
+      const outside = doc.createDocumentFragment();
+      Array.from(next.body.childNodes).forEach((node) => {
+        if (node === nextApp || node.id === "toasts") { return; }
+        outside.appendChild(imported(node));
+      });
+      revive(outside, loads);
+      if (toasts) { doc.body.insertBefore(outside, toasts); } else { doc.body.appendChild(outside); }
+    } else {
+      const fragment = doc.createDocumentFragment();
+      Array.from(next.body.childNodes).forEach((node) => fragment.appendChild(imported(node)));
+      revive(fragment, loads);
+      doc.body.replaceChildren(fragment);
+      const main = doc.getElementById("main");
+      if (main) { main.classList.add("is-entering"); }
+    }
+    return Promise.all(loads);
+  }
+
+  let progressEl = null;
+  let progressTimer = 0;
+  function progressStart() {
+    window.clearTimeout(progressTimer);
+    progressTimer = window.setTimeout(() => {
+      if (!progressEl) {
+        progressEl = doc.createElement("div");
+        progressEl.className = "nav-progress";
+        progressEl.setAttribute("aria-hidden", "true");
+        root.appendChild(progressEl);
+      }
+      void progressEl.offsetWidth;
+      progressEl.classList.add("is-running");
+    }, 120);
+  }
+  function progressDone() {
+    window.clearTimeout(progressTimer);
+    if (!progressEl) { return; }
+    const element = progressEl;
+    progressEl = null;
+    element.classList.add("is-done");
+    window.setTimeout(() => element.remove(), 360);
+  }
+
+  let renderedUrl = window.location.pathname + window.location.search;
+  let navToken = 0;
+
+  function runQueued(listeners) {
+    listeners.forEach((listener) => {
+      try {
+        const event = new Event("DOMContentLoaded");
+        if (typeof listener === "function") {
+          listener.call(doc, event);
+        } else if (listener && typeof listener.handleEvent === "function") {
+          listener.handleEvent(event);
+        }
+      } catch (error) {
+        window.setTimeout(() => { throw error; }, 0);
+      }
+    });
+  }
+
+  async function softNavigate(url, options) {
+    const opts = options || {};
+    const token = (navToken += 1);
+    progressStart();
+    let page = null;
+    try { page = await (opts.push === false ? fetchPage(url.href) : prefetchPage(url)); } catch (_) { page = null; }
+    prefetched.clear();
+    if (token !== navToken) { return; }
+    const next = page && page.ok && page.type.includes("text/html") ? new DOMParser().parseFromString(page.html, "text/html") : null;
+    if (!next || !compatiblePage(next)) {
+      window.location.assign(page && page.url ? page.url : url.href);
+      return;
+    }
+    const finalUrl = new URL(page.url || url.href, window.location.href);
+    const target = `${finalUrl.pathname}${finalUrl.search}${url.hash}`;
+    if (opts.push !== false) {
+      history.replaceState({ ...(history.state || {}), hgScroll: Math.round(window.scrollY) }, "");
+      history.pushState({ hgSoft: true }, "", target);
+    } else if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== target) {
+      history.replaceState(history.state, "", target);
+    }
+    renderedUrl = finalUrl.pathname + finalUrl.search;
+
+    teardownPage();
+    tabMemory = opts.push === false;
+    pageScope.readyQueue = [];
+    await swapDocument(next);
+    const queued = pageScope.readyQueue;
+    pageScope.readyQueue = null;
+    initDocument();
+    runQueued(queued);
+    window.scrollTo({ top: opts.scroll || 0, behavior: "instant" });
+    progressDone();
+  }
+
+  doc.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) { return; }
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    const url = softTarget(link);
+    if (!url) { return; }
+    event.preventDefault();
+    softNavigate(url);
+  });
+
+  let hoverTimer = 0;
+  doc.addEventListener("pointerover", (event) => {
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    const url = softTarget(link);
+    if (!url) { return; }
+    window.clearTimeout(hoverTimer);
+    hoverTimer = window.setTimeout(() => prefetchPage(url), event.pointerType === "mouse" ? 80 : 0);
+  }, { passive: true });
+  doc.addEventListener("pointerout", () => window.clearTimeout(hoverTimer), { passive: true });
+
+  window.addEventListener("popstate", (event) => {
+    const target = window.location.pathname + window.location.search;
+    if (target === renderedUrl) { return; }
+    if (!SOFT_PATHS.has(window.location.pathname)) {
+      window.location.reload();
+      return;
+    }
+    softNavigate(new URL(window.location.href), { push: false, scroll: (event.state && event.state.hgScroll) || 0 });
   });
 
   window.UI = {
@@ -924,4 +1227,7 @@
     isEditable,
     applyTheme
   };
+
+  // From here on, listeners and intervals are registered by page scripts.
+  pageScope.tracking = true;
 })();
