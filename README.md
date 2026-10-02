@@ -128,7 +128,7 @@ sessions/
 | `SESSIONS_DIR` | `./sessions` | 加密数据根目录 |
 | `BIND_ADDR` | `0.0.0.0:8080` | 监听地址 |
 | `RUST_LOG` | `info` | 日志级别 |
-| `HANAGRAM_IMAGE` | `ghcr.io/xmzo/hanagram-web:latest` | Docker Compose 镜像标签 |
+| `HANAGRAM_IMAGE` | `ghcr.io/xmzo/hanagram-web:latest` | Docker Compose 镜像标签，可固定为具体版本如 `:0.2.0` |
 
 旧的 `API_ID`、`API_HASH`、`BOT_NOTIFY_*`、`ADMIN_USERNAME`、`ADMIN_PASSWORD` 已废弃，可以删除。
 
@@ -246,8 +246,10 @@ Docker 镜像内置健康检查命令。
 <a id="zh-build"></a>
 ### 15. 构建说明
 
-- Docker 镜像包含 `/app/hanagram-web` 和 `/app/reset_admin` 两个二进制
+- Docker 镜像只包含一个二进制 `/app/hanagram-web`；`/app/reset_admin` 是指向它的符号链接（等同于 `/app/hanagram-web reset-admin`）
 - 运行时镜像基于 `scratch`
+- 镜像只在推送版本标签时构建：版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)，标签需与 `Cargo.toml` 的 `version` 一致，例如 `v0.2.0` 会发布 `0.2.0`、`0.2`、`latest` 三个镜像标签；预发布标签（如 `v0.3.0-rc.1`）不会覆盖 `latest`
+- 发布流程：修改 `Cargo.toml` 的 `version` 并提交 → `git tag v0.2.0` → `git push origin v0.2.0`
 - 模板在编译时嵌入二进制，无需单独拷贝 `templates/`
 
 <a id="zh-faq"></a>
@@ -392,7 +394,7 @@ sessions/
 | `SESSIONS_DIR` | `./sessions` | Root directory for encrypted data |
 | `BIND_ADDR` | `0.0.0.0:8080` | HTTP bind address |
 | `RUST_LOG` | `info` | Log filter |
-| `HANAGRAM_IMAGE` | `ghcr.io/xmzo/hanagram-web:latest` | Docker Compose image tag |
+| `HANAGRAM_IMAGE` | `ghcr.io/xmzo/hanagram-web:latest` | Docker Compose image tag; pin a release such as `:0.2.0` |
 
 Legacy `API_ID`, `API_HASH`, `BOT_NOTIFY_*`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` variables are obsolete and can be removed.
 
@@ -510,8 +512,10 @@ The Docker image ships with a built-in healthcheck command.
 <a id="en-build"></a>
 ### 15. Build Notes
 
-- Docker image contains `/app/hanagram-web` and `/app/reset_admin`
+- Docker image ships a single binary `/app/hanagram-web`; `/app/reset_admin` is a symlink to it (same as `/app/hanagram-web reset-admin`)
 - Runtime image is based on `scratch`
+- Images are built only for version tags. Versions follow [SemVer](https://semver.org/) and the tag must match `version` in `Cargo.toml`; for example `v0.2.0` publishes `0.2.0`, `0.2` and `latest`. Pre-release tags such as `v0.3.0-rc.1` never move `latest`
+- Release flow: bump `version` in `Cargo.toml` and commit → `git tag v0.2.0` → `git push origin v0.2.0`
 - Templates are embedded into the binary at build time
 
 <a id="en-faq"></a>

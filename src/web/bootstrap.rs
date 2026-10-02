@@ -17,6 +17,9 @@ pub(crate) async fn run() -> Result<()> {
     if matches!(std::env::args().nth(1).as_deref(), Some("healthcheck")) {
         return run_healthcheck_command().await;
     }
+    if hanagram_web::admin_reset_cli::requested() {
+        return hanagram_web::admin_reset_cli::run().await;
+    }
 
     dotenvy::dotenv().ok();
     init_tracing();
