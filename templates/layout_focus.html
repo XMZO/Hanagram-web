@@ -8,7 +8,7 @@
         <a class="btn btn--ghost btn--icon" href="{% block back_href %}/{% endblock back_href %}" aria-label="{{ i18n.ui_back }}" title="{{ i18n.ui_back }}">
             <svg class="icon" aria-hidden="true"><use href="#i-arrow-left"></use></svg>
         </a>
-        <span class="brand__mark" style="width:28px;height:28px;border-radius:9px"><svg aria-hidden="true" style="width:16px;height:16px"><use href="#i-flower"></use></svg></span>
+        <a href="/" class="brand" aria-label="Hanagram"><span class="seal seal--sm" aria-hidden="true">花</span></a>
         <div class="focus__title">{% block focus_title %}Hanagram{% endblock focus_title %}</div>
         <div class="focus__actions">
             <button type="button" class="btn btn--ghost btn--icon" data-menu-toggle="prefs-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false" aria-label="{{ i18n.ui_theme_label }}" title="{{ i18n.ui_theme_label }} · {{ i18n.language_switch }}">

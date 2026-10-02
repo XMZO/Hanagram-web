@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {# SPDX-License-Identifier: AGPL-3.0-or-later #}
-{# Application shell: sidebar (desktop), top bar + tab bar (mobile). #}
+{# Application shell: masthead with section tabs (desktop), masthead + tab bar (phones/tablets). #}
 
 {% block body %}
 {% set_global shell_user = "" %}
@@ -11,78 +11,50 @@
 {% set_global shell_restricted = false %}
 {% if show_workspace_links is defined %}{% if not show_workspace_links %}{% set_global shell_restricted = true %}{% endif %}{% endif %}
 <div class="app">
-    <aside class="sidebar" aria-label="{{ i18n.nav_dashboard_label }}">
-        <a class="brand sidebar__brand" href="/" aria-label="{{ i18n.hero_title }}">
-            <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
-            <span class="brand__text">
-                <span class="brand__name">Hanagram</span>
-                <span class="brand__tag">Telegram · Steam Guard</span>
-            </span>
-        </a>
-        <div class="sidebar__scroll">
-            <nav class="nav">
+    <header class="masthead">
+        <div class="masthead__inner">
+            <a class="brand" href="/" aria-label="{{ i18n.hero_title }}">
+                <span class="seal" aria-hidden="true">花</span>
+                <span class="brand__text">
+                    <span class="brand__name">Hanagram</span>
+                    <span class="brand__tag">Telegram · Steam Guard</span>
+                </span>
+            </a>
+            <div class="masthead__title truncate">{% block topbar_title %}Hanagram{% endblock topbar_title %}</div>
+            <nav class="mast-nav" aria-label="{{ i18n.nav_dashboard_label }}">
                 {% if not shell_restricted %}
-                <a class="nav__item" data-nav="overview" data-label="{{ i18n.ui_nav_overview }}" href="/">
-                    <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg><span class="nav__text">{{ i18n.ui_nav_overview }}</span>
-                </a>
-                <p class="nav__label">{{ i18n.ui_nav_group_platforms }}</p>
-                <a class="nav__item" data-nav="telegram" data-label="Telegram" href="/platforms/telegram">
-                    <svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg><span class="nav__text">Telegram</span>
-                </a>
-                <a class="nav__item" data-nav="steam" data-label="{{ i18n.steam_platform_name }}" href="/platforms/steam">
-                    <svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg><span class="nav__text">{{ i18n.steam_platform_name }}</span>
-                </a>
-                <p class="nav__label">{{ i18n.ui_nav_group_account }}</p>
+                <a class="mast-nav__item" data-nav="overview" href="/">{{ i18n.ui_nav_overview }}<span class="mast-nav__mark" aria-hidden="true"></span></a>
+                <a class="mast-nav__item" data-nav="telegram" href="/platforms/telegram">Telegram<span class="mast-nav__mark" aria-hidden="true"></span></a>
+                <a class="mast-nav__item" data-nav="steam" href="/platforms/steam">{{ i18n.steam_platform_name }}<span class="mast-nav__mark" aria-hidden="true"></span></a>
                 {% endif %}
-                <a class="nav__item" data-nav="settings" data-label="{{ i18n.nav_settings_label }}" href="/settings">
-                    <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg><span class="nav__text">{{ i18n.nav_settings_label }}</span>
-                </a>
+                <a class="mast-nav__item" data-nav="settings" href="/settings">{{ i18n.nav_settings_label }}<span class="mast-nav__mark" aria-hidden="true"></span></a>
                 {% if shell_admin and not shell_restricted %}
-                <a class="nav__item" data-nav="admin" data-label="{{ i18n.nav_admin_label }}" href="/admin">
-                    <svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg><span class="nav__text">{{ i18n.nav_admin_label }}</span>
-                </a>
+                <a class="mast-nav__item" data-nav="admin" href="/admin">{{ i18n.nav_admin_label }}<span class="mast-nav__mark" aria-hidden="true"></span></a>
                 {% endif %}
             </nav>
-        </div>
-        <div class="sidebar__foot">
-            <button type="button" class="user-chip" data-menu-toggle="user-menu" aria-haspopup="menu" aria-expanded="false" title="{{ shell_user }}">
-                <span class="avatar avatar--round">{{ shell_user | truncate(length=1, end="") | upper }}</span>
-                <span class="user-chip__meta">
-                    <span class="user-chip__name">{{ shell_user }}</span>
-                    <span class="user-chip__role">{% if shell_admin %}{{ i18n.admin_role_admin_label }}{% else %}{{ i18n.ui_signed_in_as }}{% endif %}</span>
-                </span>
-                <svg class="icon icon--sm user-chip__chev muted" aria-hidden="true"><use href="#i-chevrons"></use></svg>
-            </button>
-        </div>
-    </aside>
-
-    <div class="main">
-        <header class="topbar">
-            <a class="brand" href="/" aria-label="{{ i18n.hero_title }}">
-                <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
-            </a>
-            <div class="topbar__title truncate">{% block topbar_title %}Hanagram{% endblock topbar_title %}</div>
-            <div class="topbar__actions">
-                {% block topbar_actions %}{% endblock topbar_actions %}
-                <button type="button" class="btn btn--ghost btn--icon" data-menu-toggle="user-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false" aria-label="{{ shell_user }}">
+            <div class="masthead__actions">
+                <div class="masthead__page-actions">{% block topbar_actions %}{% endblock topbar_actions %}</div>
+                <button type="button" class="user-btn" data-menu-toggle="user-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false" aria-label="{{ shell_user }}" title="{{ shell_user }}">
                     <span class="avatar avatar--sm avatar--round">{{ shell_user | truncate(length=1, end="") | upper }}</span>
+                    <span class="user-btn__name">{{ shell_user }}</span>
+                    <svg class="icon icon--sm user-btn__chev" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
                 </button>
             </div>
-        </header>
+        </div>
+    </header>
 
-        <main id="main" class="content">
-            {% block content %}{% endblock content %}
-        </main>
-    </div>
+    <main id="main" class="content">
+        {% block content %}{% endblock content %}
+    </main>
 
     {% if not shell_restricted %}
     <nav class="tabbar" aria-label="{{ i18n.nav_dashboard_label }}">
-        <a class="tabbar__item" data-nav="overview" href="/"><svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg><span>{{ i18n.ui_nav_overview }}</span></a>
-        <a class="tabbar__item" data-nav="telegram" href="/platforms/telegram"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg><span>Telegram</span></a>
-        <a class="tabbar__item" data-nav="steam" href="/platforms/steam"><svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg><span>{{ i18n.steam_platform_name }}</span></a>
-        <a class="tabbar__item" data-nav="settings" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg><span>{{ i18n.nav_settings_label }}</span></a>
+        <a class="tabbar__item" data-nav="overview" href="/"><span class="tabbar__mark" aria-hidden="true"></span><svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg><span>{{ i18n.ui_nav_overview }}</span></a>
+        <a class="tabbar__item" data-nav="telegram" href="/platforms/telegram"><span class="tabbar__mark" aria-hidden="true"></span><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg><span>Telegram</span></a>
+        <a class="tabbar__item" data-nav="steam" href="/platforms/steam"><span class="tabbar__mark" aria-hidden="true"></span><svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg><span>{{ i18n.steam_platform_name }}</span></a>
+        <a class="tabbar__item" data-nav="settings" href="/settings"><span class="tabbar__mark" aria-hidden="true"></span><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg><span>{{ i18n.nav_settings_label }}</span></a>
         {% if shell_admin %}
-        <a class="tabbar__item" data-nav="admin" href="/admin"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg><span>{{ i18n.nav_admin_label }}</span></a>
+        <a class="tabbar__item" data-nav="admin" href="/admin"><span class="tabbar__mark" aria-hidden="true"></span><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg><span>{{ i18n.nav_admin_label }}</span></a>
         {% endif %}
     </nav>
     {% endif %}
@@ -91,7 +63,10 @@
     (function () {
         var page = document.body.getAttribute("data-page");
         if (!page) { return; }
-        document.querySelectorAll('[data-nav="' + page + '"]').forEach(function (item) { item.classList.add("is-active"); });
+        document.querySelectorAll('[data-nav="' + page + '"]').forEach(function (item) {
+            item.classList.add("is-active");
+            item.setAttribute("aria-current", "page");
+        });
     })();
 </script>
 

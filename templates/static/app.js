@@ -429,7 +429,10 @@
 
     const scrollIntoPlace = () => {
       const anchor = rootElement.querySelector("[data-panels-anchor]") || rootElement;
-      const offset = window.innerWidth < 1024 ? 64 + (rootElement.querySelector(".secnav") ? 52 : 0) : 16;
+      const bar = doc.querySelector(".masthead, .focus__bar");
+      const nav = rootElement.querySelector(".secnav");
+      const navHeight = nav && getComputedStyle(nav).flexDirection === "row" && getComputedStyle(nav).position === "sticky" ? nav.offsetHeight : 0;
+      const offset = (bar ? bar.offsetHeight : 0) + navHeight + 16;
       const top = anchor.getBoundingClientRect().top + window.scrollY - offset;
       if (window.scrollY > top + 4) {
         window.scrollTo({ top: Math.max(0, top), behavior: reduceMotion() ? "auto" : "smooth" });
@@ -625,18 +628,32 @@
     }
   }
 
-  function applyTheme(mode) {
+  function applyTheme(mode, origin) {
     const next = mode === "light" || mode === "dark" ? mode : "system";
     store.set(THEME_KEY, next);
     const run = () => {
       if (next === "system") { root.removeAttribute("data-theme"); } else { root.dataset.theme = next; }
       syncThemeControls(next);
     };
-    if (typeof doc.startViewTransition === "function" && !reduceMotion()) {
-      doc.startViewTransition(run);
-    } else {
+    if (typeof doc.startViewTransition !== "function" || reduceMotion()) {
       run();
+      return;
     }
+    // New ink spreads outward from the control that was pressed.
+    const rect = origin && origin.getBoundingClientRect ? origin.getBoundingClientRect() : null;
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : 0;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    root.classList.add("is-theme-switching");
+    const transition = doc.startViewTransition(run);
+    transition.ready.then(() => {
+      root.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 560, easing: "cubic-bezier(0.16, 1, 0.3, 1)", pseudoElement: "::view-transition-new(root)" }
+      );
+    }).catch(() => {});
+    const done = () => root.classList.remove("is-theme-switching");
+    transition.finished.then(done, done);
   }
 
   /* ---------------------------------------------------------------- */
@@ -669,7 +686,7 @@
 
     const themeChoice = target.closest("[data-theme-choice]");
     if (themeChoice) {
-      applyTheme(themeChoice.dataset.themeChoice);
+      applyTheme(themeChoice.dataset.themeChoice, themeChoice);
       return;
     }
 

@@ -824,13 +824,13 @@
     <div class="sheet__backdrop" data-sheet-close></div>
     <div class="sheet__panel" tabindex="-1">
         <div class="sheet__grab"></div>
-        <header class="sheet__head" style="background:linear-gradient(135deg,#e5484d,#b4232b);color:#fff;border-bottom:0">
-            <span class="card-icon" style="background:rgba(255,255,255,.18);color:#fff"><svg class="icon" aria-hidden="true"><use href="#i-zap"></use></svg></span>
+        <header class="sheet__head sheet__head--danger">
+            <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-zap"></use></svg></span>
             <div class="sheet__heading">
-                <h2 class="sheet__title" id="zero-trust-sheet-title" style="color:#fff">{{ i18n.steam_zero_trust_modal_title }}</h2>
-                <p class="text-sm" style="color:rgba(255,255,255,.88);margin-top:4px">{{ i18n.steam_zero_trust_modal_warning }}</p>
+                <h2 class="sheet__title" id="zero-trust-sheet-title">{{ i18n.steam_zero_trust_modal_title }}</h2>
+                <p class="sheet__desc">{{ i18n.steam_zero_trust_modal_warning }}</p>
             </div>
-            <button type="button" class="btn btn--ghost btn--icon btn--sm" style="color:#fff" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-sheet-close aria-label="{{ i18n.close }}"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
         </header>
         <div class="sheet__body stack">
             <div class="cluster cluster--between">

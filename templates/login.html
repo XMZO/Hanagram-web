@@ -9,28 +9,40 @@
 {% block body %}
 <div class="auth">
     <aside class="auth__aside" aria-hidden="true">
+        <svg class="auth-art auth-art--moon" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="auth-art__halo" cx="250" cy="150" r="188" stroke-width="1"/>
+            <circle class="auth-art__moon" cx="250" cy="150" r="158"/>
+            <rect class="auth-art__mist" x="-10" y="196" width="300" height="24" rx="12"/>
+            <rect class="auth-art__mist" x="170" y="240" width="300" height="20" rx="10"/>
+        </svg>
         <div class="brand">
-            <span class="brand__mark"><svg><use href="#i-flower"></use></svg></span>
-            <span class="brand__text"><span class="brand__name" style="color:#fff">Hanagram</span><span class="brand__tag" style="color:rgba(255,255,255,.62)">Web</span></span>
+            <span class="seal">花</span>
+            <span class="brand__text"><span class="brand__name">Hanagram</span><span class="brand__tag">Web</span></span>
         </div>
         <div>
-            <p class="eyebrow" style="color:rgba(255,255,255,.68)">{{ i18n.hero_eyebrow }}</p>
+            <p class="eyebrow">{{ i18n.hero_eyebrow }}</p>
             <h1 class="auth-hero__title mt-3">{{ i18n.hero_title }}</h1>
             <p class="auth-hero__desc">{{ i18n.hero_description_prefix }} <code>777000</code>{{ i18n.hero_description_suffix }}</p>
-            <div class="auth-features">
-                <div class="auth-feature" style="--i:0"><span class="auth-feature__icon"><svg class="icon"><use href="#i-send"></use></svg></span>{{ i18n.dashboard_sessions_title }}</div>
-                <div class="auth-feature" style="--i:1"><span class="auth-feature__icon"><svg class="icon"><use href="#i-gamepad"></use></svg></span>{{ i18n.steam_workspace_title }}</div>
-                <div class="auth-feature" style="--i:2"><span class="auth-feature__icon"><svg class="icon"><use href="#i-shield-check"></use></svg></span>{{ i18n.settings_security_tab_totp_label }} · {{ i18n.settings_security_tab_passkeys_label }}</div>
-            </div>
         </div>
-        <p class="text-xs" style="color:rgba(255,255,255,.5)">AGPL-3.0 · Hanagram-web</p>
-        <div class="auth-orb"></div>
+        <div class="auth__aside-bottom">
+            <svg class="auth-art auth-art--hill" viewBox="0 0 600 300" preserveAspectRatio="none" aria-hidden="true">
+                <path class="auth-art__grass" vector-effect="non-scaling-stroke" d="M48 108Q44 85 18 56M48 108Q46 76 36 41M48 108Q49 70 54 31M48 108Q52 82 72 52M150 92Q146 65 124 34M150 92Q149 52 144 11M150 92Q152 59 164 23M150 92Q155 71 184 43M262 105Q257 86 228 59M262 105Q260 75 248 41M262 105Q263 70 266 32M372 115Q369 90 350 59M372 115Q372 76 372 36M372 115Q375 84 394 50M372 115Q378 96 412 70M470 115Q466 94 440 65M470 115Q469 81 462 45M470 115Q472 88 484 56M556 103Q552 74 532 40M556 103Q555 62 552 20M556 103Q559 71 576 35M556 103Q561 82 592 53"/>
+                <path class="auth-art__plume" vector-effect="non-scaling-stroke" d="M36 41q-4 3 -5.5 9M36 41q-6.5 5.5 -8 13M36 41q-9 8 -10.5 17M54 31q4 3 5.5 9M54 31q6.5 5.5 8 13M54 31q9 8 10.5 17M144 11q-4 3 -5.5 9M144 11q-6.5 5.5 -8 13M144 11q-9 8 -10.5 17M164 23q4 3 5.5 9M164 23q6.5 5.5 8 13M164 23q9 8 10.5 17M248 41q-4 3 -5.5 9M248 41q-6.5 5.5 -8 13M248 41q-9 8 -10.5 17M266 32q4 3 5.5 9M266 32q6.5 5.5 8 13M266 32q9 8 10.5 17M372 36q4 3 5.5 9M372 36q6.5 5.5 8 13M372 36q9 8 10.5 17M394 50q4 3 5.5 9M394 50q6.5 5.5 8 13M394 50q9 8 10.5 17M462 45q-4 3 -5.5 9M462 45q-6.5 5.5 -8 13M462 45q-9 8 -10.5 17M552 20q-4 3 -5.5 9M552 20q-6.5 5.5 -8 13M552 20q-9 8 -10.5 17M576 35q4 3 5.5 9M576 35q6.5 5.5 8 13M576 35q9 8 10.5 17"/>
+                <path class="auth-art__hill" d="M0 108C90 76 180 72 270 92S450 116 600 82L600 300L0 300Z"/>
+            </svg>
+            <div class="auth-features">
+                <div class="auth-feature" style="--i:0"><span class="auth-feature__icon"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg></span>{{ i18n.dashboard_sessions_title }}</div>
+                <div class="auth-feature" style="--i:1"><span class="auth-feature__icon"><svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg></span>{{ i18n.steam_workspace_title }}</div>
+                <div class="auth-feature" style="--i:2"><span class="auth-feature__icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg></span>{{ i18n.settings_security_tab_totp_label }} · {{ i18n.settings_security_tab_passkeys_label }}</div>
+            </div>
+            <p class="auth__aside-foot mt-4">AGPL-3.0 · Hanagram-web</p>
+        </div>
     </aside>
 
     <main class="auth__main" id="main">
         <div class="auth__top">
             <a class="brand auth__brand" href="/login">
-                <span class="brand__mark"><svg aria-hidden="true"><use href="#i-flower"></use></svg></span>
+                <span class="seal" aria-hidden="true">花</span>
                 <span class="brand__text"><span class="brand__name">Hanagram</span><span class="brand__tag">Web</span></span>
             </a>
             <button type="button" class="btn btn--ghost btn--sm" data-menu-toggle="prefs-menu" data-menu-align="end" aria-haspopup="menu" aria-expanded="false">

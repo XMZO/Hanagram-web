@@ -6,15 +6,19 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
-    <meta name="theme-color" content="#f4f5f8">
+    <meta name="theme-color" content="#f1ece2">
     <meta name="referrer" content="same-origin">
     <title>{% block title %}{{ i18n.page_title }}{% endblock title %}</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236e6ade'/%3E%3Cstop offset='1' stop-color='%233e7bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cg fill='%23fff' transform='translate(4 4)'%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(72 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(144 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(216 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(288 12 12)'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.7' fill='%23ffd36e'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='6' fill='%23c9442b' transform='rotate(-4 16 16)'/%3E%3Crect x='4' y='4' width='24' height='24' rx='4' fill='none' stroke='%23fbf6ec' stroke-opacity='.6' transform='rotate(-4 16 16)'/%3E%3Cg fill='%23fbf6ec' transform='translate(4 4)'%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(72 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(144 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(216 12 12)'/%3E%3Cellipse cx='12' cy='6.6' rx='3.3' ry='4.6' transform='rotate(288 12 12)'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%23c9442b'/%3E%3C/svg%3E">
     <script>
         (function () {
             try {
                 var theme = window.localStorage.getItem("hg-theme");
                 if (theme === "light" || theme === "dark") { document.documentElement.setAttribute("data-theme", theme); }
+            } catch (_) {}
+            try {
+                var dark = theme === "dark" || (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+                if (dark) { document.querySelector("meta[name='theme-color']").setAttribute("content", "#121110"); }
             } catch (_) {}
         })();
     </script>
@@ -33,7 +37,6 @@
     {% block body_attrs %}{% endblock body_attrs %}
 >
     <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false">
-        <symbol id="i-flower" viewBox="0 0 24 24"><g><ellipse cx="12" cy="6.6" rx="3.3" ry="4.6"/><ellipse cx="12" cy="6.6" rx="3.3" ry="4.6" transform="rotate(72 12 12)"/><ellipse cx="12" cy="6.6" rx="3.3" ry="4.6" transform="rotate(144 12 12)"/><ellipse cx="12" cy="6.6" rx="3.3" ry="4.6" transform="rotate(216 12 12)"/><ellipse cx="12" cy="6.6" rx="3.3" ry="4.6" transform="rotate(288 12 12)"/></g><circle cx="12" cy="12" r="2.7" fill="#ffd36e"/></symbol>
         <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
         <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.54 21.69a.5.5 0 0 0 .94-.03l6.5-19a.5.5 0 0 0-.64-.63l-19 6.5a.5.5 0 0 0-.02.93l7.93 3.18a2 2 0 0 1 1.11 1.11z"/><path d="m21.85 2.15-10.94 10.94"/></symbol>
         <symbol id="i-gamepad" viewBox="0 0 24 24"><path d="M6 11h4"/><path d="M8 9v4"/><path d="M15 12h.01"/><path d="M18 10h.01"/><path d="M17.32 5H6.68a4 4 0 0 0-3.98 3.59l-.02.15C2.6 9.42 2 14.46 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.41-1.41A2 2 0 0 1 9.83 16h4.34a2 2 0 0 1 1.41.59L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.55-.6-6.58-.69-7.26l-.02-.15A4 4 0 0 0 17.32 5z"/></symbol>
