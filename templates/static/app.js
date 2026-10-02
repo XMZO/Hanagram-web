@@ -19,6 +19,9 @@
     },
     set(key, value, area) {
       try { window[(area || "local") + "Storage"].setItem(key, value); } catch (_) { /* storage unavailable */ }
+    },
+    remove(key, area) {
+      try { window[(area || "local") + "Storage"].removeItem(key); } catch (_) { /* storage unavailable */ }
     }
   };
 
@@ -40,6 +43,15 @@
   function ready(fn) {
     if (doc.readyState === "loading") {
       doc.addEventListener("DOMContentLoaded", fn, { once: true });
+    } else {
+      fn();
+    }
+  }
+
+  // Pages may be prerendered on hover; defer work with outside effects until shown.
+  function whenActivated(fn) {
+    if (doc.prerendering) {
+      doc.addEventListener("prerenderingchange", () => fn(), { once: true });
     } else {
       fn();
     }
@@ -799,6 +811,71 @@
     }
   });
 
+  /* ---------------------------------------------------------------- */
+  /* Stay in place across POST → redirect → same page                 */
+  /* ---------------------------------------------------------------- */
+  const RESTORE_KEY = "hg.restore";
+  // Same page = same canonical URL; POST results are often rendered at the form's action URL.
+  const pageKey = () => (doc.body && doc.body.dataset.canonical) || window.location.pathname;
+
+  function readRestore() {
+    try {
+      const saved = JSON.parse(store.get(RESTORE_KEY, "session") || "null");
+      return saved && Date.now() - Number(saved.at || 0) <= 20000 ? saved : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // A page rendered as the answer to a form post shows its canonical URL, so a
+  // refresh reloads the page instead of re-sending the form.
+  (function adoptCanonicalUrl() {
+    const canonical = doc.body && doc.body.dataset.canonical;
+    if (!readRestore() || !canonical || window.location.pathname === canonical) { return; }
+    history.replaceState(history.state, "", `${canonical}${window.location.hash}`);
+  })();
+
+  doc.addEventListener("submit", (event) => {
+    if (event.defaultPrevented) { return; }
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || form.hasAttribute("data-no-restore")) { return; }
+    if ((form.getAttribute("method") || "get").toLowerCase() !== "post") { return; }
+    if (form.target && form.target !== "_self") { return; }
+    store.set(RESTORE_KEY, JSON.stringify({ page: pageKey(), y: Math.round(window.scrollY), at: Date.now() }), "session");
+  });
+
+  function restorePosition() {
+    const saved = readRestore();
+    store.remove(RESTORE_KEY, "session");
+    if (!saved || saved.page !== pageKey()) { return; }
+    const top = Math.min(Number(saved.y) || 0, Math.max(0, doc.documentElement.scrollHeight - window.innerHeight));
+    if (top <= 0) { return; }
+    window.scrollTo({ top, behavior: "instant" });
+    // The result banner sits at the top of the page; echo it as a toast when it is out of view.
+    const banner = $(".alerts .alert[role='status']");
+    const bar = $(".masthead, .focus__bar");
+    if (banner && banner.getBoundingClientRect().bottom < (bar ? bar.offsetHeight : 0) + 8) {
+      const body = $(".alert__body", banner);
+      const text = body ? body.textContent.trim() : "";
+      if (text) { toast(text, banner.classList.contains("alert--success") ? "success" : "error"); }
+    }
+  }
+
+  doc.addEventListener("prerenderingchange", () => {
+    const mode = currentTheme();
+    if (mode === "system") { root.removeAttribute("data-theme"); } else { root.dataset.theme = mode; }
+    syncThemeControls(mode);
+  }, { once: true });
+
+  /** Wires up markup that was inserted after load (segments, sheets, timestamps). */
+  function enhance(scope) {
+    if (!scope) { return; }
+    initSegs(scope);
+    decorateUnix(scope);
+    if (scope.matches && scope.matches(".sheet")) { bindSheetDrag(scope); }
+    $$(".sheet", scope).forEach(bindSheetDrag);
+  }
+
   ready(() => {
     initSegs(doc);
     syncThemeControls(currentTheme());
@@ -815,8 +892,8 @@
       }, delay);
     });
     $$(".sheet").forEach(bindSheetDrag);
-    const active = $(".nav__item.is-active");
-    if (active) { active.setAttribute("aria-current", "page"); }
+    // After every page script's DOMContentLoaded handler has picked its panel.
+    window.requestAnimationFrame(restorePosition);
   });
 
   window.UI = {
@@ -827,6 +904,8 @@
     escapeHtml,
     icon,
     ready,
+    whenActivated,
+    enhance,
     copy: copyText,
     toast,
     confirm: confirmDialog,

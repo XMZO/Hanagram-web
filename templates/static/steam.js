@@ -1366,12 +1366,14 @@ function bindTimeCheck() {
 }
 
 function onSteamTab(id) {
-    if (id === "approvals") { syncSteamApprovals(); }
-    if (id === "confirmations") { syncSteamConfirmations(); }
-    if (id === "devices") {
-        const root = selectedDeviceRoot();
-        if (root && root.dataset.sessionDevicesLoaded !== "true") { loadSteamSessionDevices(root); }
-    }
+    UI.whenActivated(() => {
+        if (id === "approvals") { syncSteamApprovals(); }
+        if (id === "confirmations") { syncSteamConfirmations(); }
+        if (id === "devices") {
+            const root = selectedDeviceRoot();
+            if (root && root.dataset.sessionDevicesLoaded !== "true") { loadSteamSessionDevices(root); }
+        }
+    });
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -1416,11 +1418,14 @@ window.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll("[data-steam-account]").forEach(syncCodeBar);
     });
 
-    if (PREFETCH_CONFIRMATIONS) {
-        window.setTimeout(() => syncSteamConfirmations(false, false), 900);
-    }
-    if (PREFETCH_APPROVALS) {
-        window.setTimeout(() => syncSteamApprovals(false, false), 1800);
-    }
-    if (document.getElementById("zero-trust-banner")) { startZeroTrustPolling(); }
+    // Nothing that talks to Steam runs while this page is only being prerendered.
+    UI.whenActivated(() => {
+        if (PREFETCH_CONFIRMATIONS) {
+            window.setTimeout(() => syncSteamConfirmations(false, false), 900);
+        }
+        if (PREFETCH_APPROVALS) {
+            window.setTimeout(() => syncSteamApprovals(false, false), 1800);
+        }
+        if (document.getElementById("zero-trust-banner")) { startZeroTrustPolling(); }
+    });
 });

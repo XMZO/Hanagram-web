@@ -406,6 +406,49 @@ function currentPageSessionKeys() {
     return Array.from(document.querySelectorAll("[data-session-card]")).map((element) => element.dataset.sessionKey).sort();
 }
 
+function initSessionModal(modal) {
+    UI.panels(modal, { hash: false, defaultId: "overview" });
+    modal.addEventListener("sheet:close", () => refreshNewBadges());
+}
+
+// Sessions were added or removed: re-render only the list and its detail sheets
+// from a fresh copy of this page instead of reloading everything.
+async function swapSessionMarkup() {
+    const response = await fetch(`${window.location.pathname}${window.location.search}`, { headers: { "Accept": "text/html" }, cache: "no-store" });
+    if (!response.ok || new URL(response.url).pathname !== window.location.pathname) { return false; }
+    const next = new DOMParser().parseFromString(await response.text(), "text/html");
+    const nextPanel = next.querySelector("[data-panel='telegram']");
+    const currentPanel = document.querySelector("[data-panel='telegram']");
+    const nextToolbar = next.querySelector("#telegram-panels > .toolbar");
+    const currentToolbar = document.querySelector("#telegram-panels > .toolbar");
+    if (!nextPanel || !currentPanel) { return false; }
+
+    const search = currentToolbar ? currentToolbar.querySelector("[data-filter-input]") : null;
+    const query = search ? search.value : "";
+    currentPanel.replaceChildren(...Array.from(nextPanel.childNodes, (node) => document.importNode(node, true)));
+    if (nextToolbar && currentToolbar && !!nextToolbar.querySelector("[data-filter-input]") !== !!search) {
+        const freshToolbar = document.importNode(nextToolbar, true);
+        currentToolbar.replaceWith(freshToolbar);
+        UI.enhance(freshToolbar);
+        const freshSearch = freshToolbar.querySelector("[data-filter-input]");
+        if (freshSearch) { freshSearch.addEventListener("input", () => UI.refilter(document.getElementById("telegram-panels"))); }
+        const controller = document.getElementById("telegram-panels").__panels;
+        if (controller) { controller.activate(controller.current, { updateHash: false }); }
+    }
+
+    const anchor = document.getElementById("toasts");
+    document.querySelectorAll("[data-session-modal]").forEach((modal) => modal.remove());
+    next.querySelectorAll("[data-session-modal]").forEach((modal) => {
+        const fresh = document.importNode(modal, true);
+        anchor.parentNode.insertBefore(fresh, anchor);
+        UI.enhance(fresh);
+        initSessionModal(fresh);
+    });
+    if (search) { search.value = query; }
+    UI.refilter(document.getElementById("telegram-panels"));
+    return true;
+}
+
 async function syncWorkspace(forceFull) {
     if (workspaceSyncInFlight || document.hidden) { return; }
     workspaceSyncInFlight = true;
@@ -416,8 +459,11 @@ async function syncWorkspace(forceFull) {
         const currentKeys = currentPageSessionKeys();
         const nextKeys = snapshot.sessions.map((session) => session.id).sort();
         if (currentKeys.join("|") !== nextKeys.join("|")) {
-            if (!document.querySelector(".sheet[data-state='open']")) {
-                window.location.reload();
+            if (document.querySelector(".sheet[data-state='open']")) { return; }
+            if (await swapSessionMarkup()) {
+                updateWorkspaceMeta(snapshot);
+                refreshNewBadges();
+                refreshOtpVisibility();
             }
             return;
         }
@@ -445,10 +491,7 @@ window.addEventListener("DOMContentLoaded", () => {
         aliases: { sessions: "telegram" },
         defaultId: "telegram"
     });
-    document.querySelectorAll("[data-session-modal]").forEach((modal) => {
-        UI.panels(modal, { hash: false, defaultId: "overview" });
-        modal.addEventListener("sheet:close", () => refreshNewBadges());
-    });
+    document.querySelectorAll("[data-session-modal]").forEach(initSessionModal);
     refreshNewBadges();
     refreshOtpVisibility();
 

@@ -1900,6 +1900,60 @@ button.chip:active { transform: translateY(1px); }
 .session-card__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--text-3); }
 .session-card__error { padding: 8px 10px; border-radius: var(--r-md); background: var(--danger-soft); box-shadow: inset 2px 0 0 var(--danger); color: var(--danger-text); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 
+/* Compact session list: one ruled row per session, two columns on wide screens. */
+.session-list { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 1040px) { .session-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.session-card.session-row { container-type: inline-size; display: block; padding: 0; box-shadow: none; }
+.session-card.session-row:hover { box-shadow: var(--shadow-sm); }
+.session-row__inner { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px 6px 4px; }
+.session-row__open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 5px 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background-color var(--dur-1) var(--ease);
+}
+.session-row__open:hover { background: var(--surface-2); }
+.session-row__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.session-row .session-card__name { font-size: 14px; }
+.session-row .session-card__sub { margin-top: 0; flex-wrap: nowrap; gap: 6px; min-width: 0; overflow: hidden; }
+.session-row .session-card__sub > span { flex: none; white-space: nowrap; }
+.session-row .session-card__sub > .session-row__phone { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.session-row__note { display: none; color: var(--text-4); }
+.session-row .session-card__sub > .session-row__note { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.session-row__note::before { content: "·"; margin-right: 6px; }
+.session-row .session-card__error { padding: 0; background: none; box-shadow: none; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row__time { display: none; flex: none; font-size: 11.5px; color: var(--text-4); white-space: nowrap; }
+@container (min-width: 520px) { .session-row__note { display: block; } }
+@container (min-width: 720px) { .session-row__time { display: block; } }
+
+.code-chip {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 96px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  transition: border-color var(--dur-1), background-color var(--dur-1), transform var(--dur-1);
+}
+.code-chip__code { font-family: var(--font-mono); font-size: 17px; font-weight: 700; letter-spacing: 0.12em; margin-right: -0.12em; line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.code-chip__meta { font-family: var(--font-mono); font-size: 10.5px; line-height: 1.3; min-height: 1.3em; color: var(--text-4); white-space: nowrap; }
+.code-chip:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.code-chip:active:not(:disabled) { transform: translateY(1px); }
+.code-chip:disabled { cursor: default; border-style: dashed; background: transparent; }
+.code-chip.is-empty .code-chip__code { color: var(--text-4); letter-spacing: 0.06em; margin-right: 0; }
+.code-chip.is-copied { border-color: var(--success); background: var(--success-soft); }
+.code-chip.is-copied .code-chip__code { color: var(--success-text); }
+.code-chip.is-fresh .code-chip__code { animation: code-in var(--dur-4) var(--ease-out) both; }
+
 .phone-toggle {
   display: inline-flex;
   align-items: center;
@@ -1987,7 +2041,8 @@ button.phone-toggle:hover { background: var(--accent-soft); color: var(--accent-
 .attention-card__error { font-size: 12.5px; color: var(--danger-text); line-height: 1.5; }
 .attention-card__meta { font-size: 11.5px; color: var(--text-3); }
 @container (min-width: 640px) {
-  .attention-strip { margin: 0 0 20px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); overflow: visible; }
+  /* At most two rows; a long queue scrolls inside instead of pushing the sessions down. */
+  .attention-strip { margin: 0 0 20px; padding: 2px 4px 2px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-content: start; max-height: 252px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .attention-card { flex: none; }
 }
 

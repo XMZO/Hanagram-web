@@ -94,10 +94,10 @@
             <div class="empty__actions"><a class="btn btn--primary" href="{{ setup_href }}"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>{{ i18n.dashboard_add_session }}</a></div>
         </div>
         {% else %}
-        <div class="code-grid">
+        <div class="session-list" data-role="session-list">
             {% for session in sessions %}
             <article
-                class="session-card reveal"
+                class="session-card session-row reveal"
                 style="--i:{{ loop.index0 }}"
                 data-session-card
                 data-otp-scope
@@ -107,50 +107,39 @@
                 data-latest-code-expires-at="{{ session.latest_code_expires_at_unix | default(value="") }}"
                 data-filter-text="{{ session.key }} {{ session.phone }} {{ session.note }}"
             >
-                <div class="session-card__head">
-                    <span class="avatar avatar--tg">{{ session.key | truncate(length=1, end="") | upper }}</span>
-                    <div class="session-card__who">
-                        <p class="session-card__name">
-                            <span data-role="session-name">{{ session.key }}</span>
-                            <span data-new-indicator class="badge badge--new" hidden>{{ i18n.new_code_badge }}</span>
-                        </p>
-                        <p class="session-card__sub">
-                            <span data-role="status-dot" class="dot {% if session.status.kind == "connected" %}dot--success{% elif session.status.kind == "connecting" %}dot--warning dot--pulse{% else %}dot--danger{% endif %}"></span>
-                            <span data-role="status-badge">{% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}</span>
-                            <span class="subtle">·</span>
-                            <span class="mono" data-role="session-phone">{{ session.phone }}</span>
-                        </p>
-                    </div>
-                </div>
-
-                <button
-                    type="button"
-                    class="otp{% if not session.latest_code %} is-empty{% endif %}"
-                    data-role="copy-code-chip"
-                    data-code="{{ session.latest_code | default(value="") }}"
-                    data-label="{{ i18n.latest_otp }}"
-                    data-copied="{{ i18n.copied }}"
-                    title="{{ i18n.copy }}"
-                    aria-label="{{ i18n.copy }}"
-                    onclick="copyWorkspaceCode(this)"
-                    {% if not session.latest_code %}disabled{% endif %}
-                >
-                    <span class="otp__top">
-                        <span class="otp__label" data-role="copy-code-label">{{ i18n.latest_otp }}</span>
-                        <span class="otp__hint"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>{{ i18n.copy }}</span>
-                    </span>
-                    <span class="otp__row">
-                        <span class="otp__code" data-role="latest-code">{{ session.latest_code | default(value=i18n.otp_placeholder) }}</span>
-                        <span class="otp__time" data-role="otp-visibility-label"></span>
-                    </span>
-                </button>
-
-                <p class="session-card__note clamp-1" data-role="session-note">{% if session.note %}{{ session.note }}{% else %}{{ i18n.session_note_placeholder }}{% endif %}</p>
-                <p class="session-card__error" data-role="session-error" {% if not session.status.error %}hidden{% endif %}>{{ session.status.error | default(value="") }}</p>
-
-                <div class="session-card__foot">
-                    <span class="cluster cluster--xs truncate"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-clock"></use></svg><span class="mono truncate" data-role="latest-update">{{ session.latest_message_at | default(value="-") }}</span></span>
-                    <button type="button" class="btn btn--sm" onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')">{{ i18n.open_details }}<svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+                <div class="session-row__inner">
+                    <button type="button" class="session-row__open" onclick="openSessionModal('session-modal-{{ loop.index }}', '{{ session.id }}')" aria-label="{{ i18n.open_details }} · {{ session.key }}" title="{{ i18n.open_details }}">
+                        <span class="avatar avatar--tg avatar--sm">{{ session.key | truncate(length=1, end="") | upper }}</span>
+                        <span class="session-row__main">
+                            <span class="session-card__name">
+                                <span data-role="session-name">{{ session.key }}</span>
+                                <span data-new-indicator class="badge badge--new" hidden>{{ i18n.new_code_badge }}</span>
+                            </span>
+                            <span class="session-card__sub">
+                                <span data-role="status-dot" class="dot {% if session.status.kind == "connected" %}dot--success{% elif session.status.kind == "connecting" %}dot--warning dot--pulse{% else %}dot--danger{% endif %}"></span>
+                                <span data-role="status-badge">{% if session.status.kind == "connected" %}{{ i18n.status_connected }}{% elif session.status.kind == "connecting" %}{{ i18n.status_connecting }}{% else %}{{ i18n.status_error }}{% endif %}</span>
+                                <span class="mono session-row__phone" data-role="session-phone">{{ session.phone }}</span>
+                                <span class="session-row__note" data-role="session-note">{% if session.note %}{{ session.note }}{% else %}{{ i18n.session_note_placeholder }}{% endif %}</span>
+                            </span>
+                            <span class="session-card__error" data-role="session-error" {% if not session.status.error %}hidden{% endif %}>{{ session.status.error | default(value="") }}</span>
+                        </span>
+                    </button>
+                    <span class="session-row__time mono" data-role="latest-update" title="{{ i18n.latest_otp }}">{{ session.latest_message_at | default(value="-") }}</span>
+                    <button
+                        type="button"
+                        class="code-chip{% if not session.latest_code %} is-empty{% endif %}"
+                        data-role="copy-code-chip"
+                        data-code="{{ session.latest_code | default(value="") }}"
+                        data-label="{{ i18n.latest_otp }}"
+                        data-copied="{{ i18n.copied }}"
+                        title="{{ i18n.copy }}"
+                        aria-label="{{ i18n.copy }}"
+                        onclick="copyWorkspaceCode(this)"
+                        {% if not session.latest_code %}disabled{% endif %}
+                    >
+                        <span class="code-chip__code" data-role="latest-code">{{ session.latest_code | default(value=i18n.otp_placeholder) }}</span>
+                        <span class="code-chip__meta"><span class="sr-only" data-role="copy-code-label">{{ i18n.latest_otp }}</span><span data-role="otp-visibility-label"></span></span>
+                    </button>
                 </div>
             </article>
             {% endfor %}
