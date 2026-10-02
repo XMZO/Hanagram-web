@@ -477,6 +477,22 @@ struct SteamConfirmationActionResponse {
     message: Option<String>,
 }
 
+impl SteamConfirmationActionResponse {
+    fn into_result(self) -> Result<()> {
+        if self.needsauth.unwrap_or(false) {
+            bail!("Steam confirmation session is no longer authorized");
+        }
+        if !self.success {
+            bail!(
+                "{}",
+                self.message
+                    .unwrap_or_else(|| String::from("Steam confirmation action failed"))
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SteamHelpRevertResponse {
     #[serde(deserialize_with = "deserialize_bool_from_any")]
@@ -1780,18 +1796,7 @@ pub(crate) async fn respond_to_confirmation(
         .json()
         .await
         .context("failed decoding Steam confirmation action response")?;
-    if payload.needsauth.unwrap_or(false) {
-        bail!("Steam confirmation session is no longer authorized");
-    }
-    if !payload.success {
-        bail!(
-            "{}",
-            payload
-                .message
-                .unwrap_or_else(|| String::from("Steam confirmation action failed"))
-        );
-    }
-    Ok(())
+    payload.into_result()
 }
 
 pub(crate) async fn create_manual_account(
@@ -3732,36 +3737,82 @@ pub(crate) async fn ingest_third_party_guard(
 // Batch trade confirmation operations
 // ---------------------------------------------------------------------------
 
-/// Approve every pending trade confirmation for the given account. Returns count of successes.
+/// Approve all pending confirmations in one request. Returns the count on success.
 pub(crate) async fn batch_approve_trades(
     http_client: &reqwest::Client,
     account: &SteamGuardAccount,
 ) -> Result<usize> {
-    let pending = fetch_confirmations(http_client, account).await?;
-    let mut approved = 0usize;
-    for item in &pending {
-        match respond_to_confirmation(http_client, account, &item.id, &item.nonce, true).await {
-            Ok(()) => approved += 1,
-            Err(e) => warn!("could not approve trade {}: {e}", item.id),
-        }
-    }
-    Ok(approved)
+    batch_respond_to_confirmations(http_client, account, true).await
 }
 
-/// Reject every pending trade confirmation for the given account. Returns count of successes.
+/// Reject all pending confirmations in one request. Returns the count on success.
 pub(crate) async fn batch_reject_trades(
     http_client: &reqwest::Client,
     account: &SteamGuardAccount,
 ) -> Result<usize> {
-    let pending = fetch_confirmations(http_client, account).await?;
-    let mut rejected = 0usize;
-    for item in &pending {
-        match respond_to_confirmation(http_client, account, &item.id, &item.nonce, false).await {
-            Ok(()) => rejected += 1,
-            Err(e) => warn!("could not reject trade {}: {e}", item.id),
-        }
+    batch_respond_to_confirmations(http_client, account, false).await
+}
+
+fn build_bulk_confirmation_request(
+    http_client: &reqwest::Client,
+    account: &SteamGuardAccount,
+    pending: &[SteamConfirmation],
+    accept: bool,
+    unix_time: i64,
+) -> Result<reqwest::Request> {
+    let steam_id = account
+        .steam_id
+        .context("Steam account is missing SteamID")?;
+    let mut params = build_confirmation_query(account, "conf", unix_time)?;
+    params.push((
+        String::from("op"),
+        String::from(if accept { "allow" } else { "cancel" }),
+    ));
+    for item in pending {
+        params.push((String::from("cid[]"), item.id.trim().to_owned()));
+        params.push((String::from("ck[]"), item.nonce.trim().to_owned()));
     }
-    Ok(rejected)
+
+    http_client
+        .post("https://steamcommunity.com/mobileconf/multiajaxop")
+        .header(reqwest::header::USER_AGENT, STEAM_CONFIRMATION_USER_AGENT)
+        .header(
+            reqwest::header::COOKIE,
+            build_confirmation_cookie_header(account, steam_id)?,
+        )
+        .header(reqwest::header::ORIGIN, "https://steamcommunity.com")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded; charset=UTF-8",
+        )
+        .form(&params)
+        .build()
+        .context("failed building Steam bulk confirmation request")
+}
+
+async fn batch_respond_to_confirmations(
+    http_client: &reqwest::Client,
+    account: &SteamGuardAccount,
+    accept: bool,
+) -> Result<usize> {
+    let pending = fetch_confirmations(http_client, account).await?;
+    if pending.is_empty() {
+        return Ok(0);
+    }
+    let time = query_steam_server_time(http_client).await?;
+    let request = build_bulk_confirmation_request(http_client, account, &pending, accept, time)?;
+    let response = http_client
+        .execute(request)
+        .await
+        .context("failed sending Steam bulk confirmation action")?
+        .error_for_status()
+        .context("Steam bulk confirmation endpoint returned an error")?;
+    let payload: SteamConfirmationActionResponse = response
+        .json()
+        .await
+        .context("failed decoding Steam bulk confirmation response")?;
+    payload.into_result()?;
+    Ok(pending.len())
 }
 
 // ---------------------------------------------------------------------------
@@ -4056,6 +4107,51 @@ pub(crate) async fn list_managed_account_ids(root_dir: &Path) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn render_qr_luma(payload: &str) -> image::GrayImage {
+        let code = qrcodegen::QrCode::encode_text(payload, qrcodegen::QrCodeEcc::Medium)
+            .expect("payload should fit in a QR code");
+        let scale = 8_i32;
+        let border = 4_i32;
+        let side = ((code.size() + border * 2) * scale) as u32;
+        image::GrayImage::from_fn(side, side, |x, y| {
+            let module_x = x as i32 / scale - border;
+            let module_y = y as i32 / scale - border;
+            if code.get_module(module_x, module_y) {
+                image::Luma([0])
+            } else {
+                image::Luma([255])
+            }
+        })
+    }
+
+    #[test]
+    fn qr_screenshot_decoding_supports_common_formats() {
+        let url = "https://s.team/q/1/1234567890123456789";
+        let luma = render_qr_luma(url);
+        for format in [
+            image::ImageFormat::Png,
+            image::ImageFormat::Jpeg,
+            image::ImageFormat::Gif,
+            image::ImageFormat::Bmp,
+            image::ImageFormat::WebP,
+        ] {
+            let mut encoded = Cursor::new(Vec::new());
+            let pixels = image::DynamicImage::ImageLuma8(luma.clone()).to_rgba8();
+            let pixels = if format == image::ImageFormat::Jpeg || format == image::ImageFormat::Bmp
+            {
+                image::DynamicImage::ImageRgba8(pixels).to_rgb8().into()
+            } else {
+                image::DynamicImage::ImageRgba8(pixels)
+            };
+            pixels
+                .write_to(&mut encoded, format)
+                .unwrap_or_else(|error| panic!("encoding {format:?} failed: {error}"));
+            let decoded = extract_login_challenge_url_from_qr_image(encoded.get_ref())
+                .unwrap_or_else(|error| panic!("decoding {format:?} failed: {error}"));
+            assert_eq!(decoded, url, "{format:?}");
+        }
+    }
+
     #[test]
     fn generate_guard_code_matches_reference_sample() {
         let code = generate_guard_code("zvIayp3JPvtvX/QGHqsqKBk/44s=", 1_616_374_841)
@@ -4068,6 +4164,112 @@ mod tests {
         let key = generate_confirmation_key("GQP46b73Ws7gr8GmZFR0sDuau5c=", 1_617_591_917, "conf")
             .expect("confirmation key should generate");
         assert_eq!(key, "NaL8EIMhfy/7vBounJ0CvpKbrPk=");
+    }
+
+    #[test]
+    fn bulk_confirmation_request_includes_every_id_and_nonce() {
+        let account = parse_account_bytes(
+            br#"{
+                "account_name": "bulk-test",
+                "steamid": "76561197960265728",
+                "shared_secret": "zvIayp3JPvtvX/QGHqsqKBk/44s=",
+                "identity_secret": "GQP46b73Ws7gr8GmZFR0sDuau5c=",
+                "device_id": "android:bulk-test",
+                "Session": { "SteamLoginSecure": "76561197960265728||test-cookie" }
+            }"#,
+            Path::new("bulk-test.maFile"),
+        )
+        .expect("test account should parse");
+        let pending: Vec<_> = (1..=128)
+            .map(|index| SteamConfirmation {
+                id: index.to_string(),
+                nonce: (index + 1000).to_string(),
+                creator_id: index.to_string(),
+                confirmation_type: 2,
+                type_name: String::from("Trade"),
+                headline: String::new(),
+                summary: Vec::new(),
+                icon: None,
+                created_at_unix: 0,
+            })
+            .collect();
+        let client = reqwest::Client::new();
+
+        for accept in [true, false] {
+            let request =
+                build_bulk_confirmation_request(&client, &account, &pending, accept, 1_617_591_917)
+                    .expect("bulk request should build");
+            assert_eq!(request.method(), reqwest::Method::POST);
+            assert_eq!(
+                request.url().as_str(),
+                "https://steamcommunity.com/mobileconf/multiajaxop"
+            );
+            assert_eq!(
+                request.headers()[reqwest::header::CONTENT_TYPE],
+                "application/x-www-form-urlencoded; charset=UTF-8"
+            );
+            assert_eq!(
+                request.headers()[reqwest::header::COOKIE],
+                "dob=; steamid=76561197960265728; steamLoginSecure=76561197960265728||test-cookie"
+            );
+            let body = std::str::from_utf8(request.body().unwrap().as_bytes().unwrap())
+                .expect("form body should be UTF-8");
+            let form_url = reqwest::Url::parse(&format!("http://localhost/?{body}"))
+                .expect("form should decode");
+            let params: Vec<_> = form_url.query_pairs().into_owned().collect();
+            let values = |name: &str| -> Vec<&str> {
+                params
+                    .iter()
+                    .filter(|(key, _)| key == name)
+                    .map(|(_, value)| value.as_str())
+                    .collect()
+            };
+            assert_eq!(values("op"), [if accept { "allow" } else { "cancel" }]);
+            assert_eq!(values("tag"), ["conf"]);
+            assert_eq!(values("t"), ["1617591917"]);
+            assert_eq!(values("k"), ["NaL8EIMhfy/7vBounJ0CvpKbrPk="]);
+            assert_eq!(
+                values("cid[]"),
+                pending
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                values("ck[]"),
+                pending
+                    .iter()
+                    .map(|item| item.nonce.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn confirmation_action_response_propagates_failures() {
+        for (payload, expected_error) in [
+            (serde_json::json!({ "success": true }), None),
+            (
+                serde_json::json!({ "success": false, "message": "Rate limit exceeded" }),
+                Some("Rate limit exceeded"),
+            ),
+            (
+                serde_json::json!({ "success": false }),
+                Some("Steam confirmation action failed"),
+            ),
+            (
+                serde_json::json!({ "success": false, "needsauth": true }),
+                Some("Steam confirmation session is no longer authorized"),
+            ),
+        ] {
+            let response: SteamConfirmationActionResponse =
+                serde_json::from_value(payload).expect("action response should deserialize");
+            let result = response.into_result();
+            match expected_error {
+                Some(message) => assert_eq!(result.unwrap_err().to_string(), message),
+                None => assert!(result.is_ok()),
+            }
+        }
     }
 
     #[test]
