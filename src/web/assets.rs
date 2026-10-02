@@ -56,8 +56,9 @@ const STATIC_ASSETS: [StaticAsset; 7] = [
     },
 ];
 
-/// Content hash of every bundled asset. Templates reference assets with this
-/// value as a query string so browsers can cache them forever.
+/// Content hash of every bundled asset. Templates reference assets as
+/// `/static/<version>/<file>`: the version lives in the path (not the query
+/// string) so CDNs that ignore query strings still pick up new releases.
 static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
     let mut hasher = Sha256::new();
     for asset in &STATIC_ASSETS {
@@ -85,8 +86,13 @@ static GZIPPED_ASSETS: LazyLock<Vec<Option<Vec<u8>>>> = LazyLock::new(|| {
         .collect()
 });
 
+const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+const REVALIDATE: &str = "no-cache";
+
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/static/{file}", get(static_asset_handler))
+    Router::new()
+        .route("/static/{version}/{file}", get(versioned_asset_handler))
+        .route("/static/{file}", get(unversioned_asset_handler))
 }
 
 /// Embedded templates with the asset version filled in and indentation removed
@@ -113,7 +119,28 @@ fn compact_template(source: &str) -> String {
     compact
 }
 
-async fn static_asset_handler(AxumPath(file): AxumPath<String>, headers: HeaderMap) -> Response {
+/// Only the current version may be cached forever; a stale page asking for an
+/// older version still gets today's file, but caches must not keep it.
+async fn versioned_asset_handler(
+    AxumPath((version, file)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let cache_control = if version == *ASSET_VERSION {
+        IMMUTABLE
+    } else {
+        REVALIDATE
+    };
+    serve_asset(&file, &headers, cache_control)
+}
+
+async fn unversioned_asset_handler(
+    AxumPath(file): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    serve_asset(&file, &headers, REVALIDATE)
+}
+
+fn serve_asset(file: &str, headers: &HeaderMap, cache_control: &'static str) -> Response {
     let Some(index) = STATIC_ASSETS.iter().position(|asset| asset.name == file) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -124,7 +151,7 @@ async fn static_asset_handler(AxumPath(file): AxumPath<String>, headers: HeaderM
         .is_some_and(|value| value.split(',').any(|part| part.trim().starts_with("gzip")));
     let base_headers = [
         (header::CONTENT_TYPE, asset.content_type),
-        (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        (header::CACHE_CONTROL, cache_control),
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         (header::VARY, "Accept-Encoding"),
     ];
@@ -161,6 +188,45 @@ mod tests {
             .map(|(_, source)| source)
             .expect("base template should exist");
         assert!(!rendered.contains(ASSET_VERSION_PLACEHOLDER));
-        assert!(rendered.contains(&format!("/static/app.css?v={}", *ASSET_VERSION)));
+        assert!(rendered.contains(&format!("/static/{}/app.css", *ASSET_VERSION)));
+        assert!(!rendered.contains("?v="));
+    }
+
+    fn cache_control(response: &Response) -> &str {
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn only_the_current_asset_version_is_cached_forever() {
+        let current = versioned_asset_handler(
+            AxumPath((ASSET_VERSION.clone(), String::from("app.css"))),
+            HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(current.status(), StatusCode::OK);
+        assert_eq!(cache_control(&current), IMMUTABLE);
+
+        let stale = versioned_asset_handler(
+            AxumPath((String::from("000000000000"), String::from("app.css"))),
+            HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::OK);
+        assert_eq!(cache_control(&stale), REVALIDATE);
+
+        let legacy =
+            unversioned_asset_handler(AxumPath(String::from("app.css")), HeaderMap::new()).await;
+        assert_eq!(cache_control(&legacy), REVALIDATE);
+
+        let missing = versioned_asset_handler(
+            AxumPath((ASSET_VERSION.clone(), String::from("nope.js"))),
+            HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 }
