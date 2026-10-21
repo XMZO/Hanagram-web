@@ -121,6 +121,7 @@ sessions/
 
 - 本地构建镜像：`docker compose -f docker-compose.build.yml up -d --build`
 - 镜像基于 `scratch`，只含一个静态二进制；`/app/reset_admin` 是指向它的符号链接。模板在编译时嵌入。
+- 发布的镜像支持 `linux/amd64` 和 `linux/arm64`，CI 在对应架构的 GitHub 原生 runner 上分别编译。
 - 只有推送版本标签时才构建镜像。修改 `Cargo.toml` 的 `version` 并提交，然后 `git tag vX.Y.Z && git push origin vX.Y.Z`，会发布 `X.Y.Z`、`X.Y` 和 `latest`。预发布标签不会覆盖 `latest`。
 </details>
 

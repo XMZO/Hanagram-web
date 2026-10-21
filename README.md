@@ -121,6 +121,7 @@ sessions/
 
 - Local image: `docker compose -f docker-compose.build.yml up -d --build`
 - The image is `scratch` plus one static binary; `/app/reset_admin` is a symlink to it. Templates are compiled in.
+- Published images cover `linux/amd64` and `linux/arm64`. CI builds each one natively on a GitHub runner of that architecture.
 - Images are only built for version tags. Bump `version` in `Cargo.toml`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. This publishes `X.Y.Z`, `X.Y` and `latest`. Pre-release tags never move `latest`.
 </details>
 
