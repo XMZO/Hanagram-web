@@ -42,7 +42,7 @@ Compared with keeping an authenticator on one phone, or handing your secrets to 
 - Accept or deny trade confirmations, one by one or all at once
 - Approve or deny QR sign-in requests; review and sign out devices
 - Recovery codes, phone status, trade restore, clock-drift check, per-account HTTP/SOCKS5 proxy
-- **Zero Trust mode**: automatically rejects every confirmation, sign-in request and new device
+- **Zero Trust mode**: immediately rejects pending confirmations and sign-in requests and signs out other devices, then keeps rejecting new ones every few seconds while the Steam page stays open in a browser
 
 **Accounts & security**
 - Per-user encryption (zstd + AES-256-GCM); passwords hashed with Argon2id
