@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "hanagram-web"
-version = "0.2.4-rc.1"
+version = "0.2.4-rc.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
