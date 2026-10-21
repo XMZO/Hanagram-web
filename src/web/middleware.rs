@@ -318,6 +318,7 @@ pub(crate) async fn ensure_auth_session_master_key(
                 );
             }
         }
+        platforms::telegram::revive_stalled_user_sessions(app_state, user_id).await;
         return Some(master_key);
     }
 

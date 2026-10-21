@@ -315,7 +315,9 @@ async fn workspace_snapshot_handler(
     Json(build_workspace_snapshot(&app_state, &authenticated, language).await)
 }
 
-pub(crate) use telegram_workspace::{register_session_record, unlock_user_sessions};
+pub(crate) use telegram_workspace::{
+    register_session_record, revive_stalled_user_sessions, unlock_user_sessions,
+};
 
 #[cfg(test)]
 mod tests {

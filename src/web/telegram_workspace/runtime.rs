@@ -13,6 +13,14 @@ const WORKER_COMPACT_PEER_LIMIT: usize = 96;
 const WORKER_COMPACT_CHANNEL_LIMIT: usize = 64;
 const WORKER_RECYCLE_PEER_THRESHOLD: usize = 160;
 const WORKER_RECYCLE_CHANNEL_THRESHOLD: usize = 128;
+// Transient failures retry forever; the delay grows to a five-minute cap.
+const WORKER_RETRY_DELAYS_SECONDS: [u64; 7] = [5, 10, 20, 40, 80, 160, 300];
+// A run that stayed up this long counts as healthy, so the next failure starts the backoff over.
+const WORKER_HEALTHY_RUN_SECONDS: u64 = 60;
+
+fn worker_retry_delay_seconds(attempt: usize) -> u64 {
+    WORKER_RETRY_DELAYS_SECONDS[attempt.min(WORKER_RETRY_DELAYS_SECONDS.len() - 1)]
+}
 
 fn fallback_phone(session_file: &Path) -> String {
     match session_file.file_stem().and_then(|stem| stem.to_str()) {
@@ -218,6 +226,66 @@ pub(crate) async fn unlock_user_sessions(app_state: &AppState, user_id: &str) {
     }
 }
 
+/// Restarts this user's sessions that have no running worker even though their key is unlocked:
+/// ones that were registered before the key was available, or whose worker ended unexpectedly.
+/// Sessions Telegram rejected (unauthorized, unreadable) stay stopped.
+pub(crate) async fn revive_stalled_user_sessions(app_state: &AppState, user_id: &str) {
+    let candidates: Vec<String> = app_state
+        .shared_state
+        .read()
+        .await
+        .values()
+        .filter(|session| {
+            session.user_id == user_id
+                && matches!(
+                    session.status,
+                    SessionStatus::Error(
+                        SessionErrorKind::UnlockRequired | SessionErrorKind::UpdateFailed
+                    )
+                )
+        })
+        .map(|session| session.id.clone())
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+
+    let stalled: HashSet<String> = {
+        let workers = app_state.session_workers.lock().await;
+        candidates
+            .into_iter()
+            .filter(|id| {
+                workers
+                    .get(id)
+                    .is_none_or(|worker| worker.task.is_finished())
+            })
+            .collect()
+    };
+    if stalled.is_empty() {
+        return;
+    }
+
+    match app_state
+        .meta_store
+        .list_session_records_for_user(user_id)
+        .await
+    {
+        Ok(session_records) => {
+            for session_record in session_records {
+                if stalled.contains(&session_record.id) {
+                    register_session_record(app_state, session_record).await;
+                }
+            }
+        }
+        Err(error) => {
+            warn!(
+                "failed listing sessions to revive for {}: {}",
+                user_id, error
+            );
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum SessionFailureAction {
     Retryable(SessionErrorKind),
@@ -274,7 +342,6 @@ async fn run_session_worker(
     http_client: HttpClient,
     cancellation: CancellationToken,
 ) {
-    let retry_delays = [5_u64, 10, 20, 40, 80];
     let mut attempt = 0_usize;
 
     loop {
@@ -284,6 +351,7 @@ async fn run_session_worker(
 
         set_session_status(&shared_state, &key, SessionStatus::Connecting).await;
 
+        let run_started = std::time::Instant::now();
         let result = run_session_once(
             &key,
             Arc::clone(&session),
@@ -333,12 +401,12 @@ async fn run_session_worker(
                         set_session_status(&shared_state, &key, SessionStatus::Error(error_kind))
                             .await;
 
-                        if attempt >= retry_delays.len() {
-                            break;
+                        if run_started.elapsed() >= Duration::from_secs(WORKER_HEALTHY_RUN_SECONDS)
+                        {
+                            attempt = 0;
                         }
-
-                        let delay = retry_delays[attempt];
-                        attempt += 1;
+                        let delay = worker_retry_delay_seconds(attempt);
+                        attempt = attempt.saturating_add(1);
                         tokio::select! {
                             _ = cancellation.cancelled() => break,
                             _ = sleep(Duration::from_secs(delay)) => {}
@@ -569,6 +637,13 @@ mod tests {
             classify_session_failure(&error),
             SessionFailureAction::Terminal(SessionErrorKind::LoadFailed)
         );
+    }
+
+    #[test]
+    fn worker_retry_delay_grows_then_stays_at_cap() {
+        let delays: Vec<u64> = (0..10).map(worker_retry_delay_seconds).collect();
+        assert_eq!(delays, [5, 10, 20, 40, 80, 160, 300, 300, 300, 300]);
+        assert_eq!(worker_retry_delay_seconds(usize::MAX), 300);
     }
 
     #[test]
