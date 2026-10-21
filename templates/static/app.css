@@ -455,19 +455,16 @@ table { border-collapse: collapse; }
   border-radius: 5px;
   background: var(--seal);
   color: var(--seal-text);
-  font-family: var(--font-serif);
-  font-size: 19px;
-  font-weight: 400;
-  font-synthesis-weight: none;
-  line-height: 1;
   box-shadow: inset 0 0 0 2px var(--seal), inset 0 0 0 3px rgba(255, 246, 232, 0.6);
   transform: rotate(-4deg);
   transition: transform var(--dur-4) var(--spring);
   user-select: none;
 }
 a:hover > .seal, .seal:hover { transform: rotate(0deg) scale(1.04); }
-.seal--sm { width: 26px; height: 26px; font-size: 15px; border-radius: 4px; }
-.seal--lg { width: 40px; height: 40px; font-size: 24px; border-radius: 6px; }
+.seal--sm { width: 26px; height: 26px; border-radius: 4px; }
+.seal--lg { width: 40px; height: 40px; border-radius: 6px; }
+/* The OTP countdown mark, sized like the favicon glyph inside its seal. */
+.seal__mark { width: 69%; height: 69%; }
 
 .brand { display: inline-flex; align-items: center; gap: 11px; min-width: 0; }
 .brand__text { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
@@ -672,7 +669,7 @@ a:hover > .seal, .seal:hover { transform: rotate(0deg) scale(1.04); }
   .tabbar, .masthead__title, .masthead__page-actions { display: none; }
   .masthead .brand__text { display: flex; }
   .masthead__inner { gap: 8px; }
-  .seal { width: 34px; height: 34px; font-size: 20px; }
+  .seal { width: 34px; height: 34px; }
   .mast-nav { display: flex; align-self: stretch; margin-left: 28px; min-width: 0; }
   .user-btn { padding-right: 8px; }
   .user-btn__name, .user-btn__chev { display: block; }
