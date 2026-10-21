@@ -137,8 +137,42 @@ pub(crate) async fn run() -> Result<()> {
 
     info!("listening on http://{}", config.bind_addr);
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("axum server exited unexpectedly")
+        .context("axum server exited unexpectedly")?;
+    info!("server stopped");
+    Ok(())
+}
+
+// As PID 1 in a container, SIGTERM is ignored unless handled, so `docker stop` would wait for SIGKILL.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            warn!("failed listening for Ctrl+C: {}", error);
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                warn!("failed listening for SIGTERM: {}", error);
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    info!("shutdown signal received, finishing in-flight requests");
 }
 
 async fn run_healthcheck_command() -> Result<()> {
