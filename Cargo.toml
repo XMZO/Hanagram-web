@@ -11,8 +11,32 @@ rust-version = "1.85"
 codegen-units = 1
 incremental = false
 lto = "fat"
+# Optimize for size overall (about 19% smaller binary); the CPU-heavy crates below stay at full speed.
+opt-level = "s"
 panic = "abort"
 strip = "symbols"
+
+# Password hashing, encryption, compression, TLS, MTProto crypto, SQLite and QR screenshot decoding.
+[profile.release.package]
+argon2 = { opt-level = 3 }
+blake2 = { opt-level = 3 }
+aes = { opt-level = 3 }
+aes-gcm = { opt-level = 3 }
+ghash = { opt-level = 3 }
+polyval = { opt-level = 3 }
+sha1 = { opt-level = 3 }
+sha2 = { opt-level = 3 }
+hmac = { opt-level = 3 }
+zstd-sys = { opt-level = 3 }
+ring = { opt-level = 3 }
+grammers-crypto = { opt-level = 3 }
+libsql-ffi = { opt-level = 3 }
+rqrr = { opt-level = 3 }
+png = { opt-level = 3 }
+zune-jpeg = { opt-level = 3 }
+image-webp = { opt-level = 3 }
+fdeflate = { opt-level = 3 }
+miniz_oxide = { opt-level = 3 }
 
 [dependencies]
 aes-gcm = "0.10"
