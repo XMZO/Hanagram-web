@@ -3,7 +3,7 @@
 
 [package]
 name = "hanagram-web"
-version = "0.2.4-rc.2"
+version = "0.2.4"
 edition = "2024"
 rust-version = "1.85"
 
