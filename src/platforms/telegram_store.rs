@@ -881,8 +881,10 @@ fn build_telethon_session_data(
         }
     };
 
-    let mut data = SessionData::default();
-    data.home_dc = record.dc_id;
+    let mut data = SessionData {
+        home_dc: record.dc_id,
+        ..SessionData::default()
+    };
 
     let existing = data.dc_options.remove(&record.dc_id);
     let had_existing = existing.is_some();
@@ -1101,8 +1103,10 @@ mod tests {
     use libsql::Builder;
 
     fn sample_session() -> LoadedSession {
-        let mut data = SessionData::default();
-        data.home_dc = 2;
+        let mut data = SessionData {
+            home_dc: 2,
+            ..SessionData::default()
+        };
         data.peer_infos.insert(
             PeerId::user(12345),
             PeerInfo::User {
@@ -1157,8 +1161,10 @@ mod tests {
 
     #[test]
     fn prune_runtime_state_keeps_self_and_service_peers() {
-        let mut data = SessionData::default();
-        data.home_dc = 2;
+        let mut data = SessionData {
+            home_dc: 2,
+            ..SessionData::default()
+        };
         data.peer_infos.insert(
             PeerId::user(1000),
             PeerInfo::User {

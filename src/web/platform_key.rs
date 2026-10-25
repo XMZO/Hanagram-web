@@ -55,11 +55,11 @@ pub(crate) fn decrypt_master_key_for_passkey_login(
 }
 
 fn encode_passkey_login_key(key: &[u8]) -> Result<String> {
-    Ok(serde_json::to_string(&StoredPasskeyLoginKey {
+    serde_json::to_string(&StoredPasskeyLoginKey {
         version: PASSKEY_LOGIN_KEY_VERSION,
         key_b64: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key),
     })
-    .context("failed to encode passkey login key")?)
+    .context("failed to encode passkey login key")
 }
 
 fn decode_passkey_login_key(raw: &str) -> Result<MasterKey> {

@@ -102,9 +102,7 @@ fn session_download_filename_fallback(session_key: &str) -> String {
     let mut pending_dash = false;
 
     for ch in session_key.chars() {
-        let mapped = if ch.is_ascii_alphanumeric() {
-            Some(ch)
-        } else if matches!(ch, '.' | '-' | '_') {
+        let mapped = if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
             Some(ch)
         } else if ch.is_whitespace() {
             Some('-')

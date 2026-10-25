@@ -145,7 +145,7 @@ async fn ensure_user_passkey_login_material(
 ) {
     let current_payload = user.security.passkey_encrypted_master_key_json.as_deref();
     let passkey_login_key = app_state.passkey_login_key.as_ref().as_slice();
-    let needs_refresh = current_payload.map_or(true, |payload| {
+    let needs_refresh = current_payload.is_none_or(|payload| {
         platform_key::decrypt_master_key_for_passkey_login(passkey_login_key, payload).is_err()
     });
     if !needs_refresh {
@@ -166,7 +166,7 @@ async fn ensure_user_passkey_login_material(
         .security
         .passkey_encrypted_master_key_json
         .as_deref()
-        .map_or(true, |payload| {
+        .is_none_or(|payload| {
             platform_key::decrypt_master_key_for_passkey_login(passkey_login_key, payload).is_err()
         });
     if !needs_refresh {

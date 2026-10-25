@@ -621,7 +621,7 @@ async fn build_workspace_snapshot(
             has_proxy: account
                 .proxy_url
                 .as_deref()
-                .map_or(false, |v| !v.trim().is_empty()),
+                .is_some_and(|v| !v.trim().is_empty()),
             proxy_url: account.proxy_url.clone(),
             session_devices_api,
             session_device_revoke_api,
@@ -5013,7 +5013,7 @@ async fn import_winauth_handler(
             redirect_with_workspace_banner(
                 &app_state,
                 &headers,
-                PageBanner::error(&format!(
+                PageBanner::error(format!(
                     "{}: {error}",
                     translations.steam_import_winauth_failed_message
                 )),
@@ -6013,15 +6013,14 @@ fn is_zero_trust_allowed(
     }
 
     // GET-only readonly endpoints — always allowed
-    if *method == axum::http::Method::GET {
-        if path == STEAM_WORKSPACE_PATH
+    if *method == axum::http::Method::GET
+        && (path == STEAM_WORKSPACE_PATH
             || path == STEAM_SNAPSHOT_API_PATH
             || path == STEAM_APPROVALS_API_PATH
             || path == STEAM_CONFIRMATIONS_API_PATH
-            || path == STEAM_TIME_CHECK_API_PATH
-        {
-            return true;
-        }
+            || path == STEAM_TIME_CHECK_API_PATH)
+    {
+        return true;
     }
 
     // Extract account_id from path (if present)
@@ -6535,78 +6534,78 @@ async fn zero_trust_deactivate_handler(
     };
 
     // If user has TOTP enabled, verify the TOTP code
-    if authenticated.user.security.totp_enabled {
-        if authenticated.user.security.totp_secret_json.is_some() {
-            let totp_secret = match web_auth::decrypt_user_totp_secret(
-                &authenticated.user,
-                master_key.as_ref().as_slice(),
-            ) {
-                Ok(secret) => secret,
-                Err(error) => {
-                    warn!(
-                        "failed decrypting zero trust deactivation TOTP secret for user {}: {}",
-                        authenticated.user.username, error
-                    );
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({
-                            "ok": false,
-                            "message": translations.session_data_locked_message
-                        })),
-                    )
-                        .into_response();
-                }
-            };
-            let totp_code = form.totp_code.as_deref().unwrap_or("").trim();
-            if totp_code.is_empty() {
+    if authenticated.user.security.totp_enabled
+        && authenticated.user.security.totp_secret_json.is_some()
+    {
+        let totp_secret = match web_auth::decrypt_user_totp_secret(
+            &authenticated.user,
+            master_key.as_ref().as_slice(),
+        ) {
+            Ok(secret) => secret,
+            Err(error) => {
+                warn!(
+                    "failed decrypting zero trust deactivation TOTP secret for user {}: {}",
+                    authenticated.user.username, error
+                );
                 return (
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::FORBIDDEN,
                     Json(serde_json::json!({
                         "ok": false,
-                        "message": translations.steam_zero_trust_totp_required_message
+                        "message": translations.session_data_locked_message
                     })),
                 )
                     .into_response();
             }
-            let now = Utc::now().timestamp();
-            let used_steps = app_state
-                .meta_store
-                .list_recent_totp_steps(&authenticated.user.id, now.div_euclid(30) - 5)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<std::collections::HashSet<_>>();
-            match verify_totp(totp_secret.as_str(), totp_code, now, 1, &used_steps) {
-                Ok(TotpVerification::Valid { matched_step }) => {
-                    let _ = app_state
-                        .meta_store
-                        .mark_totp_step_used(&authenticated.user.id, matched_step)
-                        .await;
-                    let _ = app_state
-                        .meta_store
-                        .prune_used_totp_steps(now.div_euclid(30) - 8)
-                        .await;
-                }
-                Ok(TotpVerification::Replay) => {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({
-                            "ok": false,
-                            "message": translations.steam_zero_trust_totp_replay_message
-                        })),
-                    )
-                        .into_response();
-                }
-                _ => {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({
-                            "ok": false,
-                            "message": translations.steam_zero_trust_totp_invalid_message
-                        })),
-                    )
-                        .into_response();
-                }
+        };
+        let totp_code = form.totp_code.as_deref().unwrap_or("").trim();
+        if totp_code.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "message": translations.steam_zero_trust_totp_required_message
+                })),
+            )
+                .into_response();
+        }
+        let now = Utc::now().timestamp();
+        let used_steps = app_state
+            .meta_store
+            .list_recent_totp_steps(&authenticated.user.id, now.div_euclid(30) - 5)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        match verify_totp(totp_secret.as_str(), totp_code, now, 1, &used_steps) {
+            Ok(TotpVerification::Valid { matched_step }) => {
+                let _ = app_state
+                    .meta_store
+                    .mark_totp_step_used(&authenticated.user.id, matched_step)
+                    .await;
+                let _ = app_state
+                    .meta_store
+                    .prune_used_totp_steps(now.div_euclid(30) - 8)
+                    .await;
+            }
+            Ok(TotpVerification::Replay) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_zero_trust_totp_replay_message
+                    })),
+                )
+                    .into_response();
+            }
+            _ => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "message": translations.steam_zero_trust_totp_invalid_message
+                    })),
+                )
+                    .into_response();
             }
         }
     }

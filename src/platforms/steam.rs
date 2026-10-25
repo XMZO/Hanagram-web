@@ -3472,7 +3472,7 @@ pub(crate) async fn create_emergency_codes(
             bail!("Steam refused emergency code creation: {error_detail}");
         }
         let data = response.into_response_data();
-        let codes: Vec<String> = data.codes.iter().map(|c| c.clone()).collect();
+        let codes: Vec<String> = data.codes.to_vec();
         Ok(codes)
     })
     .await

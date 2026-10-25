@@ -1007,14 +1007,12 @@ async fn login_page_handler(
                 .await;
             }
         }
-        let target = if app_state
+        let has_recovery_notice = app_state
             .recovery_notices
             .read()
             .await
-            .contains_key(&authenticated.auth_session.id)
-        {
-            security_settings_target()
-        } else if authenticated.requires_password_reset {
+            .contains_key(&authenticated.auth_session.id);
+        let target = if has_recovery_notice || authenticated.requires_password_reset {
             security_settings_target()
         } else if authenticated.requires_totp_setup || authenticated.recovery_codes_remaining == 0 {
             String::from("/settings/security/totp/setup")

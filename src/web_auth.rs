@@ -1563,8 +1563,10 @@ mod tests {
 
     #[test]
     fn effective_idle_timeout_clamps_to_system_cap() {
-        let mut settings = SystemSettings::default();
-        settings.max_idle_timeout_minutes = Some(60);
+        let settings = SystemSettings {
+            max_idle_timeout_minutes: Some(60),
+            ..SystemSettings::default()
+        };
         let mut user = UserRecord::new("idle-user", UserRole::User);
         user.security.preferred_idle_timeout_minutes = Some(480);
 

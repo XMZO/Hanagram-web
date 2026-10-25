@@ -37,18 +37,13 @@ pub type SharedSensitiveBytes = Arc<SensitiveBytes>;
 pub type SensitiveString = Zeroizing<String>;
 pub type SharedSensitiveString = Arc<SensitiveString>;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RegistrationPolicy {
     AlwaysPublic,
+    #[default]
     AdminOnly,
     AdminSelectable,
-}
-
-impl Default for RegistrationPolicy {
-    fn default() -> Self {
-        Self::AdminOnly
-    }
 }
 
 impl RegistrationPolicy {
@@ -61,18 +56,13 @@ impl RegistrationPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EnforcementMode {
     AdminExempt,
     Disabled,
+    #[default]
     AllUsers,
-}
-
-impl Default for EnforcementMode {
-    fn default() -> Self {
-        Self::AllUsers
-    }
 }
 
 impl EnforcementMode {
