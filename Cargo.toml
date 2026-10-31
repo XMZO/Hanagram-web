@@ -61,7 +61,7 @@ qrcodegen = "1.8"
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rqrr = "0.7.1"
+rqrr = "0.10.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
