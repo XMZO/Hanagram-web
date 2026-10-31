@@ -13,6 +13,18 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # grammers-session links libsql 0.9; a second libsql copy duplicates SQLite symbols at link time.
+      - dependency-name: libsql
+        versions: [">= 0.10"]
+      - dependency-name: libsql-sys
+        versions: [">= 0.10"]
+      # The digest 0.11 crypto stack must move together with sha1, sha2 and the vendored steamguard.
+      - dependency-name: hmac
+        versions: [">= 0.13"]
+      # Tera 2 is a rewrite with template syntax changes; migrating the templates is its own project.
+      - dependency-name: tera
+        versions: [">= 2"]
 
   - package-ecosystem: github-actions
     directory: /
