@@ -50,7 +50,7 @@ dotenvy = "0.15"
 flate2 = "1"
 grammers-client = { git = "https://github.com/Lonami/grammers" }
 grammers-session = { git = "https://github.com/Lonami/grammers", features = ["serde"] }
-hmac = "0.12"
+hmac = "0.13"
 # Only used to decode uploaded QR screenshots; skip encoders and exotic formats.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 libsql = { version = "0.9.29", default-features = false, features = ["core"] }
