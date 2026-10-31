@@ -73,7 +73,7 @@ docker compose up -d
 
 未配置 Telegram API 时，手机号 / 扫码登录和实时验证码监听不可用；Steam 功能不需要它。
 
-从源码运行：`cargo run --release`（需要 Rust 1.85+）。
+从源码运行：`cargo run --release`（需要 Rust 1.85.1+）。
 
 ## 配置
 

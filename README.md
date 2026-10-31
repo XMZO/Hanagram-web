@@ -73,7 +73,7 @@ Open `http://<host>:8080/`, then:
 
 Without the Telegram API credentials, phone/QR login and live code watching are off. Steam does not need them.
 
-To run from source instead: `cargo run --release` (Rust 1.85+).
+To run from source instead: `cargo run --release` (Rust 1.85.1+).
 
 ## Configuration
 

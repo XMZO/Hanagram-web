@@ -16,7 +16,7 @@ Please do not open a public issue. Report it privately through GitHub's **Report
 
 ## Development setup
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.85.1 or newer.
 
 ```bash
 git clone https://github.com/XMZO/Hanagram-web.git && cd Hanagram-web
