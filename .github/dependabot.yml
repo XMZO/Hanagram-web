@@ -26,6 +26,16 @@ updates:
         versions: [">= 0.11"]
       - dependency-name: sha2
         versions: [">= 0.11"]
+      - dependency-name: aes-gcm
+        versions: [">= 0.11"]
+      - dependency-name: argon2
+        versions: [">= 0.6"]
+      # reqwest 0.13 defaults to aws-lc-rs and OS certificate stores; the scratch image needs bundled roots.
+      - dependency-name: reqwest
+        versions: [">= 0.13"]
+      # webauthn_rp 0.3 reworks the ceremony API; passkey sign-in needs a dedicated migration.
+      - dependency-name: webauthn_rp
+        versions: [">= 0.3"]
       # Argon2 salts need a rand_core 0.6 RNG, and the vendored steamguard pins rand 0.8.
       - dependency-name: rand
         versions: [">= 0.9"]
