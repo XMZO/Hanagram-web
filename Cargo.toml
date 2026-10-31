@@ -43,7 +43,7 @@ aes-gcm = "0.10"
 anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
 axum = { version = "0.8", features = ["multipart"] }
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 data-encoding = "2"
 dotenvy = "0.15"
@@ -71,13 +71,13 @@ steamguard = { path = "vendor/steamguard" }
 tera = { version = "1.20", default-features = false }
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
-tower-http = { version = "0.6", default-features = false, features = ["trace"] }
+tower-http = { version = "0.7", default-features = false, features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 webauthn_rp = { version = "0.2.7", features = ["custom"] }
 zeroize = "1"
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
