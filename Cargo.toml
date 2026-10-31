@@ -53,7 +53,7 @@ grammers-session = { git = "https://github.com/Lonami/grammers", features = ["se
 hmac = "0.12"
 # Only used to decode uploaded QR screenshots; skip encoders and exotic formats.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
-libsql = { version = "0.9.29", default-features = false, features = ["core"] }
+libsql = { version = "0.10.0", default-features = false, features = ["core"] }
 libsql-sys = { version = "0.9.29", features = ["rusqlite"] }
 phonenumber = "0.3"
 percent-encoding = "2"

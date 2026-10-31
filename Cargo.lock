@@ -1188,7 +1188,7 @@ source = "git+https://github.com/Lonami/grammers#fa7692e49f301f16dc671c2f305ac1a
 dependencies = [
  "futures-core",
  "grammers-tl-types",
- "libsql",
+ "libsql 0.9.30",
  "log",
  "serde",
  "serde_with",
@@ -1249,8 +1249,8 @@ dependencies = [
  "hmac",
  "image",
  "libc",
- "libsql",
- "libsql-sys",
+ "libsql 0.10.0",
+ "libsql-sys 0.9.30",
  "percent-encoding",
  "phonenumber",
  "qrcodegen",
@@ -1763,7 +1763,23 @@ dependencies = [
  "bitflags",
  "bytes",
  "futures",
- "libsql-sys",
+ "libsql-sys 0.9.30",
+ "parking_lot",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "libsql"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bca1704194048f0f0bbc8a8e05ba85c0c67628b03bd59346dd2fdd946a1588"
+dependencies = [
+ "async-trait",
+ "bitflags",
+ "bytes",
+ "futures",
+ "libsql-sys 0.10.0",
  "parking_lot",
  "thiserror 1.0.69",
  "tracing",
@@ -1782,6 +1798,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsql-ffi"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f232292810b6298d17466b59bf8077d075fb016d89c281ca9dc968ea4a3b9d03"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cmake",
+ "glob",
+]
+
+[[package]]
 name = "libsql-rusqlite"
 version = "0.9.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1791,7 +1819,7 @@ dependencies = [
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
- "libsql-ffi",
+ "libsql-ffi 0.9.30",
  "smallvec",
 ]
 
@@ -1802,8 +1830,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90725458cc4461bc82f8f7983e80b002ea4f64b5184e1462f252d0dd74b122f5"
 dependencies = [
  "bytes",
- "libsql-ffi",
+ "libsql-ffi 0.9.30",
  "libsql-rusqlite",
+ "once_cell",
+ "tracing",
+ "zerocopy 0.7.35",
+]
+
+[[package]]
+name = "libsql-sys"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf4a7f2d76f49442c273a892a574a272b8b35f4bf0b1b25a475f2cc95885fe0f"
+dependencies = [
+ "bytes",
+ "libsql-ffi 0.10.0",
  "once_cell",
  "tracing",
  "zerocopy 0.7.35",
