@@ -58,7 +58,7 @@ libsql-sys = { version = "0.9.29", features = ["rusqlite"] }
 phonenumber = "0.3"
 percent-encoding = "2"
 qrcodegen = "1.8"
-rand = "0.8"
+rand = "0.10"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rqrr = "0.10.1"
