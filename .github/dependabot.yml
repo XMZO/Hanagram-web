@@ -22,6 +22,13 @@ updates:
       # The digest 0.11 crypto stack must move together with sha1, sha2 and the vendored steamguard.
       - dependency-name: hmac
         versions: [">= 0.13"]
+      - dependency-name: sha1
+        versions: [">= 0.11"]
+      - dependency-name: sha2
+        versions: [">= 0.11"]
+      # Argon2 salts need a rand_core 0.6 RNG, and the vendored steamguard pins rand 0.8.
+      - dependency-name: rand
+        versions: [">= 0.9"]
       # Tera 2 is a rewrite with template syntax changes; migrating the templates is its own project.
       - dependency-name: tera
         versions: [">= 2"]
