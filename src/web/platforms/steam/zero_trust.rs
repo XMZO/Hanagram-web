@@ -87,10 +87,10 @@ pub(super) fn is_zero_trust_allowed(
     let account_id = extract_account_id_from_path(path);
 
     // Account-specific paths: if the specific account is NOT locked, allow
-    if let Some(ref id) = account_id {
-        if !locked_ids.contains(id.as_str()) {
-            return true;
-        }
+    if let Some(ref id) = account_id
+        && !locked_ids.contains(id.as_str())
+    {
+        return true;
     }
 
     // Protective operations — these are allowed even for locked accounts
@@ -264,14 +264,14 @@ pub(super) async fn ensure_zero_trust_loaded(
     };
     if !already_loaded {
         let path = zero_trust_file_path(&app_state.runtime, user_id);
-        if let Ok(Some(state)) = load_zero_trust_state(&path, master_key).await {
-            if !state.locked_accounts.is_empty() {
-                app_state
-                    .zero_trust
-                    .write()
-                    .await
-                    .insert(user_id.to_owned(), state);
-            }
+        if let Ok(Some(state)) = load_zero_trust_state(&path, master_key).await
+            && !state.locked_accounts.is_empty()
+        {
+            app_state
+                .zero_trust
+                .write()
+                .await
+                .insert(user_id.to_owned(), state);
         }
     }
 }
@@ -467,11 +467,11 @@ pub(super) async fn zero_trust_activate_handler(
             // Update the entry with captured security info
             {
                 let mut zt = bg_app_state.zero_trust.write().await;
-                if let Some(user_state) = zt.get_mut(&bg_user_id) {
-                    if let Some(entry) = user_state.locked_accounts.get_mut(account_id) {
-                        entry.initial_guard_state = initial_guard_state;
-                        entry.initial_device_id = initial_device_id.clone();
-                    }
+                if let Some(user_state) = zt.get_mut(&bg_user_id)
+                    && let Some(entry) = user_state.locked_accounts.get_mut(account_id)
+                {
+                    entry.initial_guard_state = initial_guard_state;
+                    entry.initial_device_id = initial_device_id.clone();
                 }
             }
 

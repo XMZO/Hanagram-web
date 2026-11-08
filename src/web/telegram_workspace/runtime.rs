@@ -107,10 +107,10 @@ async fn hydrate_cached_messages(
     match runtime_cache.load_hot_messages(master_key, key).await {
         Ok(messages) if !messages.is_empty() => {
             let mut state = shared_state.write().await;
-            if let Some(info) = state.get_mut(key) {
-                if info.messages.is_empty() {
-                    info.messages = messages;
-                }
+            if let Some(info) = state.get_mut(key)
+                && info.messages.is_empty()
+            {
+                info.messages = messages;
             }
         }
         Ok(_) => {}

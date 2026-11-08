@@ -207,14 +207,13 @@ pub(super) fn ordered_selected_session_tokens(
             .collect::<Vec<_>>(),
     };
 
-    if let Some(current_token_id) = inventory.current_token_id {
-        if let Some(index) = token_ids
+    if let Some(current_token_id) = inventory.current_token_id
+        && let Some(index) = token_ids
             .iter()
             .position(|token_id| *token_id == current_token_id)
-        {
-            let current = token_ids.remove(index);
-            token_ids.push(current);
-        }
+    {
+        let current = token_ids.remove(index);
+        token_ids.push(current);
     }
 
     Ok(token_ids)

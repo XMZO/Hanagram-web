@@ -156,15 +156,13 @@ fn serve_asset(file: &str, headers: &HeaderMap, cache_control: &'static str) -> 
         (header::VARY, "Accept-Encoding"),
     ];
 
-    if accepts_gzip {
-        if let Some(Some(gzipped)) = GZIPPED_ASSETS.get(index) {
-            return (
-                base_headers,
-                [(header::CONTENT_ENCODING, "gzip")],
-                gzipped.as_slice(),
-            )
-                .into_response();
-        }
+    if accepts_gzip && let Some(Some(gzipped)) = GZIPPED_ASSETS.get(index) {
+        return (
+            base_headers,
+            [(header::CONTENT_ENCODING, "gzip")],
+            gzipped.as_slice(),
+        )
+            .into_response();
     }
     (base_headers, asset.body).into_response()
 }

@@ -138,12 +138,11 @@ fn telegram_retry_after_seconds_for_invocation_error(error: &InvocationError) ->
 
 fn telegram_retry_after_seconds_for_anyhow(error: &anyhow::Error) -> Option<u32> {
     for cause in error.chain() {
-        if let Some(invocation_error) = cause.downcast_ref::<InvocationError>() {
-            if let Some(wait_seconds) =
+        if let Some(invocation_error) = cause.downcast_ref::<InvocationError>()
+            && let Some(wait_seconds) =
                 telegram_retry_after_seconds_for_invocation_error(invocation_error)
-            {
-                return Some(wait_seconds);
-            }
+        {
+            return Some(wait_seconds);
         }
     }
 
@@ -660,10 +659,10 @@ async fn import_session_file_handler(
 
                 match field_name.as_str() {
                     "lang" => {
-                        if let Ok(raw) = field.text().await {
-                            if let Some(parsed) = Language::parse(&raw) {
-                                language = parsed;
-                            }
+                        if let Ok(raw) = field.text().await
+                            && let Some(parsed) = Language::parse(&raw)
+                        {
+                            language = parsed;
                         }
                     }
                     "session_name" => {

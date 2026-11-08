@@ -1753,12 +1753,11 @@ async fn admin_revoke_user_sessions_handler(
             .meta_store
             .get_auth_session_by_id(session_id)
             .await
+            && session.user_id == user_id
         {
-            if session.user_id == user_id {
-                let _ = app_state.meta_store.revoke_auth_session(session_id).await;
-                clear_auth_session_sensitive_state(&app_state, session_id).await;
-                drop_user_master_key_if_no_active_sessions(&app_state, &user_id).await;
-            }
+            let _ = app_state.meta_store.revoke_auth_session(session_id).await;
+            clear_auth_session_sensitive_state(&app_state, session_id).await;
+            drop_user_master_key_if_no_active_sessions(&app_state, &user_id).await;
         }
     } else {
         revoke_all_user_auth_access(&app_state, &user_id).await;

@@ -58,15 +58,15 @@ pub(crate) async fn execute_zero_trust_sweep(
     .await
     {
         Ok(Ok(info)) => {
-            if let Some(initial) = initial_guard_state {
-                if info.guard_state != initial {
-                    guard_state_changed = true;
-                }
+            if let Some(initial) = initial_guard_state
+                && info.guard_state != initial
+            {
+                guard_state_changed = true;
             }
-            if let Some(initial_dev) = initial_device_id {
-                if info.bound_device != initial_dev {
-                    device_id_changed = true;
-                }
+            if let Some(initial_dev) = initial_device_id
+                && info.bound_device != initial_dev
+            {
+                device_id_changed = true;
             }
         }
         Ok(Err(e)) => {

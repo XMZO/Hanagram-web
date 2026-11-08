@@ -1080,16 +1080,16 @@ fn parse_dc_addresses(server_address: &str, port: u16) -> Option<(SocketAddrV4, 
 }
 
 fn choose_export_address(ipv4: &str, ipv6: &str) -> Result<(String, u16)> {
-    if let Ok(socket) = ipv4.parse::<SocketAddrV4>() {
-        if !socket.ip().is_unspecified() {
-            return Ok((socket.ip().to_string(), socket.port()));
-        }
+    if let Ok(socket) = ipv4.parse::<SocketAddrV4>()
+        && !socket.ip().is_unspecified()
+    {
+        return Ok((socket.ip().to_string(), socket.port()));
     }
 
-    if let Ok(socket) = ipv6.parse::<SocketAddrV6>() {
-        if !socket.ip().is_unspecified() {
-            return Ok((socket.ip().to_string(), socket.port()));
-        }
+    if let Ok(socket) = ipv6.parse::<SocketAddrV6>()
+        && !socket.ip().is_unspecified()
+    {
+        return Ok((socket.ip().to_string(), socket.port()));
     }
 
     Err(anyhow!(

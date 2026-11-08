@@ -20,10 +20,10 @@ pub(super) async fn import_mafile_handler(
                 let field_name = field.name().unwrap_or_default().to_owned();
                 match field_name.as_str() {
                     "lang" => {
-                        if let Ok(raw) = field.text().await {
-                            if let Some(parsed) = Language::parse(&raw) {
-                                language = parsed;
-                            }
+                        if let Ok(raw) = field.text().await
+                            && let Some(parsed) = Language::parse(&raw)
+                        {
+                            language = parsed;
                         }
                     }
                     "account_name" => {

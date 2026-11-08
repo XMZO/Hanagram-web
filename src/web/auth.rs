@@ -987,8 +987,8 @@ async fn login_page_handler(
     if let Ok(Some(authenticated)) =
         resolve_authenticated_session(&app_state.meta_store, &settings, &headers).await
     {
-        if let Some(session_token) = find_cookie(&headers, AUTH_COOKIE_NAME) {
-            if ensure_auth_session_master_key(
+        if let Some(session_token) = find_cookie(&headers, AUTH_COOKIE_NAME)
+            && ensure_auth_session_master_key(
                 &app_state,
                 &authenticated.user.id,
                 &authenticated.auth_session.id,
@@ -996,16 +996,15 @@ async fn login_page_handler(
             )
             .await
             .is_none()
-            {
-                return revoke_auth_session_and_redirect_to_login(
-                    &app_state,
-                    &settings,
-                    &headers,
-                    &authenticated.auth_session,
-                    LOGIN_REAUTH_UNLOCK_LOCATION,
-                )
-                .await;
-            }
+        {
+            return revoke_auth_session_and_redirect_to_login(
+                &app_state,
+                &settings,
+                &headers,
+                &authenticated.auth_session,
+                LOGIN_REAUTH_UNLOCK_LOCATION,
+            )
+            .await;
         }
         let has_recovery_notice = app_state
             .recovery_notices

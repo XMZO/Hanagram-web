@@ -104,10 +104,11 @@ pub(crate) async fn update_managed_account_materials(
     }
     if let Some(device_id) = normalize_optional_string(input.device_id) {
         record.device_id = Some(device_id);
-    } else if record.device_id.is_none() && record.identity_secret.is_some() {
-        if let Some(steam_id) = record.steam_id {
-            record.device_id = Some(generate_device_id_for_steam_id(steam_id));
-        }
+    } else if record.device_id.is_none()
+        && record.identity_secret.is_some()
+        && let Some(steam_id) = record.steam_id
+    {
+        record.device_id = Some(generate_device_id_for_steam_id(steam_id));
     }
     if let Some(steam_login_secure) = normalize_optional_string(input.steam_login_secure) {
         let session = record
@@ -682,10 +683,9 @@ pub(crate) async fn list_managed_account_ids(root_dir: &Path) -> Vec<String> {
             .and_then(|v| v.to_str())
             .map(|v| v.eq_ignore_ascii_case(STEAM_MANAGED_ACCOUNT_EXTENSION))
             == Some(true)
+            && let Some(stem) = path.file_stem().and_then(|v| v.to_str())
         {
-            if let Some(stem) = path.file_stem().and_then(|v| v.to_str()) {
-                ids.push(stem.to_owned());
-            }
+            ids.push(stem.to_owned());
         }
     }
     ids

@@ -340,21 +340,21 @@ async fn verify_primary_credentials(
             reason: active_ban.reason,
         });
     }
-    if let Some(locked_until) = user.security.locked_until_unix {
-        if locked_until > now {
-            audit_login_failure(
-                store,
-                Some(&user.id),
-                &user.username,
-                ip_address,
-                user_agent,
-                "account_locked",
-                login_method,
-                None,
-            )
-            .await;
-            return Err(LoginError::LockedUntil(locked_until));
-        }
+    if let Some(locked_until) = user.security.locked_until_unix
+        && locked_until > now
+    {
+        audit_login_failure(
+            store,
+            Some(&user.id),
+            &user.username,
+            ip_address,
+            user_agent,
+            "account_locked",
+            login_method,
+            None,
+        )
+        .await;
+        return Err(LoginError::LockedUntil(locked_until));
     }
 
     let Some(stored_hash) = user.security.password_hash.clone() else {
@@ -859,28 +859,28 @@ pub async fn authenticate_user(
             }
         }
 
-        if login_method == LOGIN_METHOD_PASSWORD_ONLY {
-            if let Some(candidate) = recovery_code.filter(|value| !value.trim().is_empty()) {
-                let recovery_codes = store
-                    .list_active_recovery_code_hashes(&verified.user.id)
-                    .await
-                    .map_err(|_| LoginError::InvalidSecondFactor)?;
-                for (code_id, code_hash) in recovery_codes {
-                    if verify_recovery_code(candidate, &code_hash)
-                        .map_err(|_| LoginError::InvalidSecondFactor)?
-                    {
-                        store
-                            .mark_recovery_code_used(&code_id)
+        if login_method == LOGIN_METHOD_PASSWORD_ONLY
+            && let Some(candidate) = recovery_code.filter(|value| !value.trim().is_empty())
+        {
+            let recovery_codes = store
+                .list_active_recovery_code_hashes(&verified.user.id)
+                .await
+                .map_err(|_| LoginError::InvalidSecondFactor)?;
+            for (code_id, code_hash) in recovery_codes {
+                if verify_recovery_code(candidate, &code_hash)
+                    .map_err(|_| LoginError::InvalidSecondFactor)?
+                {
+                    store
+                        .mark_recovery_code_used(&code_id)
+                        .await
+                        .map_err(|_| LoginError::InvalidSecondFactor)?;
+                    recovery_notice_codes = Some(
+                        rotate_recovery_codes(store, &verified.user, "recovery_code_login")
                             .await
-                            .map_err(|_| LoginError::InvalidSecondFactor)?;
-                        recovery_notice_codes = Some(
-                            rotate_recovery_codes(store, &verified.user, "recovery_code_login")
-                                .await
-                                .map_err(|_| LoginError::InvalidSecondFactor)?,
-                        );
-                        login_method = LOGIN_METHOD_PASSWORD_RECOVERY;
-                        break;
-                    }
+                            .map_err(|_| LoginError::InvalidSecondFactor)?,
+                    );
+                    login_method = LOGIN_METHOD_PASSWORD_RECOVERY;
+                    break;
                 }
             }
         }
@@ -944,21 +944,21 @@ pub async fn authenticate_user_with_passkey(
     passkey_label: Option<&str>,
 ) -> Result<LoginResult, LoginError> {
     let now = Utc::now().timestamp();
-    if let Some(locked_until) = user.security.locked_until_unix {
-        if locked_until > now {
-            audit_login_failure(
-                store,
-                Some(&user.id),
-                &user.username,
-                ip_address,
-                user_agent,
-                "account_locked",
-                Some(LOGIN_METHOD_PASSKEY),
-                passkey_label,
-            )
-            .await;
-            return Err(LoginError::LockedUntil(locked_until));
-        }
+    if let Some(locked_until) = user.security.locked_until_unix
+        && locked_until > now
+    {
+        audit_login_failure(
+            store,
+            Some(&user.id),
+            &user.username,
+            ip_address,
+            user_agent,
+            "account_locked",
+            Some(LOGIN_METHOD_PASSKEY),
+            passkey_label,
+        )
+        .await;
+        return Err(LoginError::LockedUntil(locked_until));
     }
 
     if let Some(active_ban) = refresh_user_ban_state(store, &mut user)
@@ -1017,12 +1017,12 @@ pub async fn resolve_authenticated_session(
     if auth_session.revoked_at_unix.is_some() || auth_session.expires_at_unix <= now {
         return Ok(None);
     }
-    if let Some(idle_timeout) = auth_session.idle_timeout_minutes {
-        if idle_timeout != 0 {
-            let idle_cutoff = auth_session.last_seen_at_unix + i64::from(idle_timeout) * 60;
-            if idle_cutoff <= now {
-                return Ok(None);
-            }
+    if let Some(idle_timeout) = auth_session.idle_timeout_minutes
+        && idle_timeout != 0
+    {
+        let idle_cutoff = auth_session.last_seen_at_unix + i64::from(idle_timeout) * 60;
+        if idle_cutoff <= now {
+            return Ok(None);
         }
     }
 
