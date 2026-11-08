@@ -5,7 +5,7 @@
 name = "hanagram-web"
 version = "0.2.8"
 edition = "2024"
-rust-version = "1.85.1"
+rust-version = "1.88"
 
 [profile.release]
 codegen-units = 1
